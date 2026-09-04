@@ -13,6 +13,7 @@
       this.content = document.getElementById('content');
       this.$play = document.getElementById('btn-play');
       this.$reset = document.getElementById('btn-reset');
+      this.$theme = document.getElementById('btn-theme');
       this.navButtons = U.$$('.nav-item');
 
       // 导航事件
@@ -28,7 +29,16 @@
       });
       this.$reset.addEventListener('click', () => this._call('reset'));
 
-      // 关于
+      // 主题切换（深/浅），持久化到 localStorage
+      const savedTheme = localStorage.getItem('flt-theme') === 'light' ? 'light' : 'dark';
+      this.applyTheme(savedTheme);
+      this.$theme.addEventListener('click', () => {
+        const next = document.body.classList.contains('light') ? 'dark' : 'light';
+        localStorage.setItem('flt-theme', next);
+        this.applyTheme(next);
+      });
+
+      // 帮助
       const mk = document.getElementById('about-mask');
       document.getElementById('about-trigger').addEventListener('click', (e) => { e.preventDefault(); mk.classList.remove('hidden'); });
       document.getElementById('about-close').addEventListener('click', () => mk.classList.add('hidden'));
@@ -39,8 +49,17 @@
       if (first) this.open(first);
     },
 
+    applyTheme(t) {
+      document.body.classList.toggle('light', t === 'light');
+      this.$theme.textContent = t === 'light' ? '🌙' : '☀️';
+      this.$theme.title = t === 'light' ? '切换到深色主题' : '切换到浅色主题';
+      FX.refreshTheme();
+      // 当前模块重绘（canvas 颜色跟随主题）
+      this._call('onTheme');
+    },
+
     _call(method) {
-      if (this.current && this.current.api && typeof this.current.api[method] === 'function') this.current.api[method]();
+      if (this.current && this.current.api && typeof this.current.api[method] === 'function') return this.current.api[method]();
     },
 
     open(name) {
@@ -53,8 +72,9 @@
       }
       this.navButtons.forEach((b) => b.classList.toggle('active', b.dataset.module === name));
       this.content.innerHTML = '';
-      const api = factory(this.content);
-      this.title.innerHTML = api.title + (api.subtitle ? '<small>' + api.subtitle + '</small>' : '');
+      const mod = factory(this.content);
+      const api = mod.api || mod;
+      this.title.innerHTML = mod.title + (mod.subtitle ? '<small>' + mod.subtitle + '</small>' : '');
       this.current = { name, api };
       this.$play.disabled = !api.togglePlay;
       this.$reset.disabled = !api.reset;

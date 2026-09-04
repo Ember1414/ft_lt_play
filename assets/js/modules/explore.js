@@ -5,7 +5,9 @@
  *   · 语音输入表达式
  * ============================================================ */
 App.register('explore', (host) => {
+  const cv = FX.cvCol;
   let tab = 'expr';
+  let exprRedraw = null, tfRedraw = null, drawReset = null;
   const rendered = { expr: false, draw: false, voice: false };
 
   host.innerHTML = `
@@ -94,17 +96,17 @@ App.register('explore', (host) => {
       const pad = (yhi - ylo) * 0.12 || 1;
       tp.setRange(T0, T1, ylo - pad, yhi + pad);
       tp.clear(); tp.grid(); tp.axis(true);
-      tp.clip(); tp.line(tArr, xArr.map((v) => (isFinite(v) ? v : NaN)), { color: '#5b9bff', width: 2 }); tp.unclip();
+      tp.clip(); tp.line(tArr, xArr.map((v) => (isFinite(v) ? v : NaN)), { color: cv('--cv-line1'), width: 2 }); tp.unclip();
 
       const sp = DSP.spectrum(xArr, dt);
       const mp = getPlot('#ex-mag');
       let mm = 1e-9; for (const v of sp.mag) if (v > mm) mm = v;
       mp.setRange(0, sp.f[sp.f.length - 1], 0, mm * 1.05); mp.clear(); mp.grid(); mp.axis(true);
-      mp.line(sp.f, sp.mag, { color: '#37d0a0', width: 2, fill: 'rgba(55,208,160,0.12)' });
+      mp.line(sp.f, sp.mag, { color: cv('--cv-line2'), width: 2, fill: cv('--cv-fill-green') });
 
       const pp = getPlot('#ex-ph');
       pp.setRange(0, sp.f[sp.f.length - 1], -Math.PI, Math.PI); pp.clear(); pp.grid(); pp.axis(true);
-      pp.line(sp.f, sp.ph, { color: '#b48cff', width: 2 });
+      pp.line(sp.f, sp.ph, { color: cv('--cv-line3'), width: 2 });
 
       // 采样与混叠提示
       const fs = 1 / dt;
@@ -115,6 +117,7 @@ App.register('explore', (host) => {
         <div class="stat"><span class="k">信号能量 ∫x²dt</span><span class="v">${U.fmt(energy, 3)}</span></div>
         <div class="stat"><span class="k">峰值</span><span class="v">${U.fmt(yhi, 3)}</span></div>`;
     };
+    exprRedraw = draw;
     res.querySelector('#ex-t0').addEventListener('change', () => { Object.values(draw._cache || {}).forEach((p) => p.resetView()); draw(); });
     res.querySelector('#ex-t1').addEventListener('change', () => { Object.values(draw._cache || {}).forEach((p) => p.resetView()); draw(); });
     draw();
@@ -152,7 +155,7 @@ App.register('explore', (host) => {
       let lo = 1e9, hi = -1e9; for (const m of bode.mag) { lo = Math.min(lo, m); hi = Math.max(hi, m); }
       if (hi - lo < 1) { hi += 20; lo -= 20; }
       bm.setRange(bode.w[0], bode.w[bode.w.length - 1], lo - 8, hi + 8);
-      bm.clear(); bm.grid(); bm.axis(); bm.line(bode.w, bode.mag, { color: '#5b9bff', width: 2 });
+      bm.clear(); bm.grid(); bm.axis(); bm.line(bode.w, bode.mag, { color: cv('--cv-line1'), width: 2 });
 
       const sp = cache.sp || (cache.sp = (() => { const p = new FX.Plot(res.querySelector('#ex-step'), { margin: { l: 50, r: 12, t: 10, b: 26 } }); p.onDraw = drawAll; return p; })());
       let slo = Infinity, shi = -Infinity; for (const v of step.y) if (isFinite(v)) { slo = Math.min(slo, v); shi = Math.max(shi, v); }
@@ -161,11 +164,12 @@ App.register('explore', (host) => {
       const spad = (shi - slo) * 0.12;
       sp.setRange(step.t[0], step.t[step.t.length - 1], slo - spad, shi + spad);
       sp.clear(); sp.grid(); sp.axis(true);
-      sp.clip(); sp.line(step.t, step.y, { color: '#5b9bff', width: 2 }); sp.unclip();
+      sp.clip(); sp.line(step.t, step.y, { color: cv('--cv-line1'), width: 2 }); sp.unclip();
 
       const pz = cache.pz;
       pzPlot(pz || (cache.pz = res.querySelector('#ex-pz')), poles, zeros);
     };
+    tfRedraw = drawAll;
     drawAll();
 
     const dc = den[den.length - 1] !== 0 ? num[num.length - 1] / den[den.length - 1] : Infinity;
@@ -175,7 +179,7 @@ App.register('explore', (host) => {
       <div class="stat"><span class="k">极点</span><span class="v">${poles.map(fmtC).join(', ') || '—'}</span></div>
       <div class="stat"><span class="k">零点</span><span class="v">${zeros.map(fmtC).join(', ') || '—'}</span></div>
       <div class="stat"><span class="k">DC 增益</span><span class="v">${U.fmt(dc)}</span></div>
-      <div class="stat"><span class="k">稳定性</span><span class="v" style="color:${stable ? '#37d0a0' : '#ff6b6b'}">${stable ? '稳定' : '不稳定'}</span></div>`;
+      <div class="stat"><span class="k">稳定性</span><span class="v" style="color:${stable ? cv('--cv-line2') : cv('--cv-danger')}">${stable ? '稳定' : '不稳定'}</span></div>`;
   }
   function polyTex(c) {
     let out = '';
@@ -210,7 +214,8 @@ App.register('explore', (host) => {
       </div>`;
     const cvs = box.querySelector('#ex-drawcv');
     const g = cvs.getContext('2d');
-    function clearInput() { g.fillStyle = '#0a0d14'; g.fillRect(0, 0, cvs.width, cvs.height); }
+    function clearInput() { g.fillStyle = cv('--cv-bg'); g.fillRect(0, 0, cvs.width, cvs.height); }
+    drawReset = clearInput;
     clearInput();
     let drawing = false, pts = [];
     cvs.addEventListener('pointerdown', (e) => { drawing = true; pts = []; clearInput(); try { cvs.setPointerCapture(e.pointerId); } catch (err) {} e.preventDefault(); });
@@ -219,7 +224,7 @@ App.register('explore', (host) => {
       if (!drawing) return;
       const r = cvs.getBoundingClientRect();
       pts.push({ x: (e.clientX - r.left) * (cvs.width / r.width), y: (e.clientY - r.top) * (cvs.height / r.height) });
-      g.strokeStyle = '#d8e0ee'; g.lineWidth = 2; g.lineJoin = 'round'; g.beginPath();
+      g.strokeStyle = cv('--cv-text'); g.lineWidth = 2; g.lineJoin = 'round'; g.beginPath();
       for (let i = 0; i < pts.length; i++) { const c = pts[i]; i ? g.lineTo(c.x, c.y) : g.moveTo(c.x, c.y); }
       g.stroke();
     });
@@ -266,7 +271,7 @@ App.register('explore', (host) => {
       if (o.width !== Math.round(W * dpr)) { o.width = W * dpr; o.height = H * dpr; }
       const g2 = o.getContext('2d');
       g2.setTransform(dpr, 0, 0, dpr, 0, 0);
-      g2.fillStyle = '#0e131d'; g2.fillRect(0, 0, W, H);
+      g2.fillStyle = cv('--cv-bg'); g2.fillRect(0, 0, W, H);
       const cx = W / 2, cy = H / 2, s = Math.min(W, H) * 0.42;
       const SX = (x) => cx + x * s, SY = (y) => cy - y * s;
       const ph = epicy.phasors;
@@ -283,19 +288,19 @@ App.register('explore', (host) => {
       if (show && show.checked) {
         g2.lineWidth = 1;
         for (let j = 1; j < chain.length; j++) {
-          g2.strokeStyle = j % 2 ? 'rgba(180,140,255,0.22)' : 'rgba(91,155,255,0.22)';
+          g2.strokeStyle = j % 2 ? cv('--cv-circle-b') : cv('--cv-circle-a');
           g2.beginPath(); g2.arc(SX(chain[j - 1].x), SY(chain[j - 1].y), Math.max(chain[j].amp * s, 0.5), 0, 7); g2.stroke();
         }
       }
       epicy.traceT.push(x, y);
       if (epicy.traceT.length > 480) epicy.traceT.splice(0, 2);
-      g2.strokeStyle = '#37d0a0'; g2.lineWidth = 2; g2.lineJoin = 'round'; g2.beginPath();
+      g2.strokeStyle = cv('--cv-line2'); g2.lineWidth = 2; g2.lineJoin = 'round'; g2.beginPath();
       for (let i = 0; i < epicy.traceT.length / 2; i++) {
         const px = SX(epicy.traceT[i * 2]), py = SY(epicy.traceT[i * 2 + 1]);
         i ? g2.lineTo(px, py) : g2.moveTo(px, py);
       }
       g2.stroke();
-      g2.fillStyle = '#5b9bff';
+      g2.fillStyle = cv('--cv-line1');
       g2.beginPath(); g2.arc(SX(x), SY(y), 4, 0, 7); g2.fill();
 
       epicy.t = (epicy.t + 0.0012) % 1;
@@ -327,8 +332,8 @@ App.register('explore', (host) => {
       for (let i = e.resultIndex; i < e.results.length; i++) { const r = e.results[i]; if (r.isFinal) finalTxt += r[0].transcript; else cur += r[0].transcript; }
       const shown = (finalTxt + cur).toString();
       outBox.innerHTML = `
-        <div class="stat"><span class="k">识别文字</span><span class="v" style="color:#d8e0ee;font-size:13px">${shown || '…'}</span></div>
-        <div class="stat"><span class="k">映射表达式</span><span class="v" style="color:#37d0a0">${mapSpeech(shown) || '…'}</span></div>`;
+        <div class="stat"><span class="k">识别文字</span><span class="v" style="color:var(--text);font-size:13px">${shown || '…'}</span></div>
+        <div class="stat"><span class="k">映射表达式</span><span class="v" style="color:var(--accent-2)">${mapSpeech(shown) || '…'}</span></div>`;
     };
     rec.onend = () => { btn.dataset.on = '0'; btn.textContent = '🎤 开始录音'; };
     rec.onerror = (e) => { outBox.innerHTML = `<span class="hint" style="color:var(--danger)">识别出错：${e.error}</span>`; };
@@ -380,28 +385,28 @@ App.register('explore', (host) => {
     const W = cv.clientWidth || 400, H = cv.clientHeight || 220;
     const dpr = window.devicePixelRatio || 1; cv.width = W * dpr; cv.height = H * dpr;
     const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    g.clearRect(0, 0, W, H); g.fillStyle = '#0e131d'; g.fillRect(0, 0, W, H);
+    g.clearRect(0, 0, W, H); g.fillStyle = cv('--cv-bg'); g.fillRect(0, 0, W, H);
     const ml = 40, mr = 14, mt = 14, mb = 24, dw = W - ml - mr, dh = H - mt - mb;
     const cx = ml + dw / 2, cy = mt + dh / 2;
     let R = 3; for (const p of [...poles, ...zeros]) R = Math.max(R, Math.abs(p.re) + 0.3, Math.abs(p.im) + 0.3);
     const SX = (r) => cx + (r * dw / 2) / R, SY = (i) => cy - (i * dh / 2) / R;
-    g.fillStyle = 'rgba(55,208,160,0.05)'; g.fillRect(ml, mt, cx - ml, dh);
-    g.strokeStyle = '#1c2433';
+    g.fillStyle = cv('--cv-stable-bg'); g.fillRect(ml, mt, cx - ml, dh);
+    g.strokeStyle = cv('--cv-grid');
     for (let i = 0; i <= 4; i++) { const x = ml + (i / 4) * dw; g.beginPath(); g.moveTo(x, mt); g.lineTo(x, mt + dh); g.stroke(); }
     for (let i = 0; i <= 4; i++) { const y = mt + (i / 4) * dh; g.beginPath(); g.moveTo(ml, y); g.lineTo(ml + dw, y); g.stroke(); }
-    g.strokeStyle = '#39445a'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(cx, mt); g.lineTo(cx, mt + dh); g.stroke();
-    g.strokeStyle = '#2b3547'; g.beginPath(); g.moveTo(ml, cy); g.lineTo(ml + dw, cy); g.stroke();
-    g.fillStyle = '#4c5874'; g.font = '10px monospace'; g.textAlign = 'left'; g.textBaseline = 'top';
+    g.strokeStyle = cv('--cv-axis-hi'); g.lineWidth = 1.5; g.beginPath(); g.moveTo(cx, mt); g.lineTo(cx, mt + dh); g.stroke();
+    g.strokeStyle = cv('--cv-axis'); g.beginPath(); g.moveTo(ml, cy); g.lineTo(ml + dw, cy); g.stroke();
+    g.fillStyle = cv('--cv-tick'); g.font = '10px monospace'; g.textAlign = 'left'; g.textBaseline = 'top';
     g.fillText('jω', cx + 4, mt + 2); g.fillText('σ', ml + dw - 12, cy + 4);
-    g.strokeStyle = '#ff6b6b'; g.lineWidth = 2;
+    g.strokeStyle = cv('--cv-danger'); g.lineWidth = 2;
     for (const p of poles) { const x = SX(p.re), y = SY(p.im); g.beginPath(); g.moveTo(x - 7, y - 7); g.lineTo(x + 7, y + 7); g.moveTo(x - 7, y + 7); g.lineTo(x + 7, y - 7); g.stroke(); }
-    g.strokeStyle = '#5b9bff';
+    g.strokeStyle = cv('--cv-line1');
     for (const z of zeros) { const x = SX(z.re), y = SY(z.im); g.beginPath(); g.arc(x, y, 7, 0, 7); g.stroke(); }
   }
 
   tabBar();
   switchTab();
 
-  return { title: '交互求解', api: { dispose } };
+  return { title: '交互求解', api: { dispose, onTheme: () => { if (tab === 'expr' && exprRedraw) exprRedraw(); if (tab === 'expr' && tfRedraw) tfRedraw(); if (drawReset) drawReset(); } } };
   function dispose() { }
 });

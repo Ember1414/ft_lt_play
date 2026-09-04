@@ -4,6 +4,7 @@
  *   · 卷积定理：翻转-平移-重叠面积 动画 + 频域相乘验证
  * ============================================================ */
 App.register('ft', (host) => {
+  const cv = FX.cvCol;
   let tab = 'map';
   const rendered = { map: false, conv: false };
   let convRaf = null;
@@ -111,7 +112,7 @@ App.register('ft', (host) => {
       const pad = (yhi - ylo) * 0.15 || 1;
       tp.setRange(d.sig.t0, d.sig.t1, ylo - pad, yhi + pad);
       tp.clear(); tp.grid(null, null); tp.axis(true);
-      tp.line(tArr, xArr, { color: '#5b9bff', width: 2 });
+      tp.line(tArr, xArr, { color: cv('--cv-line1'), width: 2 });
       tp.crosshair((x) => 't=' + U.fmt(x, 4), (y, wx) => 'x(t)=' + U.fmt(interpAt(tArr, xArr, wx), 4));
 
       // 幅度
@@ -121,7 +122,7 @@ App.register('ft', (host) => {
       let ymax = 1e-9; for (const m of sp.mag) if (m > ymax) ymax = m;
       mp.setRange(0, fmax, 0, ymax * 1.1);
       mp.clear(); mp.grid(null, null); mp.axis(true);
-      mp.line(sp.f, sp.mag, { color: '#37d0a0', width: 2, fill: 'rgba(55,208,160,0.12)' });
+      mp.line(sp.f, sp.mag, { color: cv('--cv-line2'), width: 2, fill: cv('--cv-fill-green') });
       mp.crosshair((f) => 'f=' + U.fmt(f, 3) + ' Hz', (m, f) => '|X|=' + U.fmt(interpAt(sp.f, sp.mag, f), 4));
 
       // 相位
@@ -129,9 +130,9 @@ App.register('ft', (host) => {
       if (!pp) { pp = new FX.Plot(host.querySelector('#ft-phase')); pp.onDraw = draw; mapCtx.plots.ph = pp; }
       pp.setRange(0, fmax, -Math.PI, Math.PI);
       pp.clear(); pp.grid(null, null); pp.axis(true);
-      pp.line(sp.f, sp.ph, { color: '#b48cff', width: 2 });
-      pp.label('+π', pp.margin.l + 6, pp.sy(Math.PI), { color: '#6b7890', size: 10 });
-      pp.label('−π', pp.margin.l + 6, pp.sy(-Math.PI), { color: '#6b7890', size: 10 });
+      pp.line(sp.f, sp.ph, { color: cv('--cv-line3'), width: 2 });
+      pp.label('+π', pp.margin.l + 6, pp.sy(Math.PI), { color: cv('--cv-label'), size: 10 });
+      pp.label('−π', pp.margin.l + 6, pp.sy(-Math.PI), { color: cv('--cv-label'), size: 10 });
       pp.crosshair((f) => 'f=' + U.fmt(f, 3) + ' Hz', (p2, f) => '∠X=' + U.fmt(interpAt(sp.f, sp.ph, f), 3));
 
       // 能量 / 峰值统计
@@ -239,6 +240,7 @@ App.register('ft', (host) => {
       let err = 0, ref = 0;
       for (let k = 0; k < fv.length; k++) { err = Math.max(err, Math.abs(hSp[k] - fgSp[k])); ref = Math.max(ref, fgSp[k]); }
 
+      convCtx.drawAll = drawConv;
       convCtx.data = { F, G, dt, hT, hArr, hT0, hT1: hT0 + (h.length - 1) * dt, fv, hSp, fgSp, specErr: err / (ref || 1) };
       Object.values(convCtx.plots).forEach((p) => p.resetView());
       drawConv();
@@ -286,13 +288,13 @@ App.register('ft', (host) => {
       for (let i = 0; i < sl.tau.length; i++) { const px = pfg.sx(sl.tau[i]), py = pfg.sy(sl.pv[i]); i ? ctxg.lineTo(px, py) : ctxg.moveTo(px, py); }
       for (let i = sl.tau.length - 1; i >= 0; i--) ctxg.lineTo(pfg.sx(sl.tau[i]), pfg.sy(0));
       ctxg.closePath();
-      ctxg.fillStyle = 'rgba(255,180,84,0.35)'; ctxg.fill();
+      ctxg.fillStyle = cv('--cv-fill-warn'); ctxg.fill();
       pfg.unclip();
-      pfg.line(sl.tau, sl.fv, { color: '#5b9bff', width: 2 });
-      pfg.line(sl.tau, sl.gv, { color: '#ff8fb3', width: 2 });
-      pfg.label('f(τ)', pfg.sx(0) + 8, pfg.sy(0) - 8, { color: '#5b9bff', size: 11 });
-      pfg.label('g(t−τ)', pfg.margin.l + 8, pfg.margin.t + 12, { color: '#ff8fb3', size: 11 });
-      pfg.label('重叠面积 = h(t) = ' + U.fmt(sl.area, 3), pfg.margin.l + 8, pfg.margin.t + 26, { color: '#ffb454', size: 11 });
+      pfg.line(sl.tau, sl.fv, { color: cv('--cv-line1'), width: 2 });
+      pfg.line(sl.tau, sl.gv, { color: cv('--cv-pink'), width: 2 });
+      pfg.label('f(τ)', pfg.sx(0) + 8, pfg.sy(0) - 8, { color: cv('--cv-line1'), size: 11 });
+      pfg.label('g(t−τ)', pfg.margin.l + 8, pfg.margin.t + 12, { color: cv('--cv-pink'), size: 11 });
+      pfg.label('重叠面积 = h(t) = ' + U.fmt(sl.area, 3), pfg.margin.l + 8, pfg.margin.t + 26, { color: cv('--cv-warn'), size: 11 });
 
       // --- 2. h(t) + 当前点 ---
       let ph = convCtx.plots.h;
@@ -300,12 +302,12 @@ App.register('ft', (host) => {
       let hmax = 1e-9; for (const v of c.hArr) if (Math.abs(v) > hmax) hmax = Math.abs(v);
       ph.setRange(c.hT0, c.hT1, -hmax * 1.15, hmax * 1.15);
       ph.clear(); ph.grid(); ph.axis(true);
-      ph.line(c.hT, c.hArr, { color: '#37d0a0', width: 2, fill: 'rgba(55,208,160,0.10)' });
-      ph.line([t, t], [ph.ymin, ph.ymax], { color: '#4c5874', width: 1 });
+      ph.line(c.hT, c.hArr, { color: cv('--cv-line2'), width: 2, fill: cv('--cv-fill-green') });
+      ph.line([t, t], [ph.ymin, ph.ymax], { color: cv('--cv-tick'), width: 1 });
       const hNow = c.hArr[U.clamp(Math.round((t - c.hT0) / c.dt), 0, c.hArr.length - 1)];
-      ph.ctx.fillStyle = '#ffb454';
+      ph.ctx.fillStyle = cv('--cv-warn');
       ph.ctx.beginPath(); ph.ctx.arc(ph.sx(t), ph.sy(hNow), 5, 0, 7); ph.ctx.fill();
-      ph.label('h(' + U.fmt(t, 2) + ')=' + U.fmt(hNow, 3), ph.sx(t) + 8, ph.sy(hNow) - 8, { color: '#ffb454', size: 11 });
+      ph.label('h(' + U.fmt(t, 2) + ')=' + U.fmt(hNow, 3), ph.sx(t) + 8, ph.sy(hNow) - 8, { color: cv('--cv-warn'), size: 11 });
 
       // --- 3. 频域验证 ---
       let pf = convCtx.plots.freq;
@@ -316,16 +318,16 @@ App.register('ft', (host) => {
       for (let i = 0; i < c.fv.length; i++) if (c.fgSp[i] > fymax * 1e-3) fShow = c.fv[i];
       pf.setRange(0, fShow, 0, fymax * 1.1);
       pf.clear(); pf.grid(); pf.axis(true);
-      pf.line(c.fv, c.fgSp, { color: '#b48cff', width: 2.5 });
-      pf.line(c.fv, c.hSp, { color: '#37d0a0', width: 1.5 });
+      pf.line(c.fv, c.fgSp, { color: cv('--cv-line3'), width: 2.5 });
+      pf.line(c.fv, c.hSp, { color: cv('--cv-line2'), width: 1.5 });
       pf.crosshair((f) => 'f=' + U.fmt(f, 3) + ' Hz', (m, f) => '|F·G|=' + U.fmt(interpConv(f), 4));
-      pf.label('|F·G| (紫) 与 |FFT{f∗g}| (绿) — 两条线应重合', pf.margin.l + 8, pf.margin.t + 12, { color: '#8b97ad', size: 11 });
+      pf.label('|F·G| (紫) 与 |FFT{f∗g}| (绿) — 两条线应重合', pf.margin.l + 8, pf.margin.t + 12, { color: cv('--cv-label'), size: 11 });
 
       host.querySelector('#cv-t-label').textContent = 't = ' + U.fmt(t, 2);
       host.querySelector('#cv-check').innerHTML = `
         <div class="stat"><span class="k">当前 h(t)</span><span class="v">${U.fmt(hNow, 3)}</span></div>
         <div class="stat"><span class="k">面积法读数</span><span class="v">${U.fmt(sl.area, 3)}</span></div>
-        <div class="stat"><span class="k">定理验证(谱)</span><span class="v" style="color:${convCtx.data.specErr < 1e-6 ? '#37d0a0' : '#ffb454'}">相对误差 ${convCtx.data.specErr.toExponential(1)}</span></div>`;
+        <div class="stat"><span class="k">定理验证(谱)</span><span class="v" style="color:${convCtx.data.specErr < 1e-6 ? cv('--cv-line2') : cv('--cv-warn')}">相对误差 ${convCtx.data.specErr.toExponential(1)}</span></div>`;
     }
 
     const ct = host.querySelector('#cv-t');
@@ -357,6 +359,6 @@ App.register('ft', (host) => {
   tabBar();
   renderMap(); rendered.map = true;
 
-  return { title: '傅立叶变换', api: { dispose } };
+  return { title: '傅立叶变换', api: { dispose, onTheme: () => { if (mapCtx && mapCtx.draw) mapCtx.draw(); if (convCtx && convCtx.data && convCtx.drawAll) convCtx.drawAll(); } } };
   function dispose() { if (convRaf) cancelAnimationFrame(convRaf); }
 });

@@ -1,9 +1,20 @@
 /* ============================================================
  * plots.js — Canvas 图表基类 + KaTeX 渲染助手
- *   Plot 支持：滚轮缩放（含对数轴）、拖拽平移、双击复位、
- *   悬停十字线+精度读数、曲线自动裁剪（不超出绘图区）
+ *   Plot 支持：滚轮/双指缩放（含对数轴）、拖拽/单指平移、
+ *   双击复位、悬停十字线+精度读数、曲线自动裁剪
+ *   颜色全部来自 CSS 变量（--cv-*），支持主题切换
  * ============================================================ */
 const FX = (() => {
+  /* ---------- 主题色（CSS 变量读取 + 缓存） ---------- */
+  let themeVer = 0;
+  const colorCache = { _ver: -1 };
+  function cvCol(name) {
+    if (colorCache._ver !== themeVer) { for (const k of Object.keys(colorCache)) if (k !== '_ver') delete colorCache[k]; colorCache._ver = themeVer; }
+    if (!(name in colorCache)) colorCache[name] = (getComputedStyle(document.body).getPropertyValue(name) || '').trim() || '#888888';
+    return colorCache[name];
+  }
+  function refreshTheme() { themeVer++; FX.themeVer = themeVer; }
+
   /* ---------- KaTeX ---------- */
   function katex(tex, el, { displayMode = false } = {}) {
     if (!window.katex) { if (el) el.textContent = tex; return; }
@@ -37,7 +48,9 @@ const FX = (() => {
       this.xmin = 0; this.xmax = 1; this.ymin = 0; this.ymax = 1;
       this.userAdjusted = false;   // 用户手动缩放/平移后，忽略模块的 setRange
       this.hoverPx = null;
-      this._bg = null;
+      this._bg = null; this._bgVer = -1;
+      this._pointers = new Map();
+      this._pinch = null;
       this._setupSize();
       this._bind();
       if (typeof ResizeObserver !== 'undefined' && canvas.parentElement) {
@@ -58,9 +71,16 @@ const FX = (() => {
       this.drawableH = h - this.margin.t - this.margin.b;
     }
 
-    /* ---------- 交互：缩放 / 平移 / 悬停 ---------- */
+    /* ---------- 交互：缩放 / 平移 / 悬停 / 双指 ---------- */
     _bind() {
       const cv = this.cv;
+      const pointers = this._pointers;
+      const twoPts = () => [...pointers.values()].slice(0, 2);
+      const toCanvas = (cx, cy) => {
+        const r = cv.getBoundingClientRect();
+        return [(cx - r.left) * (cv.clientWidth / r.width), (cy - r.top) * (cv.clientHeight / r.height)];
+      };
+
       if (this.zoomEnabled) {
         cv.addEventListener('wheel', (e) => {
           const r = cv.getBoundingClientRect();
@@ -75,42 +95,68 @@ const FX = (() => {
       if (this.dblclickReset) {
         cv.addEventListener('dblclick', () => { this.resetView(); });
       }
-      if (this.hoverEnabled || this.panEnabled) {
-        cv.addEventListener('pointerdown', (e) => {
-          if (!this.panEnabled || e.button !== 0) return;
-          this._drag = { x: e.clientX, y: e.clientY, moved: false };
+
+      cv.addEventListener('pointerdown', (e) => {
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (pointers.size === 2 && this.zoomEnabled) {
+          const [a, b] = twoPts();
+          this._pinch = { d: Math.max(20, Math.hypot(a.x - b.x, a.y - b.y)) };
+          this._drag = null;
+        } else if (pointers.size === 1 && this.panEnabled && e.button === 0) {
+          this._drag = { x: e.clientX, y: e.clientY };
           cv.setPointerCapture && cv.setPointerCapture(e.pointerId);
-        });
-        cv.addEventListener('pointermove', (e) => {
+        }
+      });
+      cv.addEventListener('pointermove', (e) => {
+        const tracked = pointers.has(e.pointerId);
+        if (tracked) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        // 双指捏合缩放
+        if (this._pinch && pointers.size >= 2) {
+          const [a, b] = twoPts();
+          const d = Math.max(20, Math.hypot(a.x - b.x, a.y - b.y));
+          const [px, py] = toCanvas((a.x + b.x) / 2, (a.y + b.y) / 2);
+          this._zoomAt(px, py, this._pinch.d / d);
+          this._pinch.d = d;
+          e.preventDefault();
+          return;
+        }
+        // 单指/鼠标拖拽平移
+        if (this._drag) {
+          const dx = e.clientX - this._drag.x, dy = e.clientY - this._drag.y;
+          if (this._drag.moved || Math.abs(dx) + Math.abs(dy) > 3) {
+            this._drag.moved = true;
+            this.hoverPx = null;
+            this._pan(dx, dy);
+            this._drag.x = e.clientX; this._drag.y = e.clientY;
+            cv.style.cursor = 'grabbing';
+          }
+          return;
+        }
+        // 悬停读数（鼠标）
+        if (this.hoverEnabled && !tracked) {
           const r = cv.getBoundingClientRect();
           const px = (e.clientX - r.left) * (cv.clientWidth / r.width);
           const py = (e.clientY - r.top) * (cv.clientHeight / r.height);
-          if (this._drag) {
-            const dx = e.clientX - this._drag.x, dy = e.clientY - this._drag.y;
-            if (this._drag.moved || Math.abs(dx) + Math.abs(dy) > 3) {
-              this._drag.moved = true;
-              this.hoverPx = null;
-              this._pan(dx, dy);
-              this._drag.x = e.clientX; this._drag.y = e.clientY;
-              cv.style.cursor = 'grabbing';
-            }
-            return;
-          }
-          if (this.hoverEnabled) {
-            const inside = this._inData(px, py);
-            const changed = (this.hoverPx == null) !== !inside || (this.hoverPx && (this.hoverPx.x !== px || this.hoverPx.y !== py));
-            this.hoverPx = inside ? { x: px, y: py } : null;
-            if (changed) { const cb = this.onUpdate || this.onDraw; if (cb) cb(); }
-          }
-        });
-        const endDrag = () => { if (this._drag) { this._drag = null; cv.style.cursor = ''; } };
-        cv.addEventListener('pointerup', endDrag);
-        cv.addEventListener('pointercancel', endDrag);
-        cv.addEventListener('pointerleave', () => {
-          endDrag();
-          if (this.hoverEnabled && this.hoverPx) { this.hoverPx = null; { const cb = this.onUpdate || this.onDraw; if (cb) cb(); } }
-        });
-      }
+          const inside = this._inData(px, py);
+          const changed = (this.hoverPx == null) !== !inside || (this.hoverPx && (this.hoverPx.x !== px || this.hoverPx.y !== py));
+          this.hoverPx = inside ? { x: px, y: py } : null;
+          if (changed) { const cb = this.onUpdate || this.onDraw; if (cb) cb(); }
+        }
+      });
+      const endPointer = (e) => {
+        pointers.delete(e.pointerId);
+        if (pointers.size < 2) this._pinch = null;
+        if (pointers.size === 0) { this._drag = null; cv.style.cursor = ''; }
+      };
+      cv.addEventListener('pointerup', endPointer);
+      cv.addEventListener('pointercancel', endPointer);
+      cv.addEventListener('pointerleave', (e) => {
+        endPointer(e);
+        if (e.pointerType === 'mouse' && this.hoverEnabled && this.hoverPx) {
+          this.hoverPx = null;
+          const cb = this.onUpdate || this.onDraw; if (cb) cb();
+        }
+      });
     }
     _inData(px, py) {
       const m = this.margin;
@@ -135,9 +181,10 @@ const FX = (() => {
       if (!this._inData(px, py)) return;
       this.userAdjusted = true;
       const wx = this.xAt(px), wy = this.yAt(py);
-      const clampSpan = (lo, hi, isLog) => {
+      const clampSpan = (lo, hi) => {
         const span = hi - lo;
-        if (!isLog) { if (span < 1e-12) { const c = (lo + hi) / 2; return [c - 1e-12, c + 1e-12]; } if (span > 1e15) { const c = (lo + hi) / 2; return [c - 1e15, c + 1e15]; } }
+        if (span < 1e-12) { const c = (lo + hi) / 2; return [c - 1e-12, c + 1e-12]; }
+        if (span > 1e15) { const c = (lo + hi) / 2; return [c - 1e15, c + 1e15]; }
         return [lo, hi];
       };
       if (this.logX) {
@@ -147,7 +194,7 @@ const FX = (() => {
       } else {
         this.xmin = wx - (wx - this.xmin) * factor;
         this.xmax = wx + (this.xmax - wx) * factor;
-        [this.xmin, this.xmax] = clampSpan(this.xmin, this.xmax, false);
+        [this.xmin, this.xmax] = clampSpan(this.xmin, this.xmax);
       }
       if (this.logY) {
         const ly = Math.log10(wy), a = Math.log10(Math.max(this.ymin, 1e-300)), b = Math.log10(Math.max(this.ymax, 1e-299));
@@ -156,7 +203,7 @@ const FX = (() => {
       } else {
         this.ymin = wy - (wy - this.ymin) * factor;
         this.ymax = wy + (this.ymax - wy) * factor;
-        [this.ymin, this.ymax] = clampSpan(this.ymin, this.ymax, false);
+        [this.ymin, this.ymax] = clampSpan(this.ymin, this.ymax);
       }
       { const cb = this.onUpdate || this.onDraw; if (cb) cb(); }
     }
@@ -228,9 +275,9 @@ const FX = (() => {
     }
     clear() {
       const { ctx } = this;
-      if (this._bg == null) {
-        const bg = getComputedStyle(this.cv).backgroundColor;
-        this._bg = bg === 'rgba(0, 0, 0, 0)' ? '#0e131d' : bg;
+      if (this._bg == null || this._bgVer !== FX.themeVer) {
+        this._bg = cvCol('--cv-bg');
+        this._bgVer = FX.themeVer;
       }
       ctx.save();
       ctx.fillStyle = this._bg;
@@ -241,7 +288,7 @@ const FX = (() => {
     unclip() { this.ctx.restore(); }
     grid(xstep, ystep, { xtickFmt, ytickFmt } = {}) {
       const { ctx } = this;
-      ctx.strokeStyle = '#1c2433'; ctx.lineWidth = 1; ctx.fillStyle = '#4c5874';
+      ctx.strokeStyle = cvCol('--cv-grid'); ctx.lineWidth = 1; ctx.fillStyle = cvCol('--cv-tick');
       ctx.font = '10px SFMono-Regular, monospace';
       ctx.textAlign = 'center'; ctx.textBaseline = 'top';
       const xs = this.ticks(this.xmin, this.xmax, xstep);
@@ -317,7 +364,7 @@ const FX = (() => {
     axis(origin = false) {
       const { ctx } = this;
       ctx.save();
-      ctx.strokeStyle = '#2b3547'; ctx.lineWidth = 1;
+      ctx.strokeStyle = cvCol('--cv-axis'); ctx.lineWidth = 1;
       ctx.beginPath();
       if (this.logX) { } else {
         let y0 = this.sy(0);
@@ -334,14 +381,14 @@ const FX = (() => {
       ctx.stroke();
       ctx.restore();
     }
-    label(text, x, y, { color = '#6b7890', size = 11, align = 'left', baseline = 'alphabetic' } = {}) {
+    label(text, x, y, { color, size = 11, align = 'left', baseline = 'alphabetic' } = {}) {
       const { ctx } = this;
-      ctx.fillStyle = color; ctx.font = `${size}px ${getComputedStyle(document.body).fontFamily}`;
+      ctx.fillStyle = color || cvCol('--cv-label');
+      ctx.font = `${size}px ${getComputedStyle(document.body).fontFamily}`;
       ctx.textAlign = align; ctx.textBaseline = baseline;
       ctx.fillText(text, x, y);
     }
-    /* 悬停十字线 + 精度读数（模块在重绘末尾调用）
-       fmtX/fmtY: 可选格式化函数；返回悬停世界坐标 */
+    /* 悬停十字线 + 精度读数（模块在重绘末尾调用） */
     crosshair(fmtX, fmtY) {
       if (!this.hoverEnabled || !this.hoverPx) return null;
       const { x: px, y: py } = this.hoverPx;
@@ -349,14 +396,13 @@ const FX = (() => {
       const wx = this.xAt(px), wy = this.yAt(py);
       const { ctx } = this;
       ctx.save();
-      ctx.strokeStyle = 'rgba(139,151,173,0.75)';
+      ctx.strokeStyle = cvCol('--cv-crosshair');
       ctx.setLineDash([4, 4]); ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(px, this.margin.t); ctx.lineTo(px, this.margin.t + this.drawableH);
       ctx.moveTo(this.margin.l, py); ctx.lineTo(this.margin.l + this.drawableW, py);
       ctx.stroke();
       ctx.setLineDash([]);
-      // 读数框（靠鼠标，越界翻转）
       const txt1 = fmtX ? fmtX(wx) : 'x=' + U.fmt(wx, 4);
       const txt2 = fmtY ? fmtY(wy, wx) : 'y=' + U.fmt(wy, 4);
       ctx.font = '11px SFMono-Regular, monospace';
@@ -365,14 +411,14 @@ const FX = (() => {
       let bx = px + 12, by = py - bh - 10;
       if (bx + bw > this.margin.l + this.drawableW) bx = px - bw - 12;
       if (by < this.margin.t) by = py + 14;
-      ctx.fillStyle = 'rgba(10,14,21,0.92)';
-      ctx.strokeStyle = '#2b3547';
+      ctx.fillStyle = cvCol('--cv-readout-bg');
+      ctx.strokeStyle = cvCol('--cv-readout-border');
       ctx.beginPath();
       ctx.roundRect ? ctx.roundRect(bx, by, bw, bh, 6) : ctx.rect(bx, by, bw, bh);
       ctx.fill(); ctx.stroke();
-      ctx.fillStyle = '#d8e0ee'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.fillStyle = cvCol('--cv-text'); ctx.textAlign = 'left'; ctx.textBaseline = 'top';
       ctx.fillText(txt1, bx + 8, by + 6);
-      ctx.fillStyle = '#37d0a0';
+      ctx.fillStyle = cvCol('--cv-line2');
       ctx.fillText(txt2, bx + 8, by + 20);
       ctx.restore();
       return { x: wx, y: wy };
@@ -388,7 +434,8 @@ const FX = (() => {
     return nm * pow;
   }
 
-  return { katex, span, div, Plot, niceStep };
+  return { katex, span, div, Plot, niceStep, cvCol, refreshTheme };
 })();
 
+FX.themeVer = themeVer;
 window.FX = FX;

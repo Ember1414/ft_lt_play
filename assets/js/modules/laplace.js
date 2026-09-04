@@ -5,6 +5,7 @@
  *   · 部分分式（留数法）自动求反变换，解析式与数值仿真叠加验证
  * ============================================================ */
 App.register('la', (host) => {
+  const cv = FX.cvCol;
   let mode = 'preset', preset = 'second_under';
   let poleSpecs = [], zeroSpecs = []; // {re, im≥0}：im>0 表示共轭对
   let num, den;
@@ -39,10 +40,10 @@ App.register('la', (host) => {
         <h3>s 平面（稳定性区域）</h3>
         <div class="canvas-wrap" style="height:320px"><canvas class="plot" id="la-sp"></canvas></div>
         <div class="legend">
-          <span style="color:#37d0a0">左侧 = 稳定</span>
-          <span style="color:#ffb454">jω 轴 = 临界</span>
-          <span style="color:#ff6b6b">右侧 = 不稳定</span>
-          <span style="color:#b48cff">■ ROC</span>
+          <span style="color:var(--accent-2)">左侧 = 稳定</span>
+          <span style="color:var(--warn)">jω 轴 = 临界</span>
+          <span style="color:var(--danger)">右侧 = 不稳定</span>
+          <span style="color:var(--purple)">■ ROC</span>
         </div>
         <div class="hint" style="margin-top:6px">反变换 h(t)=L⁻¹{H(s)} 由极点<b>位置</b>和 <b>ROC</b> 共同唯一确定：
           ROC 在最右极点右侧（因果系统）→ 各极点项为 e^(p·t) 形式。</div>
@@ -287,9 +288,9 @@ App.register('la', (host) => {
       if (Math.abs(p.re) < 1e-9) marginal = true;
       if (p.re > 1e-9) unstable = true;
     }
-    if (unstable) return { name: '不稳定', color: '#ff6b6b' };
-    if (marginal) return { name: '临界稳定', color: '#ffb454' };
-    return { name: '稳定', color: '#37d0a0' };
+    if (unstable) return { name: '不稳定', color: 'var(--danger)' };
+    if (marginal) return { name: '临界稳定', color: 'var(--warn)' };
+    return { name: '稳定', color: 'var(--accent-2)' };
   }
 
   /* ---------- 时域仿真 + 解析叠加 ---------- */
@@ -338,8 +339,8 @@ App.register('la', (host) => {
       <div class="stat"><span class="k">零点</span><span class="v">${zc.join(', ') || '—'}</span></div>
       <div class="stat"><span class="k">ROC</span><span class="v">${isFinite(rightmost) ? 'σ>' + U.fmt(rightmost, 2) : '全平面'}</span></div>`;
 
-    drawTime($('#la-imp'), imp, ana ? ana.imp : null, '#8f7afe');
-    drawTime($('#la-step'), step, ana ? ana.step : null, '#5b9bff');
+    drawTime($('#la-imp'), imp, ana ? ana.imp : null, cv('--cv-purple2'));
+    drawTime($('#la-step'), step, ana ? ana.step : null, cv('--cv-line1'));
     const invEl = $('#la-inverse');
     invEl.innerHTML = '';
     if (ana && ana.texImp) {
@@ -369,11 +370,11 @@ App.register('la', (host) => {
       const stride = Math.max(1, Math.floor(ana.t.length / 60));
       const xs = [], ys = [];
       for (let i = 0; i < ana.t.length; i += stride) { xs.push(ana.t[i]); ys.push(ana.y[i]); }
-      p.dots(xs, ys, { color: '#ffb454', r: 2.2 });
+      p.dots(xs, ys, { color: cv('--cv-warn'), r: 2.2 });
     }
     p.unclip();
     p.crosshair((t) => 't=' + U.fmt(t, 4), (y) => 'y=' + U.fmt(y, 4));
-    p.label('t (s)', p.margin.l + p.drawableW - 24, p.margin.t + p.drawableH - 6, { color: '#4c5874', size: 10 });
+    p.label('t (s)', p.margin.l + p.drawableW - 24, p.margin.t + p.drawableH - 6, { color: cv('--cv-tick'), size: 10 });
   }
 
   /* ---------- s 平面（FX.Plot：滚轮缩放） ---------- */
@@ -393,33 +394,33 @@ App.register('la', (host) => {
     const x0px = U.clamp(p.sx(0), ml, ml + dw);
 
     // 稳定/不稳定底色
-    ctx.fillStyle = 'rgba(55,208,160,0.06)'; ctx.fillRect(ml, mt, x0px - ml, dh);
-    ctx.fillStyle = 'rgba(255,107,107,0.06)'; ctx.fillRect(x0px, mt, ml + dw - x0px, dh);
+    ctx.fillStyle = cv('--cv-stable-bg'); ctx.fillRect(ml, mt, x0px - ml, dh);
+    ctx.fillStyle = cv('--cv-unstable-bg'); ctx.fillRect(x0px, mt, ml + dw - x0px, dh);
 
     // ROC：最右极点右侧（因果）
     const poles = specsToRoots(poleSpecs);
     if (showROC && poles.length) {
       const rightmost = poles.reduce((m, q) => Math.max(m, q.re), -Infinity);
       const rx = U.clamp(p.sx(rightmost), ml, ml + dw);
-      ctx.fillStyle = 'rgba(180,140,255,0.10)';
+      ctx.fillStyle = cv('--cv-roc-bg');
       ctx.fillRect(rx, mt, ml + dw - rx, dh);
-      ctx.strokeStyle = 'rgba(180,140,255,0.55)';
+      ctx.strokeStyle = cv('--cv-roc-line');
       ctx.setLineDash([6, 4]); ctx.lineWidth = 1.4;
       ctx.beginPath(); ctx.moveTo(rx, mt); ctx.lineTo(rx, mt + dh); ctx.stroke();
       ctx.setLineDash([]);
-      ctx.fillStyle = '#b48cff'; ctx.font = '11px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.fillStyle = cv('--cv-line3'); ctx.font = '11px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
       ctx.fillText('ROC: σ>' + U.fmt(rightmost, 2), Math.min(rx + 6, ml + dw - 86), mt + 4);
     }
 
     p.grid(null, null);
     p.axis(true);
-    ctx.fillStyle = '#6b7890'; ctx.font = '11px monospace';
+    ctx.fillStyle = cv('--cv-label'); ctx.font = '11px monospace';
     ctx.fillText('σ', ml + dw - 12, mt + 4);
     ctx.fillText('jω', ml + 6, mt + 14);
 
     // 极点 / 零点
-    for (const q of poles) drawSym(p.sx(q.re), p.sy(q.im), 'pole', '#ff6b6b');
-    for (const z of specsToRoots(zeroSpecs)) drawSym(p.sx(z.re), p.sy(z.im), 'zero', '#5b9bff');
+    for (const q of poles) drawSym(p.sx(q.re), p.sy(q.im), 'pole', cv('--cv-danger'));
+    for (const z of specsToRoots(zeroSpecs)) drawSym(p.sx(z.re), p.sy(z.im), 'zero', cv('--cv-line1'));
     function drawSym(x, y, kind, color) {
       ctx.save();
       ctx.lineWidth = 2; ctx.strokeStyle = color;
@@ -487,6 +488,6 @@ App.register('la', (host) => {
   usePreset('second_under');
   syncInputs();
 
-  return { title: '拉普拉斯变换', api: { dispose } };
+  return { title: '拉普拉斯变换', api: { dispose, onTheme: () => { drawSP(); redraw(); } } };
   function dispose() { }
 });

@@ -322,7 +322,7 @@ App.register('derive', (host) => {
       });
       const tbl = U.el('table', { class: 'tbl', style: 'margin-top:14px' });
       tbl.innerHTML = `<tr><th>验证点 s</th><th>数值 ∫₀^∞ f(t)e⁻ˢᵗdt</th><th>符号 F(s)</th><th>相对误差</th></tr>` +
-        rows.map((r) => `<tr><td>${r.sv}</td><td>${U.fmt(r.numeric, 6)}</td><td>${U.fmt(r.sym, 6)}</td><td style="color:${r.err < 1e-4 ? '#37d0a0' : '#ffb454'}">${r.err < 1e-12 ? '<1e-12' : U.fmt(r.err, 3)}</td></tr>`).join('');
+        rows.map((r) => `<tr><td>${r.sv}</td><td>${U.fmt(r.numeric, 6)}</td><td>${U.fmt(r.sym, 6)}</td><td style="color:${r.err < 1e-4 ? 'var(--accent-2)' : 'var(--warn)'}">${r.err < 1e-12 ? '<1e-12' : U.fmt(r.err, 3)}</td></tr>`).join('');
       out.append(U.el('p', { class: 'hint', html: '数值验证：把每一步得到的符号 F(s) 与直接数值积分对比，误差应接近机器精度——推导无误的硬证据。' }), tbl);
       if (hasNondecay) out.append(U.el('p', { class: 'hint', html: '注：含 sin/cos/tⁿ/常数项时 ROC 为 Re(s)>0，数值验证取 s>0 仍然收敛；其傅里叶变换含冲激谱线，见对应步骤。' }));
     };

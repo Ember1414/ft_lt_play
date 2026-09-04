@@ -5,6 +5,7 @@
  *   所有图支持滚轮缩放、拖拽平移、双击复位、悬停精度读数
  * ============================================================ */
 App.register('sys', (host) => {
+  const cv = FX.cvCol;
   let num, den;
   let chart = 'bode';                 // bode | nyquist | root
   const plots = {};                   // canvas id -> Plot
@@ -42,8 +43,8 @@ App.register('sys', (host) => {
           <div class="canvas-wrap" style="height:170px"><canvas class="plot" id="sys-bmag"></canvas></div>
           <div class="canvas-wrap" style="height:140px;margin-top:8px"><canvas class="plot" id="sys-bph"></canvas></div>
           <div class="legend">
-            <span><span class="sw" style="background:#5b9bff"></span>幅频 20log|H(jω)| dB</span>
-            <span><span class="sw" style="background:#b48cff"></span>相频 ∠H(jω) °</span>
+            <span><span class="sw" style="background:var(--accent)"></span>幅频 20log|H(jω)| dB</span>
+            <span><span class="sw" style="background:var(--purple)"></span>相频 ∠H(jω) °</span>
           </div>
         </div>
         <div id="sys-chart-nyq" class="hidden">
@@ -215,7 +216,7 @@ App.register('sys', (host) => {
     else drawRoot();
   }
 
-  const bodeColors = { mag: '#5b9bff', ph: '#b48cff' };
+  const bodeColors = { mag: cv('--cv-line1'), ph: cv('--cv-line3') };
   function drawBode() {
     const bode = getBode();
     const bm = getPlot('#sys-bmag', { logX: true, padding: 0.02 }, drawBode);
@@ -223,7 +224,7 @@ App.register('sys', (host) => {
     if (hi - lo < 1) { hi += 30; lo -= 30; }
     bm.setRange(bode.w[0], bode.w[bode.w.length - 1], lo - 8, hi + 8);
     bm.clear(); bm.grid(null, null); bm.axis();
-    bm.line(bode.w, bode.mag, { color: bodeColors.mag, width: 2, fill: 'rgba(91,155,255,0.1)' });
+    bm.line(bode.w, bode.mag, { color: bodeColors.mag, width: 2, fill: cv('--cv-fill-blue') });
     bm.crosshair((w) => 'ω=' + U.fmt(w, 3) + ' rad/s', (m) => m.toFixed(1) + ' dB');
 
     const bp = getPlot('#sys-bph', { logX: true, padding: 0 }, drawBode);
@@ -244,29 +245,29 @@ App.register('sys', (host) => {
     p.clip();
     const ux = [], uy = [];
     for (let i = 0; i <= 120; i++) { const a = (i / 120) * 2 * Math.PI; ux.push(Math.cos(a)); uy.push(Math.sin(a)); }
-    p.line(ux, uy, { color: 'rgba(139,151,173,0.4)', width: 1 });
+    p.line(ux, uy, { color: cv('--cv-unit'), width: 1 });
     p.unclip();
     // G(jω) 轨迹
-    p.line(d.re, d.im, { color: '#37d0a0', width: 2 });
+    p.line(d.re, d.im, { color: cv('--cv-line2'), width: 2 });
     // 镜像（ω<0，共轭）弱显示
-    p.line(d.re, d.im.map((v) => -v), { color: 'rgba(55,208,160,0.35)', width: 1.5 });
+    p.line(d.re, d.im.map((v) => -v), { color: cv('--cv-line2-soft'), width: 1.5 });
     // 起点终点标注
     const iw = [0.1, 1, 10];
     for (const wv of iw) {
       const idx = d.w.findIndex((x) => x >= wv);
       if (idx > 0) {
-        p.dots([d.re[idx]], [d.im[idx]], { color: '#ffb454', r: 3 });
-        p.label('ω=' + wv, p.sx(d.re[idx]) + 6, p.sy(d.im[idx]) - 4, { color: '#ffb454', size: 10 });
+        p.dots([d.re[idx]], [d.im[idx]], { color: cv('--cv-warn'), r: 3 });
+        p.label('ω=' + wv, p.sx(d.re[idx]) + 6, p.sy(d.im[idx]) - 4, { color: cv('--cv-warn'), size: 10 });
       }
     }
     // (-1, 0) 临界点
     const cx = p.sx(-1), cy = p.sy(0);
-    p.ctx.strokeStyle = '#ff6b6b'; p.ctx.lineWidth = 2;
+    p.ctx.strokeStyle = cv('--cv-danger'); p.ctx.lineWidth = 2;
     p.ctx.beginPath();
     p.ctx.moveTo(cx - 7, cy - 7); p.ctx.lineTo(cx + 7, cy + 7);
     p.ctx.moveTo(cx - 7, cy + 7); p.ctx.lineTo(cx + 7, cy - 7);
     p.ctx.stroke();
-    p.label('(−1, 0)', cx, cy + 20, { color: '#ff6b6b', size: 11, align: 'center' });
+    p.label('(−1, 0)', cx, cy + 20, { color: cv('--cv-danger'), size: 11, align: 'center' });
     p.crosshair((x) => 'Re=' + U.fmt(x, 4), (y) => 'Im=' + U.fmt(y, 4));
     // 判稳提示（开环无右半平面极点时适用）
     const openPoles = DSP.polyRoots(den);
@@ -281,7 +282,7 @@ App.register('sys', (host) => {
     const p = getPlot('#sys-root', { padding: 0.08 }, drawRoot);
     if (!locus) {
       p.clear();
-      p.label('仅支持分母阶次 1–6 的传递函数', p.margin.l + 20, p.margin.t + 40, { color: '#ff6b6b', size: 13 });
+      p.label('仅支持分母阶次 1–6 的传递函数', p.margin.l + 20, p.margin.t + 40, { color: cv('--cv-danger'), size: 13 });
       return;
     }
     // 范围：所有分支点 + 起点
@@ -296,13 +297,13 @@ App.register('sys', (host) => {
     p.clear();
     // 稳定区底色
     const x0px = U.clamp(p.sx(0), p.margin.l, p.margin.l + p.drawableW);
-    p.ctx.fillStyle = 'rgba(55,208,160,0.05)';
+    p.ctx.fillStyle = cv('--cv-stable-bg');
     p.ctx.fillRect(p.margin.l, p.margin.t, x0px - p.margin.l, p.drawableH);
     p.grid(null, null); p.axis(true);
-    p.label('jω', p.margin.l + p.drawableW - 20, p.margin.t + 12, { color: '#4c5874', size: 11 });
-    p.label('σ', p.margin.l + p.drawableW - 14, p.sy(0) - 6, { color: '#4c5874', size: 11 });
+    p.label('jω', p.margin.l + p.drawableW - 20, p.margin.t + 12, { color: cv('--cv-tick'), size: 11 });
+    p.label('σ', p.margin.l + p.drawableW - 14, p.sy(0) - 6, { color: cv('--cv-tick'), size: 11 });
     // 分支
-    const bcolors = ['#5b9bff', '#b48cff', '#37d0a0', '#ffb454', '#ff8fb3', '#7fd4ff'];
+    const bcolors = [cv('--cv-line1'), cv('--cv-line3'), cv('--cv-line2'), cv('--cv-warn'), cv('--cv-pink'), cv('--cv-line4')];
     p.clip();
     locus.branches.forEach((br, i) => {
       p.line(br.map((q) => q.re), br.map((q) => q.im), { color: bcolors[i % bcolors.length], width: 2 });
@@ -311,7 +312,7 @@ App.register('sys', (host) => {
     // 起点（开环极点）
     for (const q of locus.poles) {
       const x = p.sx(q.re), y = p.sy(q.im);
-      p.ctx.strokeStyle = '#ff6b6b'; p.ctx.lineWidth = 2;
+      p.ctx.strokeStyle = cv('--cv-danger'); p.ctx.lineWidth = 2;
       p.ctx.beginPath();
       p.ctx.moveTo(x - 7, y - 7); p.ctx.lineTo(x + 7, y + 7);
       p.ctx.moveTo(x - 7, y + 7); p.ctx.lineTo(x + 7, y - 7);
@@ -320,7 +321,7 @@ App.register('sys', (host) => {
     // 有限零点终点
     for (const q of locus.zeros) {
       const x = p.sx(q.re), y = p.sy(q.im);
-      p.ctx.strokeStyle = '#5b9bff'; p.ctx.lineWidth = 2;
+      p.ctx.strokeStyle = cv('--cv-line1'); p.ctx.lineWidth = 2;
       p.ctx.beginPath(); p.ctx.arc(x, y, 7, 0, 7); p.ctx.stroke();
     }
     // 悬停：σ/jω + 最近轨迹点 K 值
@@ -352,7 +353,7 @@ App.register('sys', (host) => {
     const stats = [];
     stats.push({ k: 'DC 增益', v: U.fmt(dc) });
     stats.push({ k: '带宽(-3dB)', v: bw ? U.fmt(bw) + ' rad/s' : '—' });
-    stats.push({ k: '稳定性', v: stable ? '稳定' : '不稳定', color: stable ? '#37d0a0' : '#ff6b6b' });
+    stats.push({ k: '稳定性', v: stable ? '稳定' : '不稳定', color: stable ? 'var(--accent-2)' : 'var(--danger)' });
     for (const p of poles) {
       if (Math.abs(p.im) > 1e-6 && p.re < 0) {
         const wn = Math.hypot(p.re, p.im), zeta = -p.re / wn;
@@ -389,8 +390,8 @@ App.register('sys', (host) => {
   }
   function drawTimeStep() {
     computeTime();
-    timeCanvas('#sys-step', lastSim.step, '#5b9bff');
-    timeCanvas('#sys-imp', lastSim.imp, '#8f7afe');
+    timeCanvas('#sys-step', lastSim.step, cv('--cv-line1'));
+    timeCanvas('#sys-imp', lastSim.imp, cv('--cv-purple2'));
   }
   function timeCanvas(id, data, color) {
     const p = getPlot(id, { margin: { l: 50, r: 12, t: 10, b: 26 } }, () => timeCanvas(id, data, color));
@@ -406,6 +407,6 @@ App.register('sys', (host) => {
   // 首屏
   solve();
 
-  return { title: '系统分析', api: { dispose } };
+  return { title: '系统分析', api: { dispose, onTheme: () => { renderChart(); drawTimeStep(); } } };
   function dispose() { }
 });
