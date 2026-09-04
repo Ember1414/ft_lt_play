@@ -50,11 +50,13 @@ App.register('ft', (host) => {
         </div>
         <div class="pane">
           <h3>时域 <code>x(t)</code> <small style="color:var(--text-faint);text-transform:none">悬停读数</small></h3>
-          <div style="height:150px"><canvas class="plot" id="ft-time"></canvas></div>
+          <div class="canvas-wrap" style="height:150px"><canvas class="plot" id="ft-time"></canvas></div>
           <h3 style="margin-top:14px">频域 <code>|X(f)|</code>（幅度）</h3>
-          <div style="height:150px"><canvas class="plot" id="ft-mag"></canvas></div>
-          <h3 style="margin-top:14px">相位 <code>∠X(f)</code></h3>
-          <div style="height:120px"><canvas class="plot" id="ft-phase"></canvas></div>
+          <div class="canvas-wrap" style="height:150px"><canvas class="plot" id="ft-mag"></canvas></div>
+          <details class="plot-fold">
+            <summary>相位 ∠X(f)</summary>
+            <div class="canvas-wrap" style="height:120px"><canvas class="plot" id="ft-phase"></canvas></div>
+          </details>
           <div class="statbar" id="ft-stats"></div>
         </div>
       </div>`;
@@ -152,6 +154,7 @@ App.register('ft', (host) => {
 
     buildParams();
     recompute();
+    if (FX.enablePlotChrome) FX.enablePlotChrome(box);
   }
   function redrawMap() { if (mapCtx && mapCtx.draw) mapCtx.draw(); }
 
@@ -178,11 +181,13 @@ App.register('ft', (host) => {
         </div>
         <div class="pane">
           <h3>滑动重叠 · f(τ) × g(t−τ)</h3>
-          <div style="height:170px"><canvas class="plot" id="cv-fg"></canvas></div>
+          <div class="canvas-wrap" style="height:170px"><canvas class="plot" id="cv-fg"></canvas></div>
           <h3 style="margin-top:10px">卷积结果 h(t)（点 = 当前时刻）</h3>
-          <div style="height:150px"><canvas class="plot" id="cv-h"></canvas></div>
-          <h3 style="margin-top:10px">频域验证 · |FFT{f∗g}| vs |F·G|</h3>
-          <div style="height:150px"><canvas class="plot" id="cv-freq"></canvas></div>
+          <div class="canvas-wrap" style="height:150px"><canvas class="plot" id="cv-h"></canvas></div>
+          <details class="plot-fold">
+            <summary>频域验证 · |FFT{f∗g}| vs |F·G|</summary>
+            <div class="canvas-wrap" style="height:150px"><canvas class="plot" id="cv-freq"></canvas></div>
+          </details>
         </div>
       </div>`;
 
@@ -352,6 +357,7 @@ App.register('ft', (host) => {
     host.querySelector('#cv-reset').addEventListener('click', () => { convCtx.animT = 0; ct.value = 0; drawConv(); });
 
     recompute();
+    if (FX.enablePlotChrome) FX.enablePlotChrome(box);
   }
   function redrawConv() { if (convCtx) { convCtx.plots = {}; renderConv(); } }
 

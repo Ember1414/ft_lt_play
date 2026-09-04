@@ -26,15 +26,19 @@ App.register('sys', (host) => {
     <div class="module layout">
       <div class="pane">
         <h3>传递函数 H(s)</h3>
-        <div class="ctrl"><label>分子 / 分母（用 <code>*</code>）</label>
-          <input type="text" id="sys-tf" value="1/(s^2+2*s+5)" spellcheck="false"></div>
+        <div class="tf-frac">
+          <input type="text" id="sys-num" value="1" placeholder="分子  如 1 或 (s+2)" spellcheck="false" aria-label="分子">
+          <div class="tf-bar" title="分数线"></div>
+          <input type="text" id="sys-den" value="s^2+2*s+5" placeholder="分母  如 s^2+2*s+5 或 (s+1)*(s+2)" spellcheck="false" aria-label="分母">
+        </div>
+        <div class="row" id="sys-struct" style="margin-bottom:10px"></div>
         <button class="btn primary" id="sys-apply" style="margin-bottom:12px">求解并绘图</button>
         <h3>预设</h3>
         <div class="row" id="sys-presets" style="margin-bottom:12px"></div>
         <div class="formula-center" id="sys-tex"></div>
         <div class="statbar" id="sys-metrics"></div>
-        <div class="hint">语法示例：<code>5 / (s^2 + 0.5*s + 1.25)</code>、<code>s / (s + 1)</code>、<code>(s+2)*(s+3) / (s^2 + 4)</code>。
-          所有图表：<b>滚轮缩放 · 拖拽平移 · 双击复位 · 悬停读数</b>。</div>
+        <div class="hint">按分数线填写分子 / 分母，支持因式 <code>(s+2)*(s+3)</code>。结构按钮可一键套模板。
+          图表：<b>滚轮缩放 · 拖底边改图高 · 双击复位</b>。</div>
       </div>
       <div class="pane">
         <div class="row" id="sys-charts" style="margin-bottom:10px"></div>
@@ -58,24 +62,50 @@ App.register('sys', (host) => {
           <div class="hint">× = 开环极点（K=0 起点），○ = 开环零点。轨迹进入右半平面（红色区）即该 K 下闭环不稳定；悬停轨迹可读出对应 K 值。</div>
         </div>
       </div>
-      <div class="pane full">
-        <h3>时域响应</h3>
+      <details class="pane full plot-fold">
+        <summary>时域响应（阶跃 / 脉冲）</summary>
         <div class="layout right-side">
-          <div class="pane"><h3>阶跃响应</h3><div style="height:170px"><canvas class="plot" id="sys-step"></canvas></div></div>
-          <div class="pane"><h3>脉冲响应</h3><div style="height:170px"><canvas class="plot" id="sys-imp"></canvas></div></div>
+          <div class="pane"><h3>阶跃响应</h3><div class="canvas-wrap" style="height:170px"><canvas class="plot" id="sys-step"></canvas></div></div>
+          <div class="pane"><h3>脉冲响应</h3><div class="canvas-wrap" style="height:170px"><canvas class="plot" id="sys-imp"></canvas></div></div>
         </div>
-      </div>
+      </details>
     </div>`;
 
   const $ = (s) => host.querySelector(s);
+  function setTF(str) {
+    const f = FX_LIB.tfToFields(str);
+    $('#sys-num').value = f.num;
+    $('#sys-den').value = f.den;
+  }
   const pRow = $('#sys-presets');
   Object.keys(presets).forEach((id) => {
     const c = U.el('button', { class: 'chip', 'data-v': presets[id].v }, presets[id].name);
-    c.addEventListener('click', () => { $('#sys-tf').value = presets[id].v; solve(); });
+    c.addEventListener('click', () => { setTF(presets[id].v); solve(); });
     pRow.append(c);
   });
+  const structs = [
+    ['一阶', '1', 's+a', { a: 1 }],
+    ['二阶', 'wn*wn', 's^2+2*z*wn*s+wn*wn', { z: 0.25, wn: 1 }],
+    ['超前', 's+z', 's+p', { z: 2, p: 0.5 }],
+    ['滞后', 's+z', 's+p', { z: 0.5, p: 2 }],
+    ['积分', '1', 's', {}],
+    ['PID', 'kd*s^2+kp*s+ki', 's', { kp: 1, ki: 0.5, kd: 0.1 }]
+  ];
+  const sRow = $('#sys-struct');
+  structs.forEach(([name, numT, denT, vals]) => {
+    const c = U.el('button', { class: 'chip' }, name);
+    c.addEventListener('click', () => {
+      let n = numT, d = denT;
+      for (const [k, v] of Object.entries(vals)) {
+        const re = new RegExp('\\b' + k + '\\b', 'g');
+        n = n.replace(re, String(v)); d = d.replace(re, String(v));
+      }
+      $('#sys-num').value = n; $('#sys-den').value = d; solve();
+    });
+    sRow.append(c);
+  });
   $('#sys-apply').addEventListener('click', solve);
-  $('#sys-tf').addEventListener('keydown', (e) => { if (e.key === 'Enter') solve(); });
+  ['#sys-num', '#sys-den'].forEach((sel) => $(sel).addEventListener('keydown', (e) => { if (e.key === 'Enter') solve(); }));
 
   // 图表切换
   const chartRow = $('#sys-charts');
@@ -102,8 +132,8 @@ App.register('sys', (host) => {
   }
 
   function solve() {
-    const res = FX_LIB.parseTF($('#sys-tf').value);
-    if (!res) { $('#sys-tex').innerHTML = '<span style="color:#ff6b6b">无法解析，请检查语法（需含 * 号）。</span>'; return; }
+    const res = FX_LIB.parseTFFields($('#sys-num').value, $('#sys-den').value);
+    if (!res) { $('#sys-tex').innerHTML = '<span style="color:#ff6b6b">无法解析分子/分母，检查括号与 * 号。</span>'; return; }
     num = res.num; den = res.den;
     const d0 = den[0];
     num = num.map((c) => c / d0); den = den.map((c) => c / d0);

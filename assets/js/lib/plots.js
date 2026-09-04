@@ -53,6 +53,7 @@ const FX = (() => {
       this._pinch = null;
       this._setupSize();
       this._bind();
+      canvas._fxPlot = this;
       if (typeof ResizeObserver !== 'undefined' && canvas.parentElement) {
         this.ro = new ResizeObserver(() => { this._setupSize(); if (this.onDraw) this.onDraw(); });
         this.ro.observe(canvas.parentElement);
@@ -296,36 +297,45 @@ const FX = (() => {
       const { ctx } = this;
       ctx.strokeStyle = cvCol('--cv-grid'); ctx.lineWidth = 1; ctx.fillStyle = cvCol('--cv-tick');
       ctx.font = '10px SFMono-Regular, monospace';
+      const top = this.margin.t, bot = this.margin.t + this.drawableH;
+      const left = this.margin.l, right = this.margin.l + this.drawableW;
 
-      // --- X ---
       ctx.textAlign = 'center'; ctx.textBaseline = 'top';
       const xs = this.axisTicks('x', xstep);
-      let lastPx = -Infinity;
+      let lastRight = -Infinity;
       for (let i = 0; i < xs.length; i++) {
         const x = xs[i];
         const px = this.sx(x);
-        if (px < this.margin.l - 1 || px > this.margin.l + this.drawableW + 1) continue;
-        const label = xtickFmt ? xtickFmt(x) : this.fmtTick(x, xs.step);
+        if (px < left - 1 || px > right + 1) continue;
+        ctx.beginPath(); ctx.moveTo(px, top); ctx.lineTo(px, bot); ctx.stroke();
+        const label = xtickFmt ? xtickFmt(x) : this.fmtTick(x, xs.step, this.logX);
+        if (!label) continue;
         const w = ctx.measureText(label).width;
-        if (px - w / 2 < lastPx + 6) continue;   // 与上一条标签重叠 → 跳过标签（网格线仍画）
-        lastPx = px + w / 2;
-        ctx.fillText(label, px, this.margin.t + this.drawableH + 5);
-        ctx.beginPath(); ctx.moveTo(px, this.margin.t); ctx.lineTo(px, this.margin.t + this.drawableH); ctx.stroke();
+        if (px - w / 2 < lastRight + 6) continue;
+        lastRight = px + w / 2;
+        ctx.fillText(label, px, bot + 5);
       }
-      // --- Y ---
+
       ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
       const ys = this.axisTicks('y', ystep);
-      lastPx = -Infinity;
+      // 刻度值从小到大 → 像素从上到下递减；先画网格，再按像素从上到下标数字
+      const yItems = [];
       for (let i = 0; i < ys.length; i++) {
         const y = ys[i];
         const py = this.sy(y);
-        if (py < this.margin.t - 1 || py > this.margin.t + this.drawableH + 1) continue;
-        const label = ytickFmt ? ytickFmt(y) : this.fmtTick(y, ys.step);
-        const w = ctx.measureText(label).width;
-        if (py - 7 < lastPx + 4) continue;   // 行距不足 → 跳过
-        lastPx = py + 7;
-        ctx.fillText(label, this.margin.l - 6, py);
-        ctx.beginPath(); ctx.moveTo(this.margin.l, py); ctx.lineTo(this.margin.l + this.drawableW, py); ctx.stroke();
+        if (py < top - 1 || py > bot + 1) continue;
+        yItems.push({ y, py });
+        ctx.beginPath(); ctx.moveTo(left, py); ctx.lineTo(right, py); ctx.stroke();
+      }
+      yItems.sort((a, b) => a.py - b.py);
+      let lastPy = -Infinity;
+      for (let i = 0; i < yItems.length; i++) {
+        const { y, py } = yItems[i];
+        const label = ytickFmt ? ytickFmt(y) : this.fmtTick(y, ys.step, this.logY);
+        if (!label) continue;
+        if (py < lastPy + 12) continue;
+        lastPy = py;
+        ctx.fillText(label, left - 6, py);
       }
     }
     // 轴刻度生成：返回数组并挂 .step（线性）供格式化
@@ -372,8 +382,8 @@ const FX = (() => {
       return out;
     }
     // 刻度数字：小数位随步长自适应（步长 0.001 → 3 位）
-    fmtTick(v, step) {
-      if (this.logX || this.logY) { if (v <= 0) return ''; return Math.abs(v) >= 10000 || Math.abs(v) < 0.01 ? v.toExponential(0) : +v.toPrecision(3) + ''; }
+    fmtTick(v, step, isLog) {
+      if (isLog) { if (v <= 0) return ''; return Math.abs(v) >= 10000 || Math.abs(v) < 0.01 ? v.toExponential(0) : +v.toPrecision(3) + ''; }
       let d = 0;
       if (step && step > 0) d = Math.max(0, Math.min(6, -Math.floor(Math.log10(step) + 1e-9)));
       else d = 1;
@@ -508,8 +518,54 @@ const FX = (() => {
     return nm * pow;
   }
 
-  return { katex, span, div, Plot, niceStep, cvCol, refreshTheme };
+  function redrawFold(details) {
+    if (!details.open) return;
+    requestAnimationFrame(() => {
+      details.querySelectorAll('canvas.plot').forEach((cv) => {
+        const p = cv._fxPlot;
+        if (p) { p._setupSize(); if (p.onDraw) p.onDraw(); }
+        else if (typeof cv._redraw === 'function') cv._redraw();
+      });
+    });
+  }
+  if (typeof document !== 'undefined') {
+    document.addEventListener('toggle', (e) => {
+      if (e.target && e.target.classList && e.target.classList.contains('plot-fold')) redrawFold(e.target);
+    }, true);
+  }
+
+  function enablePlotChrome(root) {
+    (root || document).querySelectorAll('.canvas-wrap').forEach((wrap) => {
+      if (wrap.dataset.chrome || wrap.querySelector('.draw-canvas')) return;
+      wrap.dataset.chrome = '1';
+      const h = document.createElement('div');
+      h.className = 'plot-resize';
+      h.title = '拖拽调整图高';
+      wrap.appendChild(h);
+      let startY = 0, startH = 0;
+      const onMove = (e) => {
+        const nh = Math.max(80, Math.min(900, startH + (e.clientY - startY)));
+        wrap.style.height = nh + 'px';
+      };
+      const onUp = () => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+      };
+      h.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        startY = e.clientY;
+        startH = wrap.getBoundingClientRect().height;
+        try { h.setPointerCapture(e.pointerId); } catch (err) { }
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+      });
+    });
+  }
+
+  const api = { katex, span, div, Plot, niceStep, cvCol, refreshTheme, enablePlotChrome };
+  api.themeVer = themeVer;
+  return api;
 })();
 
-FX.themeVer = themeVer;
 window.FX = FX;

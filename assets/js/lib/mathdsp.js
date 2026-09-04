@@ -137,7 +137,8 @@ const DSP = (() => {
         re += pts[n].re * Math.cos(ph) - pts[n].im * Math.sin(ph);
         im += pts[n].re * Math.sin(ph) + pts[n].im * Math.cos(ph);
       }
-      out.push({ k, amp: Math.hypot(re, im) / N, phase: Math.atan2(im, re), re: re / N, im: im / N });
+      const freq = k > N / 2 ? k - N : k;
+      out.push({ k: freq, amp: Math.hypot(re, im) / N, phase: Math.atan2(im, re), re: re / N, im: im / N });
     }
     return out.sort((a, b) => b.amp - a.amp);
   }

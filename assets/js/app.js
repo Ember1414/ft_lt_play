@@ -73,6 +73,7 @@
       this.navButtons.forEach((b) => b.classList.toggle('active', b.dataset.module === name));
       this.content.innerHTML = '';
       const mod = factory(this.content);
+      if (FX.enablePlotChrome) FX.enablePlotChrome(this.content);
       const api = mod.api || mod;
       this.title.innerHTML = mod.title + (mod.subtitle ? '<small>' + mod.subtitle + '</small>' : '');
       this.current = { name, api };

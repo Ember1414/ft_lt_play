@@ -21,8 +21,13 @@ App.register('la', (host) => {
           <button class="chip active" id="la-roc-toggle">显示 ROC</button>
           <button class="btn" id="la-clear">清空</button>
         </div>
-        <div class="ctrl"><label>手动输入 H(s)（分子 / 分母）</label>
-          <input type="text" id="la-tf-in" placeholder="1/(s^2+0.5*s+1.25)" spellcheck="false"></div>
+        <div class="ctrl"><label>手动输入 H(s)</label></div>
+        <div class="tf-frac">
+          <input type="text" id="la-num" placeholder="分子  如 1 或 s+2" spellcheck="false" aria-label="分子">
+          <div class="tf-bar" title="分数线"></div>
+          <input type="text" id="la-den" placeholder="分母  如 s^2+0.5*s+1.25" spellcheck="false" aria-label="分母">
+        </div>
+        <div class="row" id="la-struct" style="margin-bottom:10px"></div>
         <div class="ctrl"><label>或直接输入极点（逗号分隔，支持 j）</label>
           <input type="text" id="la-poles-in" placeholder="-0.25+1.09j, -0.25-1.09j" spellcheck="false"></div>
         <div class="ctrl"><label>零点（可留空）</label>
@@ -48,8 +53,8 @@ App.register('la', (host) => {
         <div class="hint" style="margin-top:6px">反变换 h(t)=L⁻¹{H(s)} 由极点<b>位置</b>和 <b>ROC</b> 共同唯一确定：
           ROC 在最右极点右侧（因果系统）→ 各极点项为 e^(p·t) 形式。</div>
       </div>
-      <div class="pane full">
-        <h3>时域响应联动</h3>
+      <details class="pane full plot-fold" open>
+        <summary>时域响应联动</summary>
         <div class="layout right-side">
           <div class="pane">
             <h3>脉冲响应 h(t)（点 = 留数法解析解）</h3>
@@ -62,7 +67,7 @@ App.register('la', (host) => {
         </div>
         <div class="formula-center" id="la-inverse"></div>
         <div class="hint" id="la-note"></div>
-      </div>
+      </details>
     </div>`;
 
   const $ = (s) => host.querySelector(s);
@@ -126,17 +131,32 @@ App.register('la', (host) => {
   $('#la-clear').addEventListener('click', () => { poleSpecs = []; zeroSpecs = []; mode = 'custom'; $('#la-custom-mode').classList.add('active'); buildFromPZ(); syncInputs(); });
   $('#la-reset-view').addEventListener('click', () => { if (spPlot) spPlot.resetView(); });
 
+  const laStructs = [
+    ['一阶', '1', 's+1'],
+    ['二阶欠阻尼', '1', 's^2+0.5*s+1.25'],
+    ['带通', 's', 's^2+0.4*s+1.21'],
+    ['因式', '(s+2)', '(s+1)*(s+3)']
+  ];
+  const laSRow = $('#la-struct');
+  if (laSRow) {
+    laStructs.forEach(([name, n, d]) => {
+      const c = U.el('button', { class: 'chip' }, name);
+      c.addEventListener('click', () => { $('#la-num').value = n; $('#la-den').value = d; applyInputs(); });
+      laSRow.append(c);
+    });
+  }
   $('#la-apply').addEventListener('click', applyInputs);
-  ['#la-tf-in', '#la-poles-in', '#la-zeros-in'].forEach((sel) => {
+  ['#la-num', '#la-den', '#la-poles-in', '#la-zeros-in'].forEach((sel) => {
     $(sel).addEventListener('keydown', (e) => { if (e.key === 'Enter') applyInputs(); });
   });
   function applyInputs() {
-    const tfStr = $('#la-tf-in').value.trim();
+    const numStr = ($('#la-num').value || '').trim();
+    const denStr = ($('#la-den').value || '').trim();
     const poleStr = $('#la-poles-in').value.trim();
     const zeroStr = $('#la-zeros-in').value.trim();
-    if (tfStr) {
-      const t = FX_LIB.parseTF(tfStr);
-      if (!t || !t.den || !t.den[0]) { $('#la-note').innerHTML = '<span style="color:var(--danger)">H(s) 解析失败，示例：1/(s^2+0.5*s+1.25) 或 (s+2)/(s+1)</span>'; return; }
+    if (numStr || denStr) {
+      const t = FX_LIB.parseTFFields(numStr || '1', denStr || '1');
+      if (!t || !t.den || !t.den[0]) { $('#la-note').innerHTML = '<span style="color:var(--danger)">H(s) 解析失败，示例：分子 1，分母 s^2+0.5*s+1.25</span>'; return; }
       num = t.num; den = t.den;
       const d0 = den[0];
       num = num.map((c) => c / d0); den = den.map((c) => c / d0);

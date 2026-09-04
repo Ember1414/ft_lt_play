@@ -74,9 +74,9 @@ App.register('explore', (host) => {
           <label class="chip">t ∈ [<input type="number" id="ex-t0" value="-4" step="1" style="width:64px;background:transparent;border:0;color:var(--accent);font-family:var(--mono)"> , <input type="number" id="ex-t1" value="8" step="1" style="width:64px;background:transparent;border:0;color:var(--accent);font-family:var(--mono)">]</label>
         </div>
       </div>
-      <div class="pane"><h3>时域 x(t)</h3><div style="height:170px"><canvas class="plot" id="ex-time"></canvas></div></div>
-      <div class="pane"><h3>幅度谱 |X(f)|</h3><div style="height:170px"><canvas class="plot" id="ex-mag"></canvas></div></div>
-      <div class="pane"><h3>相位谱 ∠X(f)</h3><div style="height:160px"><canvas class="plot" id="ex-ph"></canvas></div></div>
+      <div class="pane"><h3>时域 x(t)</h3><div class="canvas-wrap" style="height:170px"><canvas class="plot" id="ex-time"></canvas></div></div>
+      <div class="pane"><h3>幅度谱 |X(f)|</h3><div class="canvas-wrap" style="height:170px"><canvas class="plot" id="ex-mag"></canvas></div></div>
+      <details class="pane plot-fold"><summary>相位谱 ∠X(f)</summary><div class="canvas-wrap" style="height:160px"><canvas class="plot" id="ex-ph"></canvas></div></details>
       <div class="pane full" id="ex-time-info"><div class="statbar"></div></div>`;
     if (!f) { res.querySelector('#ex-time-info').innerHTML = '<p style="color:var(--danger)">无法解析表达式，请检查语法。</p>'; return; }
 
@@ -121,6 +121,7 @@ App.register('explore', (host) => {
     res.querySelector('#ex-t0').addEventListener('change', () => { Object.values(draw._cache || {}).forEach((p) => p.resetView()); draw(); });
     res.querySelector('#ex-t1').addEventListener('change', () => { Object.values(draw._cache || {}).forEach((p) => p.resetView()); draw(); });
     draw();
+    if (FX.enablePlotChrome) FX.enablePlotChrome(res);
   }
 
   function renderTF(res, str) {
@@ -133,10 +134,11 @@ App.register('explore', (host) => {
       <div class="pane" style="grid-column:1/-1">
         <div class="formula-center" id="ex-h"></div>
       </div>
-      <div class="pane"><h3>波特图 幅度(dB)</h3><div style="height:150px"><canvas class="plot" id="ex-bmag"></canvas></div></div>
-      <div class="pane"><h3>阶跃响应</h3><div style="height:150px"><canvas class="plot" id="ex-step"></canvas></div></div>
-      <div class="pane"><h3>极点零点</h3><div style="height:220px"><canvas class="plot" id="ex-pz"></canvas></div></div>
+      <div class="pane"><h3>波特图 幅度(dB)</h3><div class="canvas-wrap" style="height:150px"><canvas class="plot" id="ex-bmag"></canvas></div></div>
+      <div class="pane"><h3>阶跃响应</h3><div class="canvas-wrap" style="height:150px"><canvas class="plot" id="ex-step"></canvas></div></div>
+      <div class="pane"><h3>极点零点</h3><div class="canvas-wrap" style="height:220px"><canvas class="plot" id="ex-pz"></canvas></div></div>
       <div class="pane"><h3>关键指标</h3><div id="ex-metrics" class="statbar"></div></div>`;
+    if (FX.enablePlotChrome) FX.enablePlotChrome(res);
     let num = t.num.map((c) => c / t.den[0]), den = t.den.map((c) => c / t.den[0]);
     while (num.length < den.length) num.unshift(0);
     if (window.katex) window.katex.render('H(s)=\\dfrac{' + polyTex(num) + '}{' + polyTex(den) + '}', res.querySelector('#ex-h'), { throwOnError: false, displayMode: true });
@@ -305,6 +307,7 @@ App.register('explore', (host) => {
 
       epicy.t = (epicy.t + 0.0012) % 1;
     }
+    if (FX.enablePlotChrome) FX.enablePlotChrome(box);
   }
 
   /* ---------- 语音 ---------- */

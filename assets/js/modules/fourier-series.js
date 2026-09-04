@@ -45,13 +45,13 @@ App.register('fs', (host) => {
           <span><span class="sw" style="background:#37d0a0"></span>已合成轨迹</span>
         </div>
       </div>
-      <div class="pane full">
-        <h3>谐波幅度谱 · 当前形状的 DFT 分解</h3>
+      <details class="pane full plot-fold">
+        <summary>谐波幅度谱 · 当前形状的 DFT 分解</summary>
         <div class="canvas-wrap" style="height:130px"><canvas class="plot" id="fs-spec"></canvas></div>
-        <div class="hint">各谐波相量的幅值 |c<sub>k</sub>|（按频率排列）。谱线随形状变化——这就是"波形分解成谐波"的频域视图。</div>
-      </div>
-      <div class="pane full">
-        <h3>谐波叠加 · 方波逐步合成（Gibbs 现象）</h3>
+        <div class="hint">各谐波相量的幅值 |c<sub>k</sub>|（按频率 k 排列）。谱线随形状变化——这就是"波形分解成谐波"的频域视图。</div>
+      </details>
+      <details class="pane full plot-fold">
+        <summary>谐波叠加 · 方波逐步合成（Gibbs 现象）</summary>
         <div class="canvas-wrap" style="height:240px"><canvas class="plot" id="fs-harmonics"></canvas></div>
         <div class="legend">
           <span><span class="sw" style="background:#ffb454"></span>方波目标</span>
@@ -60,7 +60,7 @@ App.register('fs', (host) => {
         </div>
         <div class="hint">方波 = 奇次正弦之和 <b>S<sub>n</sub>(t) = (4/π)·Σ<sub>k=1..n</sub> sin((2k-1)·2πt)/(2k-1)</b>。
           在跳变处始终存在约 9% 的过冲，这是不可消除的 Gibbs 现象，不是动画误差。此图同样支持滚轮缩放与悬停读数。</div>
-      </div>
+      </details>
     </div>`;
 
   const $ = (s) => host.querySelector(s);
@@ -96,10 +96,13 @@ App.register('fs', (host) => {
     sizeEl.height = (sizeEl.clientHeight || sizeEl.parentElement.clientHeight || 300) * (window.devicePixelRatio || 1);
   }
 
+  let shapeCache = [];
   function recompute() {
-    const pts = FX_LIB.shapePoints(state.shape, 480);
-    phasors = DSP.dftPhasors(pts.filter((p) => !(isNaN(p.re))));
+    const pts = FX_LIB.shapePoints(state.shape, 512);
+    shapeCache = pts;
+    phasors = DSP.dftPhasors(pts.filter((p) => p && isFinite(p.re) && isFinite(p.im)));
     traceTail = [];
+    view.k = 1; view.cx = 0; view.cy = 0;
     draw();
     drawSpec();
   }
@@ -195,47 +198,50 @@ App.register('fs', (host) => {
 
     const chain = phasorChain(state.t, state.terms);
 
-    // 目标形状（弱显示）
-    const pts = FX_LIB.shapePoints(state.shape, 480);
-    ctxC.strokeStyle = cv('--cv-circle-a'); ctxC.lineWidth = 1.5;
-    ctxC.beginPath();
-    for (let i = 0; i < pts.length; i++) { const px = SX(pts[i].re), py = SY(pts[i].im); i ? ctxC.lineTo(px, py) : ctxC.moveTo(px, py); }
-    ctxC.closePath(); ctxC.stroke();
-
-    // 圆 & 半径线（裁剪到画布，避免放大后画出面板观感杂乱）
     ctxC.save();
     ctxC.beginPath(); ctxC.rect(0, 0, W, H); ctxC.clip();
+
+    const pts = shapeCache;
+    ctxC.setLineDash([5, 4]);
+    ctxC.strokeStyle = cv('--cv-circle-a'); ctxC.lineWidth = 1.2; ctxC.lineJoin = 'round';
+    ctxC.beginPath();
+    for (let i = 0; i < pts.length; i++) { const px = SX(pts[i].re), py = SY(pts[i].im); i ? ctxC.lineTo(px, py) : ctxC.moveTo(px, py); }
+    if (state.shape !== 'spiral') ctxC.closePath();
+    ctxC.stroke();
+    ctxC.setLineDash([]);
+
     if (state.showCircles) {
       for (let j = 1; j < chain.length; j++) {
         const c = chain[j - 1], n = chain[j];
         const r = n.amp * s;
+        if (r < 0.5 || n.k === 0) continue;
         ctxC.beginPath();
         ctxC.strokeStyle = j % 2 ? cv('--cv-circle-b') : cv('--cv-circle-a');
-        ctxC.lineWidth = 1;
-        ctxC.arc(SX(c.x), SY(c.y), Math.max(r, 0.5), 0, 7); ctxC.stroke();
+        ctxC.lineWidth = r > 60 ? 1.35 : 1;
+        ctxC.arc(SX(c.x), SY(c.y), r, 0, Math.PI * 2); ctxC.stroke();
         ctxC.beginPath();
         ctxC.moveTo(SX(c.x), SY(c.y));
         ctxC.lineTo(SX(n.x), SY(n.y));
-        ctxC.strokeStyle = cv('--cv-chain'); ctxC.stroke();
+        ctxC.strokeStyle = cv('--cv-chain'); ctxC.lineWidth = 1.4; ctxC.stroke();
       }
     }
 
-    // 链上主相量（亮点）
     const tip = chain[chain.length - 1];
-    ctxC.beginPath();
-    ctxC.arc(SX(tip.x), SY(tip.y), 5, 0, 7); ctxC.fillStyle = cv('--cv-line1'); ctxC.fill();
-
-    // 轨迹（整周期：t 回绕时清空，完整闭合后再重画）
     if (traceJustCleared) { traceTail = []; traceJustCleared = false; }
     traceTail.push(tip.x, tip.y);
-    if (traceTail.length > 3600 * 2) traceTail.splice(0, 2);
-    ctxC.lineWidth = 2.5; ctxC.strokeStyle = cv('--cv-line2'); ctxC.lineJoin = 'round';
+    if (traceTail.length > 8000) traceTail.splice(0, 2);
+    ctxC.lineWidth = 2.6; ctxC.strokeStyle = cv('--cv-line2');
+    ctxC.lineJoin = 'round'; ctxC.lineCap = 'round';
     ctxC.beginPath();
     for (let i = 0; i < traceTail.length / 2; i++) {
       const px = SX(traceTail[i * 2]), py = SY(traceTail[i * 2 + 1]);
       i ? ctxC.lineTo(px, py) : ctxC.moveTo(px, py);
     }
     ctxC.stroke();
+
+    ctxC.beginPath();
+    ctxC.arc(SX(tip.x), SY(tip.y), 4.5, 0, Math.PI * 2);
+    ctxC.fillStyle = cv('--cv-line1'); ctxC.fill();
     ctxC.restore();
 
     // 文字
@@ -304,19 +310,22 @@ App.register('fs', (host) => {
       specPlot.onDraw = drawSpec;
     }
     const p = specPlot;
-    // phasors 按幅值排序存储，这里取前 60 个再按频率 |k| 排列
-    const top = phasors.slice(0, Math.min(60, phasors.length)).slice().sort((a, b) => Math.abs(a.k) - Math.abs(b.k));
-    let maxA = 1e-9;
-    for (const q of top) maxA = Math.max(maxA, q.amp);
-    p.setRange(0, Math.max(8, top.length), 0, maxA * 1.08);
+    const top = phasors.filter((q) => q.amp > 1e-6).slice(0, 80).sort((a, b) => a.k - b.k);
+    let maxA = 1e-9, k0 = 0, k1 = 8;
+    for (const q of top) { maxA = Math.max(maxA, q.amp); k0 = Math.min(k0, q.k); k1 = Math.max(k1, q.k); }
+    p.setRange(k0 - 0.5, k1 + 0.5, 0, maxA * 1.08);
     p.clear(); p.grid(null, null); p.axis(true);
     p.clip();
-    top.forEach((q, i) => {
-      p.line([i, i], [0, q.amp], { color: cv('--cv-line3'), width: 4 });
+    top.forEach((q) => {
+      p.line([q.k, q.k], [0, q.amp], { color: cv('--cv-line3'), width: 3 });
     });
     p.unclip();
-    p.crosshair((x) => '序号 ' + Math.round(x), (y, wx) => '|c' + (top[Math.round(wx)] ? '{' + top[Math.round(wx)].k + '}' : '') + '|=' + U.fmt(y, 4));
-    p.label('|cₖ| 随频率的分布（前 60 个最强谐波）', p.margin.l + 8, p.margin.t + 14, { color: cv('--cv-label'), size: 11 });
+    p.crosshair((x) => 'k=' + Math.round(x), (y, wx) => {
+      let best = null, bd = Infinity;
+      for (const q of top) { const d = Math.abs(q.k - wx); if (d < bd) { bd = d; best = q; } }
+      return best && bd < 0.6 ? '|c_{' + best.k + '}|=' + U.fmt(best.amp, 4) : '|c|=' + U.fmt(y, 4);
+    });
+    p.label('|cₖ|（横轴 = 谐波次数 k）', p.margin.l + 8, p.margin.t + 14, { color: cv('--cv-label'), size: 11 });
   }
   function rmsErr(n) {
     let s = 0; const M = 2000;

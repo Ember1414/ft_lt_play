@@ -3,19 +3,90 @@
  * ============================================================ */
 const FX_LIB = (() => {
   /* ============ 傅立叶级数：笔画形状（返回复数点） ============ */
-  function shapePoints(kind, N = 500) {
-    const P = [];
-    const push = (x, y) => P.push({ re: x, im: y });
-    switch (kind) {
-      case 'square': { const C = [[-1, -1], [1, -1], [1, 1], [-1, 1], [-1, -1]]; for (let i = 0; i < N; i++) { const t = (i / N) * 4; const e = Math.min(3, Math.floor(t)); const f = t - e; push(U.lerp(C[e][0], C[e + 1][0], f), U.lerp(C[e][1], C[e + 1][1], f)); } break; }
-      case 'triangle': { for (let i = 0; i < N; i++) { const x = U.lerp(-1, 1, i / N); const y = (i / N < 0.5 ? U.mapRange(i / N, 0, 0.5, 0, 1) : U.mapRange(i / N, 0.5, 1, 1, 0)); push(x, y); } break; }
-      case 'heart': { for (let i = 0; i < N; i++) { const t = (i / N) * 2 * Math.PI; const x = 16 * Math.pow(Math.sin(t), 3); const y = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t); push(x / 18, y / 18); } break; }
-      case 'star': { const outer = 5, inner = 2.2, points = 5; const spikes = points * 2; for (let i = 0; i < N; i++) { const seg = (i / N) * spikes; const s = Math.floor(seg), f = seg - s; const a0 = (s / spikes) * 2 * Math.PI - Math.PI / 2; const a1 = ((s + 1) / spikes) * 2 * Math.PI - Math.PI / 2; const r0 = s % 2 === 0 ? outer : inner, r1 = s % 2 === 0 ? inner : outer; const r = U.lerp(r0, r1, f) / 5; push(r * Math.cos(a0), r * Math.sin(a0)); } break; }
-      case 'butterfly': { for (let i = 0; i < N; i++) { const t = (i / N) * 12 * Math.PI; const e = Math.exp(Math.cos(t)); const x = Math.sin(t) * (e - 2 * Math.cos(4 * t) - Math.pow(Math.sin(t / 12), 5)); const y = Math.cos(t) * (e - 2 * Math.cos(4 * t) - Math.pow(Math.sin(t / 12), 5)); push(x / 2.5, -y / 2.5); } break; }
-      case 'gear': { const teeth = 8; const steps = N / teeth; for (let i = 0; i < N; i++) { const k = Math.floor(i / steps); const f = (i % steps) / steps; const a0 = (k / teeth) * 2 * Math.PI; const r = f < 0.5 ? 1 : 1.5; const a = a0 + f * (2 * Math.PI / teeth); push((r / 1.5) * Math.cos(a), (r / 1.5) * Math.sin(a)); } break; }
-      case 'spiral': { for (let i = 0; i < N; i++) { const t = (i / N) * 6 * Math.PI; const r = 0.2 + 0.8 * (i / N); push(r * Math.cos(t), r * Math.sin(t)); } break; }
+  function resamplePath(P, N, closed) {
+    if (!P.length) return P;
+    const Q = P.slice();
+    if (closed) {
+      const d = Math.hypot(Q[0].re - Q[Q.length - 1].re, Q[0].im - Q[Q.length - 1].im);
+      if (d > 1e-9) Q.push({ re: Q[0].re, im: Q[0].im });
     }
-    // 居中归一化到 [-1,1]²
+    const cum = [0];
+    for (let i = 1; i < Q.length; i++) cum.push(cum[i - 1] + Math.hypot(Q[i].re - Q[i - 1].re, Q[i].im - Q[i - 1].im));
+    const L = cum[cum.length - 1] || 1;
+    const out = [];
+    let seg = 1;
+    for (let k = 0; k < N; k++) {
+      const target = (k / N) * L;
+      while (seg < cum.length - 1 && cum[seg] < target) seg++;
+      const t = (target - cum[seg - 1]) / (cum[seg] - cum[seg - 1] || 1);
+      out.push({ re: U.lerp(Q[seg - 1].re, Q[seg].re, t), im: U.lerp(Q[seg - 1].im, Q[seg].im, t) });
+    }
+    return out;
+  }
+  function verts(list) { return list.map(([x, y]) => ({ re: x, im: y })); }
+  function shapePoints(kind, N = 512) {
+    let P = [];
+    let closed = true;
+    switch (kind) {
+      case 'square':
+        P = verts([[-1, -1], [1, -1], [1, 1], [-1, 1]]);
+        break;
+      case 'triangle':
+        P = verts([[0, 1], [-1, -0.75], [1, -0.75]]);
+        break;
+      case 'heart': {
+        for (let i = 0; i < N; i++) {
+          const t = (i / N) * 2 * Math.PI;
+          const x = 16 * Math.pow(Math.sin(t), 3);
+          const y = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
+          P.push({ re: x / 18, im: y / 18 });
+        }
+        break;
+      }
+      case 'star': {
+        const spikes = 5;
+        for (let i = 0; i < spikes * 2; i++) {
+          const a = (i / (spikes * 2)) * 2 * Math.PI - Math.PI / 2;
+          const r = i % 2 === 0 ? 1 : 0.38;
+          P.push({ re: r * Math.cos(a), im: r * Math.sin(a) });
+        }
+        break;
+      }
+      case 'butterfly': {
+        for (let i = 0; i < N; i++) {
+          const t = (i / N) * 12 * Math.PI;
+          const e = Math.exp(Math.cos(t));
+          const k = e - 2 * Math.cos(4 * t) - Math.pow(Math.sin(t / 12), 5);
+          P.push({ re: Math.sin(t) * k / 2.5, im: -Math.cos(t) * k / 2.5 });
+        }
+        break;
+      }
+      case 'gear': {
+        const teeth = 8;
+        for (let k = 0; k < teeth; k++) {
+          const a0 = (k / teeth) * 2 * Math.PI;
+          const a1 = ((k + 1) / teeth) * 2 * Math.PI;
+          const mid = (a0 + a1) / 2;
+          const rIn = 0.72, rOut = 1;
+          P.push({ re: rIn * Math.cos(a0), im: rIn * Math.sin(a0) });
+          P.push({ re: rOut * Math.cos(a0 + (mid - a0) * 0.25), im: rOut * Math.sin(a0 + (mid - a0) * 0.25) });
+          P.push({ re: rOut * Math.cos(mid), im: rOut * Math.sin(mid) });
+          P.push({ re: rOut * Math.cos(a1 - (a1 - mid) * 0.25), im: rOut * Math.sin(a1 - (a1 - mid) * 0.25) });
+          P.push({ re: rIn * Math.cos(a1), im: rIn * Math.sin(a1) });
+        }
+        break;
+      }
+      case 'spiral': {
+        closed = false;
+        for (let i = 0; i < N; i++) {
+          const t = (i / (N - 1)) * 6 * Math.PI;
+          const r = 0.12 + 0.88 * (i / (N - 1));
+          P.push({ re: r * Math.cos(t), im: r * Math.sin(t) });
+        }
+        break;
+      }
+    }
+    P = resamplePath(P, N, closed);
     if (P.length) {
       let x0 = P[0].re, x1 = P[0].re, y0 = P[0].im, y1 = P[0].im;
       for (const p of P) { x0 = Math.min(x0, p.re); x1 = Math.max(x1, p.re); y0 = Math.min(y0, p.im); y1 = Math.max(y1, p.im); }
@@ -49,55 +120,120 @@ const FX_LIB = (() => {
   };
 
   /* ============ 表达式解析 ============ */
-  // 解析实系数多项式字符串 => 系数（自高到低）。支持 s、s^2、数字、带 * 的系数项。
-  // 例: "s^2 + 2*s + 5"  => [1, 2, 5]
+  // 解析实系数多项式 => 系数自高到低。支持 (s+2)*(s+3)、s^2+2*s+5。
+  function polyMul(a, b) {
+    const out = new Array(a.length + b.length - 1).fill(0);
+    for (let i = 0; i < a.length; i++) for (let j = 0; j < b.length; j++) out[i + j] += a[i] * b[j];
+    return out;
+  }
+  function polyAdd(a, b) {
+    const n = Math.max(a.length, b.length);
+    const out = new Array(n).fill(0);
+    for (let i = 0; i < a.length; i++) out[n - a.length + i] += a[i];
+    for (let i = 0; i < b.length; i++) out[n - b.length + i] += b[i];
+    return out;
+  }
+  function stripOuter(s) {
+    while (s.length >= 2 && s[0] === '(' && s[s.length - 1] === ')') {
+      let d = 0, wrapped = true;
+      for (let i = 0; i < s.length; i++) {
+        if (s[i] === '(') d++;
+        else if (s[i] === ')') { d--; if (d === 0 && i < s.length - 1) { wrapped = false; break; } }
+      }
+      if (!wrapped) break;
+      s = s.slice(1, -1);
+    }
+    return s;
+  }
+  function splitDepth(s, pred) {
+    const parts = [];
+    let depth = 0, start = 0;
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (c === '(') depth++;
+      else if (c === ')') depth--;
+      else if (depth === 0 && pred(c, i, start)) { parts.push(s.slice(start, i)); start = i; }
+    }
+    parts.push(s.slice(start));
+    return parts;
+  }
+  function parseMonomial(t) {
+    let sign = 1;
+    if (t[0] === '+') t = t.slice(1);
+    else if (t[0] === '-') { sign = -1; t = t.slice(1); }
+    if (!t) return [0];
+    if (!t.includes('s')) {
+      const c = parseFloat(t);
+      return isNaN(c) ? null : [sign * c];
+    }
+    const idx = t.indexOf('s');
+    const coefText = t.slice(0, idx).replace('*', '');
+    const pPart = t.slice(idx + 1);
+    const power = pPart ? parseInt(pPart.replace('^', ''), 10) : 1;
+    if (!(power >= 0) || isNaN(power)) return null;
+    const c = (coefText === '' ? 1 : parseFloat(coefText));
+    if (isNaN(c)) return null;
+    const out = new Array(power + 1).fill(0);
+    out[0] = sign * c;
+    return out;
+  }
+  function parseFactor(f) {
+    f = stripOuter(f);
+    if (!f) return [1];
+    if (f.includes('(')) return parsePoly(f);
+    for (let i = 1; i < f.length; i++) if (f[i] === '+' || f[i] === '-') return parsePoly(f);
+    return parseMonomial(f);
+  }
   function parsePoly(str) {
     if (str == null) return null;
     let s = String(str).replace(/\s+/g, '').replace(/\*\*/g, '^');
     if (!s) return [0];
-    // 展开成 token：用正则匹配 [+-]?(coefficient)(s)(^n)?
-    const tokens = s.match(/[+-]?(?:[0-9.]+(?:\*)?s(?:\^\d+)?|s(?:\^\d+)?|[0-9.]+)/g);
-    if (!tokens) return null;
-    const coeff = new Map(); // 幂次 -> 系数（幂次低到高）
-    let ok = true;
-    for (let t of tokens) {
+    s = s.replace(/\)\(/g, ')*(').replace(/(\d)\(/g, '$1*(').replace(/s\(/g, 's*(').replace(/\)s/g, ')*s').replace(/\)(\d)/g, ')*$1');
+    s = stripOuter(s);
+    const terms = splitDepth(s, (c, i, start) => i > start && (c === '+' || c === '-'));
+    let acc = null;
+    for (let term of terms) {
+      if (!term || term === '+') continue;
       let sign = 1;
-      if (t[0] === '+') t = t.slice(1);
-      else if (t[0] === '-') { sign = -1; t = t.slice(1); }
-      // 分离 coefficient 与 s 部分
-      const hasS = t.includes('s');
-      let coefText, power;
-      if (hasS) {
-        const idx = t.indexOf('s');
-        coefText = t.slice(0, idx).replace('*', '');
-        const pPart = t.slice(idx + 1);
-        power = pPart ? parseInt(pPart.replace('^', ''), 10) : 1;
-        if (!(power >= 0) || isNaN(power)) { ok = false; break; }
-      } else { coefText = t; power = 0; }
-      let c = coefText === '' ? 1 : parseFloat(coefText);
-      if (isNaN(c)) { ok = false; break; }
-      coeff.set(power, (coeff.get(power) || 0) + sign * c);
+      if (term[0] === '+') term = term.slice(1);
+      else if (term[0] === '-') { sign = -1; term = term.slice(1); }
+      if (!term) continue;
+      const factors = splitDepth(term, (c) => c === '*').map((f) => f.replace(/^\*/, '')).filter(Boolean);
+      let prod = [1];
+      for (const f of factors) {
+        const piece = parseFactor(f);
+        if (!piece) return null;
+        prod = polyMul(prod, piece);
+      }
+      if (sign < 0) prod = prod.map((x) => -x);
+      acc = acc ? polyAdd(acc, prod) : prod;
     }
-    if (!ok) return null;
-    const maxDeg = Math.max(0, ...coeff.keys());
-    const out = new Array(maxDeg + 1).fill(0);
-    for (const [p, c] of coeff) out[maxDeg - p] = c;
-    // 去掉首项为 0 造成的多余前导（不可删首项为0会改变次数）；保留
-    return out;
+    return acc || [0];
   }
 
-  // 解析传递函数字符串 "num/den"，返回 {num, den}（自高到低）
   function parseTF(str) {
     if (!str) return null;
-    const parts = String(str).split('/');
+    const s = String(str).replace(/\s+/g, '').replace(/\*\*/g, '^');
+    const parts = splitDepth(s, (c) => c === '/');
     const num = parsePoly(parts[0]);
-    const den = parts.length > 1 ? parsePoly(parts[1]) : [1];
-    // 归一化分母首项
+    const denStr = parts.slice(1).map((p) => p.replace(/^\//, '')).join('/');
+    const den = denStr ? parsePoly(denStr) : [1];
     if (!num || !den) return null;
-    const d0 = den[0] || 0;
-    if (d0 === 0) return null;
-    // 若分母为零次且=1 直接返回
+    if (!(den[0] || 0)) return null;
     return { num, den };
+  }
+  function parseTFFields(numStr, denStr) {
+    numStr = (numStr || '').trim();
+    denStr = (denStr || '').trim();
+    if (!denStr && /\/.+/.test(numStr)) return parseTF(numStr);
+    if (!numStr) numStr = '1';
+    if (!denStr) denStr = '1';
+    return parseTF('(' + numStr + ')/(' + denStr + ')');
+  }
+  function tfToFields(str) {
+    const s = String(str || '').replace(/\s+/g, '');
+    const parts = splitDepth(s, (c) => c === '/');
+    return { num: parts[0] || '1', den: parts.slice(1).map((p) => p.replace(/^\//, '')).join('/') || '1' };
   }
 
   // 解析以 t 为变量的时域表达式，返回 f(t) 函数 + 校验
@@ -128,7 +264,7 @@ const FX_LIB = (() => {
     } catch (e) { return null; }
   }
 
-  return { shapePoints, ftSignals, laplacePresets, parseTF, parseTimeExpr };
+  return { shapePoints, ftSignals, laplacePresets, parseTF, parseTFFields, tfToFields, parsePoly, parseTimeExpr };
 })();
 
 window.FX_LIB = FX_LIB;
