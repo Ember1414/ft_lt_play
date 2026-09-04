@@ -37,7 +37,7 @@ App.register('la', (host) => {
           <button class="btn" id="la-reset-view">复位视图</button>
         </div>
         <div class="hint">点选模式：<b>左键</b>加极点(红)、<b>右键</b>加零点(蓝)、<b>拖动</b>移动、<b>双击</b>删除；带虚部的点自动生成共轭对。
-          s 平面支持<b>滚轮缩放</b>，缩放后点击更精准。</div>
+          s 平面支持<b>滚轮缩放</b>，视图随零极点自动留边；复位视图按当前点重新适配。</div>
         <div class="formula-center" id="la-tex"></div>
         <div id="la-status" class="statbar"></div>
       </div>
@@ -129,7 +129,13 @@ App.register('la', (host) => {
   });
   $('#la-roc-toggle').addEventListener('click', () => { showROC = !showROC; $('#la-roc-toggle').classList.toggle('active', showROC); drawSP(); });
   $('#la-clear').addEventListener('click', () => { poleSpecs = []; zeroSpecs = []; mode = 'custom'; $('#la-custom-mode').classList.add('active'); buildFromPZ(); syncInputs(); });
-  $('#la-reset-view').addEventListener('click', () => { if (spPlot) spPlot.resetView(); });
+  $('#la-reset-view').addEventListener('click', () => {
+    if (!spPlot) return;
+    spPlot.userAdjusted = false;
+    const r = defaultSPRange();
+    spPlot.setRange(r[0], r[1], r[2], r[3], true);
+    drawSP();
+  });
 
   const laStructs = [
     ['一阶', '1', 's+1'],
@@ -175,6 +181,7 @@ App.register('la', (host) => {
       $('#la-note').textContent = '请输入 H(s) 或至少一组极点。';
       return;
     }
+    if (spPlot) spPlot.userAdjusted = false;
     syncInputs();
     renderTex();
     redraw();
@@ -203,6 +210,7 @@ App.register('la', (host) => {
     num = p.num.slice(); den = p.den.slice();
     poleSpecs = rootsToSpecs(DSP.polyRoots(den));
     zeroSpecs = rootsToSpecs(DSP.polyRoots(num));
+    if (spPlot) spPlot.userAdjusted = false;
     renderTex();
     $('#la-note').textContent = p.note;
     redraw();
@@ -398,13 +406,27 @@ App.register('la', (host) => {
   }
 
   /* ---------- s 平面（FX.Plot：滚轮缩放） ---------- */
-  const XR = [-4.5, 1.8], YR = [-3, 3];
+  function defaultSPRange() {
+    const pts = [...specsToRoots(poleSpecs), ...specsToRoots(zeroSpecs)];
+    let xr = 4, xi = 3;
+    for (const q of pts) {
+      if (!q || !isFinite(q.re) || !isFinite(q.im)) continue;
+      xr = Math.max(xr, Math.abs(q.re) + 1.2);
+      xi = Math.max(xi, Math.abs(q.im) + 1.2);
+    }
+    xr = Math.min(Math.max(xr, 2.5), 40);
+    xi = Math.min(Math.max(xi, 2.5), 40);
+    return [-xr, Math.max(1.6, xr * 0.4), -xi, xi];
+  }
   let spPlot = null;
   function drawSP() {
     if (!spPlot) {
       spPlot = new FX.Plot(spCv, { margin: { l: 46, r: 16, t: 16, b: 30 }, padding: 0, pan: false, hover: false, dblclickReset: false });
       spPlot.onDraw = drawSP;
-      spPlot.setRange(XR[0], XR[1], YR[0], YR[1], true);
+    }
+    if (!spPlot.userAdjusted) {
+      const r = defaultSPRange();
+      spPlot.setRange(r[0], r[1], r[2], r[3], true);
     }
     const p = spPlot;
     const { ctx } = p;

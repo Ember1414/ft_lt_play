@@ -38,7 +38,7 @@ App.register('sys', (host) => {
         <div class="formula-center" id="sys-tex"></div>
         <div class="statbar" id="sys-metrics"></div>
         <div class="hint">按分数线填写分子 / 分母，支持因式 <code>(s+2)*(s+3)</code>。结构按钮可一键套模板。
-          图表：<b>滚轮缩放 · 拖底边改图高 · 双击复位</b>。</div>
+          图表：<b>滚轮缩放 · 拖底边/右边/右下角改图框 · 双击复位</b>。</div>
       </div>
       <div class="pane">
         <div class="row" id="sys-charts" style="margin-bottom:10px"></div>
@@ -176,12 +176,18 @@ App.register('sys', (host) => {
     }
     return cache.nyq;
   }
-  // 暖启动 Durand–Kerner
+  function stripLead(c) {
+    const a = c.slice();
+    while (a.length > 1 && Math.abs(a[0]) < 1e-12) a.shift();
+    return a;
+  }
   function warmRoots(coef, init) {
     const n = coef.length - 1;
     const lead = coef[0];
+    if (!isFinite(lead) || Math.abs(lead) < 1e-18 || n < 1) return init.map((r) => ({ re: r.re, im: r.im }));
     const c = coef.map((x) => x / lead);
-    const roots = init.map((r) => ({ re: r.re, im: r.im }));
+    const roots = init.slice(0, n).map((r) => ({ re: r.re, im: r.im }));
+    while (roots.length < n) roots.push({ re: 0.1 * roots.length, im: 0.2 * roots.length });
     for (let it = 0; it < 80; it++) {
       let delta = 0;
       for (let i = 0; i < n; i++) {
@@ -190,6 +196,7 @@ App.register('sys', (host) => {
           const ar = roots[i].re - roots[j].re, ai = roots[i].im - roots[j].im;
           const nr = dr * ar - di * ai, ni = dr * ai + di * ar; dr = nr; di = ni;
         }
+        if (Math.abs(dr) + Math.abs(di) < 1e-18) { dr = 1e-12; }
         const pv = DSP.horner(c, roots[i]);
         const corr = DSP.cdiv({ re: pv.re, im: pv.im }, { re: dr, im: di });
         roots[i].re -= corr.re; roots[i].im -= corr.im;
@@ -199,35 +206,68 @@ App.register('sys', (host) => {
     }
     return roots;
   }
+  function matchRoots(prev, next) {
+    const n = prev.length, m = next.length;
+    const pairs = [];
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < m; j++) {
+        const d = (next[j].re - prev[i].re) ** 2 + (next[j].im - prev[i].im) ** 2;
+        pairs.push({ i, j, d });
+      }
+    }
+    pairs.sort((a, b) => a.d - b.d);
+    const out = new Array(n), takenI = new Set(), takenJ = new Set();
+    for (const p of pairs) {
+      if (takenI.has(p.i) || takenJ.has(p.j)) continue;
+      takenI.add(p.i); takenJ.add(p.j);
+      out[p.i] = { re: next[p.j].re, im: next[p.j].im };
+      if (takenI.size === n) break;
+    }
+    for (let i = 0; i < n; i++) if (!out[i]) out[i] = { re: prev[i].re, im: prev[i].im };
+    return out;
+  }
   function getRootLocus() {
     if (!cache.root) {
-      const n = den.length - 1;
-      if (n < 1 || n > 6) { cache.root = null; return null; }
-      const numP = num.slice();
-      while (numP.length < den.length) numP.unshift(0);
-      const Ks = [];
-      for (let i = 0; i < 240; i++) Ks.push(Math.pow(10, U.lerp(-3, 3, i / 239)));
-      let cur = DSP.polyRoots(den);
+      const denS = stripLead(den), numS = stripLead(num);
+      const n = denS.length - 1, m = numS.length - 1;
+      if (n < 1 || n > 8) { cache.root = null; return null; }
+      const poles = DSP.polyRoots(denS);
+      const zeros = m >= 1 ? DSP.polyRoots(numS) : [];
+      const numP = numS.slice();
+      while (numP.length < denS.length) numP.unshift(0);
+      const Ks = [0];
+      for (let i = 0; i < 70; i++) Ks.push(Math.pow(10, U.lerp(-4, -1, i / 69)));
+      for (let i = 1; i <= 180; i++) Ks.push(Math.pow(10, U.lerp(-1, 3.5, i / 180)));
+      let cur = poles.map((r) => ({ re: r.re, im: r.im }));
       const branches = cur.map((r) => [{ re: r.re, im: r.im, K: 0 }]);
       for (const K of Ks) {
-        const coef = den.map((c, i) => c + K * numP[i]);
-        const roots = warmRoots(coef, cur);
-        // 贪心配对：保持分支连续
-        const used = new Array(roots.length).fill(false);
-        const order = [];
-        for (const r0 of cur) {
-          let best = -1, bd = Infinity;
-          for (let j = 0; j < roots.length; j++) {
-            if (used[j]) continue;
-            const d = (roots[j].re - r0.re) * (roots[j].re - r0.re) + (roots[j].im - r0.im) * (roots[j].im - r0.im);
-            if (d < bd) { bd = d; best = j; }
-          }
-          used[best] = true; order.push(best);
+        if (K === 0) continue;
+        const coef = denS.map((c, i) => c + K * (numP[i] || 0));
+        if (!isFinite(coef[0]) || Math.abs(coef[0]) < 1e-18) continue;
+        let roots = warmRoots(coef, cur);
+        let bad = 0;
+        for (const r of roots) {
+          const pv = DSP.horner(coef.map((x) => x / coef[0]), r);
+          bad += Math.hypot(pv.re, pv.im);
         }
-        cur = order.map((i) => roots[i]);
-        cur.forEach((r, bi) => branches[bi].push({ re: r.re, im: r.im, K }));
+        if (bad > 1e-3 || roots.some((r) => !isFinite(r.re) || !isFinite(r.im))) {
+          roots = DSP.polyRoots(coef);
+        }
+        cur = matchRoots(cur, roots);
+        cur.forEach((r, bi) => {
+          if (isFinite(r.re) && isFinite(r.im)) branches[bi].push({ re: r.re, im: r.im, K });
+        });
       }
-      cache.root = { branches, poles: DSP.polyRoots(den), zeros: DSP.polyRoots(num) };
+      const excess = n - m;
+      let centroid = { re: 0, im: 0 }, angles = [];
+      if (excess > 0) {
+        let sr = 0, si = 0;
+        for (const q of poles) { sr += q.re; si += q.im; }
+        for (const q of zeros) { sr -= q.re; si -= q.im; }
+        centroid = { re: sr / excess, im: si / excess };
+        for (let k = 0; k < excess; k++) angles.push(((2 * k + 1) * Math.PI) / excess);
+      }
+      cache.root = { branches, poles, zeros, centroid, angles, excess };
     }
     return cache.root;
   }
@@ -257,8 +297,12 @@ App.register('sys', (host) => {
     bm.line(bode.w, bode.mag, { color: bodeColors.mag, width: 2, fill: cv('--cv-fill-blue') });
     bm.crosshair((w) => 'ω=' + U.fmt(w, 3) + ' rad/s', (m) => m.toFixed(1) + ' dB');
 
-    const bp = getPlot('#sys-bph', { logX: true, padding: 0 }, drawBode);
-    bp.setRange(bode.w[0], bode.w[bode.w.length - 1], -200, 200);
+    const bp = getPlot('#sys-bph', { logX: true, padding: 0.04 }, drawBode);
+    let plo = Infinity, phi = -Infinity;
+    for (const v of bode.ph) if (isFinite(v)) { plo = Math.min(plo, v); phi = Math.max(phi, v); }
+    if (!isFinite(plo)) { plo = -180; phi = 180; }
+    if (phi - plo < 40) { const mid = (plo + phi) / 2; plo = mid - 20; phi = mid + 20; }
+    bp.setRange(bode.w[0], bode.w[bode.w.length - 1], plo - 15, phi + 15);
     bp.clear(); bp.grid(null, null); bp.axis();
     bp.line(bode.w, bode.ph, { color: bodeColors.ph, width: 2 });
     bp.crosshair((w) => 'ω=' + U.fmt(w, 3) + ' rad/s', (p) => p.toFixed(1) + '°');
@@ -267,8 +311,12 @@ App.register('sys', (host) => {
   function drawNyq() {
     const d = getNyq();
     const p = getPlot('#sys-nyq', { padding: 0.08 }, drawNyq);
-    let m = 0.5;
-    for (let i = 0; i < d.re.length; i++) m = Math.max(m, Math.abs(d.re[i]), Math.abs(d.im[i]));
+    const start = Math.floor(d.re.length * 0.08);
+    let m = 1.2;
+    for (let i = start; i < d.re.length; i++) {
+      if (isFinite(d.re[i]) && isFinite(d.im[i])) m = Math.max(m, Math.abs(d.re[i]), Math.abs(d.im[i]));
+    }
+    m = Math.min(Math.max(m * 1.15, 1.2), 40);
     p.setRange(-m, m, -m, m);
     p.clear(); p.grid(null, null); p.axis(true);
     // 单位圆（判稳参考）
@@ -312,18 +360,29 @@ App.register('sys', (host) => {
     const p = getPlot('#sys-root', { padding: 0.08 }, drawRoot);
     if (!locus) {
       p.clear();
-      p.label('仅支持分母阶次 1–6 的传递函数', p.margin.l + 20, p.margin.t + 40, { color: cv('--cv-danger'), size: 13 });
+      p.label('仅支持分母阶次 1–8 的传递函数', p.margin.l + 20, p.margin.t + 40, { color: cv('--cv-danger'), size: 13 });
       return;
     }
-    // 范围：所有分支点 + 起点
-    let xr = 1, xi = 1;
-    for (const br of locus.branches) for (const pt of br) { xr = Math.max(xr, Math.abs(pt.re)); xi = Math.max(xi, Math.abs(pt.im)); }
-    for (const q of [...locus.poles, ...locus.zeros]) { xr = Math.max(xr, Math.abs(q.re)); xi = Math.max(xi, Math.abs(q.im)); }
-    xr *= 1.15; xi *= 1.15;
-    const spanX = Math.max(2 * xr, 1), spanY = Math.max(2 * xi, 1);
-    // 保持横纵等比观感：以宽定高
-    const spanYFit = Math.max(spanY, spanX * (p.drawableH / p.drawableW));
-    p.setRange(-xr, xr, -spanYFit / 2, spanYFit / 2);
+    let xr = 1.2, xi = 1.2;
+    const collect = (q) => {
+      if (!q || !isFinite(q.re) || !isFinite(q.im)) return;
+      xr = Math.max(xr, Math.abs(q.re));
+      xi = Math.max(xi, Math.abs(q.im));
+    };
+    for (const q of locus.poles) collect(q);
+    for (const q of locus.zeros) collect(q);
+    collect(locus.centroid);
+    const rMax = Math.max(xr, xi, 1.2) * 3.2;
+    for (const br of locus.branches) {
+      for (const pt of br) {
+        if (!isFinite(pt.re) || !isFinite(pt.im)) continue;
+        if (Math.hypot(pt.re, pt.im) > rMax) continue;
+        collect(pt);
+      }
+    }
+    xr = Math.max(xr * 1.25, 1.5);
+    xi = Math.max(xi * 1.25, 1.5);
+    p.setRange(-xr, xr, -xi, xi);
     p.clear();
     // 稳定区底色
     const x0px = U.clamp(p.sx(0), p.margin.l, p.margin.l + p.drawableW);
@@ -335,6 +394,16 @@ App.register('sys', (host) => {
     // 分支
     const bcolors = [cv('--cv-line1'), cv('--cv-line3'), cv('--cv-line2'), cv('--cv-warn'), cv('--cv-pink'), cv('--cv-line4')];
     p.clip();
+    if (locus.excess > 0 && locus.angles) {
+      const L = Math.hypot(p.xmax - p.xmin, p.ymax - p.ymin);
+      for (const ang of locus.angles) {
+        p.line(
+          [locus.centroid.re, locus.centroid.re + L * Math.cos(ang)],
+          [locus.centroid.im, locus.centroid.im + L * Math.sin(ang)],
+          { color: cv('--cv-tick'), width: 1 }
+        );
+      }
+    }
     locus.branches.forEach((br, i) => {
       p.line(br.map((q) => q.re), br.map((q) => q.im), { color: bcolors[i % bcolors.length], width: 2 });
     });

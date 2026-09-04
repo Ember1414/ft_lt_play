@@ -181,7 +181,7 @@ App.register('fs', (host) => {
   window.addEventListener('pointercancel', endFinger);
   circleCanvas.addEventListener('dblclick', () => { view.k = 1; view.cx = 0; view.cy = 0; });
 
-  function baseScale() { return Math.min(circleCanvas.clientWidth, circleCanvas.clientHeight) * 0.40; }
+  function baseScale() { return Math.min(circleCanvas.clientWidth, circleCanvas.clientHeight) * 0.32; }
 
   function draw() {
     // --- 主画布：画圈 ---

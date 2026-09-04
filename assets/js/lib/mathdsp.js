@@ -14,7 +14,7 @@ const DSP = (() => {
     return { re, im };
   }
   function cdiv(a, b) {
-    const d = b.re * b.re + b.im * b.im;
+    const d = b.re * b.re + b.im * b.im || 1e-30;
     return { re: (a.re * b.re + a.im * b.im) / d, im: (a.im * b.re - a.re * b.im) / d };
   }
 
@@ -39,6 +39,7 @@ const DSP = (() => {
           const nr = dr * ar - di * ai, ni = dr * ai + di * ar;
           dr = nr; di = ni;
         }
+        if (Math.abs(dr) + Math.abs(di) < 1e-18) { dr = 1e-12; }
         const p = horner(coef, roots[i]);
         const corr = cdiv({ re: p.re, im: p.im }, { re: dr, im: di });
         roots[i].re -= corr.re; roots[i].im -= corr.im;
@@ -120,7 +121,13 @@ const DSP = (() => {
       const r = re[k], i = im[k];
       let m = Math.hypot(r, i) * dt;
       mag.push(m);
-      ph.push(Math.atan2(i, r));
+      let p = Math.atan2(i, r);
+      if (k) {
+        const prev = ph[ph.length - 1];
+        while (p - prev > Math.PI) p -= 2 * Math.PI;
+        while (p - prev < -Math.PI) p += 2 * Math.PI;
+      }
+      ph.push(p);
     }
     for (let k = 1; k < mag.length - 1; k++) mag[k] *= 2; // 单边
     return { f, mag, ph };
@@ -213,7 +220,13 @@ const DSP = (() => {
       const h = evalH(num, den, wv);
       w.push(wv);
       mag.push(20 * Math.log10(Math.hypot(h.re, h.im) + 1e-12));
-      ph.push((180 / Math.PI) * Math.atan2(h.im, h.re));
+      let p = (180 / Math.PI) * Math.atan2(h.im, h.re);
+      if (i) {
+        const prev = ph[i - 1];
+        while (p - prev > 180) p -= 360;
+        while (p - prev < -180) p += 360;
+      }
+      ph.push(p);
     }
     return { w, mag, ph };
   }

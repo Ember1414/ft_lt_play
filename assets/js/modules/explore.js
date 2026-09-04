@@ -105,7 +105,11 @@ App.register('explore', (host) => {
       mp.line(sp.f, sp.mag, { color: cv('--cv-line2'), width: 2, fill: cv('--cv-fill-green') });
 
       const pp = getPlot('#ex-ph');
-      pp.setRange(0, sp.f[sp.f.length - 1], -Math.PI, Math.PI); pp.clear(); pp.grid(); pp.axis(true);
+      let plo = Infinity, phi = -Infinity;
+      for (const v of sp.ph) if (isFinite(v)) { plo = Math.min(plo, v); phi = Math.max(phi, v); }
+      if (!isFinite(plo)) { plo = -Math.PI; phi = Math.PI; }
+      if (phi - plo < 0.4) { const mid = (plo + phi) / 2; plo = mid - 0.5; phi = mid + 0.5; }
+      pp.setRange(0, sp.f[sp.f.length - 1], plo - 0.2, phi + 0.2); pp.clear(); pp.grid(); pp.axis(true);
       pp.line(sp.f, sp.ph, { color: cv('--cv-line3'), width: 2 });
 
       // 采样与混叠提示

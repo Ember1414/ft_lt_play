@@ -409,17 +409,24 @@ const FX = (() => {
     line(xs, ys, { color = '#5b9bff', width = 2, fill, fillUpTo = null } = {}) {
       const { ctx } = this;
       ctx.save();
-      // 默认裁剪到绘图区，曲线不会溢出面板
       ctx.beginPath();
       ctx.rect(this.margin.l, this.margin.t, this.drawableW, this.drawableH);
       ctx.clip();
       ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
       ctx.beginPath();
       let started = false;
+      let px0, py0;
       for (let i = 0; i < xs.length; i++) {
         const px = this.sx(xs[i]), py = this.sy(ys[i]);
         if (!isFinite(py) || !isFinite(px)) { started = false; continue; }
-        if (!started) { ctx.moveTo(px, py); started = true; } else ctx.lineTo(px, py);
+        if (!started) { ctx.moveTo(px, py); started = true; }
+        else {
+          // 跳变（相位展开前的 ±π、根轨迹换支）断开，避免斜穿整幅图
+          const jump = Math.abs(px - px0) + Math.abs(py - py0);
+          if (jump > Math.max(this.drawableW, this.drawableH) * 1.6) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        px0 = px; py0 = py;
       }
       ctx.stroke();
       if (fill) {
@@ -534,31 +541,77 @@ const FX = (() => {
     }, true);
   }
 
+  function bindDrag(handle, onDown, onMove) {
+    handle.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try { handle.setPointerCapture(e.pointerId); } catch (err) { }
+      onDown(e);
+      const move = (ev) => onMove(ev);
+      const up = () => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+    });
+  }
   function enablePlotChrome(root) {
-    (root || document).querySelectorAll('.canvas-wrap').forEach((wrap) => {
+    const host = root || document;
+    host.querySelectorAll('.canvas-wrap').forEach((wrap) => {
       if (wrap.dataset.chrome || wrap.querySelector('.draw-canvas')) return;
       wrap.dataset.chrome = '1';
+      const mk = (cls, title) => {
+        const el = document.createElement('div');
+        el.className = cls; el.title = title; wrap.appendChild(el); return el;
+      };
+      const hs = mk('plot-resize', '拖底边改高度');
+      const he = mk('plot-resize-e', '拖右边改宽度');
+      const hse = mk('plot-resize-se', '拖右下角同时改宽高');
+      const st = { x: 0, y: 0, w: 0, h: 0, paneW: 0 };
+      const begin = (e) => {
+        const r = wrap.getBoundingClientRect();
+        st.x = e.clientX; st.y = e.clientY; st.w = r.width; st.h = r.height;
+        const pane = wrap.closest('.pane');
+        st.paneW = pane ? pane.getBoundingClientRect().width : 0;
+      };
+      const setH = (nh) => { wrap.style.height = Math.max(80, Math.min(900, nh)) + 'px'; };
+      const setW = (nw) => {
+        wrap.style.width = Math.max(140, Math.min(1400, nw)) + 'px';
+        const pane = wrap.closest('.pane');
+        const lay = wrap.closest('.layout');
+        if (pane && lay && st.paneW) {
+          const dw = nw - st.w;
+          const pw = Math.max(220, Math.min(1400, st.paneW + dw));
+          pane.style.minWidth = pw + 'px';
+        }
+      };
+      bindDrag(hs, begin, (e) => setH(st.h + (e.clientY - st.y)));
+      bindDrag(he, begin, (e) => setW(st.w + (e.clientX - st.x)));
+      bindDrag(hse, begin, (e) => {
+        setW(st.w + (e.clientX - st.x));
+        setH(st.h + (e.clientY - st.y));
+      });
+    });
+    host.querySelectorAll('.layout').forEach((lay) => {
+      if (lay.dataset.colChrome) return;
+      const kids = [...lay.children].filter((el) => el.classList.contains('pane') && !el.classList.contains('full'));
+      if (kids.length < 2) return;
+      lay.dataset.colChrome = '1';
+      const rightSide = lay.classList.contains('right-side');
+      const pane = rightSide ? kids[kids.length - 1] : kids[0];
       const h = document.createElement('div');
-      h.className = 'plot-resize';
-      h.title = '拖拽调整图高';
-      wrap.appendChild(h);
-      let startY = 0, startH = 0;
-      const onMove = (e) => {
-        const nh = Math.max(80, Math.min(900, startH + (e.clientY - startY)));
-        wrap.style.height = nh + 'px';
-      };
-      const onUp = () => {
-        window.removeEventListener('pointermove', onMove);
-        window.removeEventListener('pointerup', onUp);
-      };
-      h.addEventListener('pointerdown', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        startY = e.clientY;
-        startH = wrap.getBoundingClientRect().height;
-        try { h.setPointerCapture(e.pointerId); } catch (err) { }
-        window.addEventListener('pointermove', onMove);
-        window.addEventListener('pointerup', onUp);
+      h.className = 'layout-resize' + (rightSide ? ' layout-resize-left' : '');
+      h.title = '拖动调整栏宽';
+      pane.appendChild(h);
+      const st = { x: 0, w: 0 };
+      bindDrag(h, (e) => {
+        st.x = e.clientX;
+        st.w = pane.getBoundingClientRect().width;
+      }, (e) => {
+        const dw = rightSide ? (st.x - e.clientX) : (e.clientX - st.x);
+        const w = Math.max(220, Math.min(640, st.w + dw));
+        lay.style.setProperty(rightSide ? '--layout-right' : '--layout-left', w + 'px');
       });
     });
   }

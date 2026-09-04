@@ -130,11 +130,15 @@ App.register('ft', (host) => {
       // 相位
       let pp = mapCtx.plots.ph;
       if (!pp) { pp = new FX.Plot(host.querySelector('#ft-phase')); pp.onDraw = draw; mapCtx.plots.ph = pp; }
-      pp.setRange(0, fmax, -Math.PI, Math.PI);
+      let plo = Infinity, phi = -Infinity;
+      for (const v of sp.ph) if (isFinite(v)) { plo = Math.min(plo, v); phi = Math.max(phi, v); }
+      if (!isFinite(plo)) { plo = -Math.PI; phi = Math.PI; }
+      if (phi - plo < 0.4) { const mid = (plo + phi) / 2; plo = mid - 0.5; phi = mid + 0.5; }
+      pp.setRange(0, fmax, plo - 0.2, phi + 0.2);
       pp.clear(); pp.grid(null, null); pp.axis(true);
       pp.line(sp.f, sp.ph, { color: cv('--cv-line3'), width: 2 });
-      pp.label('+π', pp.margin.l + 6, pp.sy(Math.PI), { color: cv('--cv-label'), size: 10 });
-      pp.label('−π', pp.margin.l + 6, pp.sy(-Math.PI), { color: cv('--cv-label'), size: 10 });
+      if (pp.ymin <= Math.PI && pp.ymax >= Math.PI) pp.label('+π', pp.margin.l + 6, pp.sy(Math.PI), { color: cv('--cv-label'), size: 10 });
+      if (pp.ymin <= -Math.PI && pp.ymax >= -Math.PI) pp.label('−π', pp.margin.l + 6, pp.sy(-Math.PI), { color: cv('--cv-label'), size: 10 });
       pp.crosshair((f) => 'f=' + U.fmt(f, 3) + ' Hz', (p2, f) => '∠X=' + U.fmt(interpAt(sp.f, sp.ph, f), 3));
 
       // 能量 / 峰值统计
