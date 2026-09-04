@@ -128,7 +128,7 @@ App.register('fs', (host) => {
     const s = baseScale();
     const wx = view.cx + (px - circleCanvas.clientWidth / 2) / (s * view.k);
     const wy = view.cy + (circleCanvas.clientHeight / 2 - py) / (s * view.k);
-    const factor = e.deltaY > 0 ? 1 / 1.12 : 1.12;
+    const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
     view.k = U.clamp(view.k * factor, 0.3, 30);
     view.cx = wx - (px - circleCanvas.clientWidth / 2) / (s * view.k);
     view.cy = wy - (circleCanvas.clientHeight / 2 - py) / (s * view.k);
@@ -159,7 +159,7 @@ App.register('fs', (host) => {
       const s0 = baseScale();
       const wx = view.cx + (mx - circleCanvas.clientWidth / 2) / (s0 * view.k);
       const wy = view.cy + (circleCanvas.clientHeight / 2 - my) / (s0 * view.k);
-      const factor = pinchBase / d;
+      const factor = d / pinchBase;   // 张开 = 放大
       view.k = U.clamp(view.k * factor, 0.3, 30);
       view.cx = wx - (mx - circleCanvas.clientWidth / 2) / (s0 * view.k);
       view.cy = wy - (circleCanvas.clientHeight / 2 - my) / (s0 * view.k);

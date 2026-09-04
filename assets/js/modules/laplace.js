@@ -351,10 +351,10 @@ App.register('la', (host) => {
     }
   }
 
-  function drawTime(cv, data, ana, color) {
-    let p = plots[cv.id];
-    if (!p) { p = new FX.Plot(cv, { margin: { l: 50, r: 12, t: 10, b: 26 } }); plots[cv.id] = p; }
-    p.onDraw = () => drawTime(cv, data, ana, color);
+  function drawTime(cvEl, data, ana, color) {
+    let p = plots[cvEl.id];
+    if (!p) { p = new FX.Plot(cvEl, { margin: { l: 50, r: 12, t: 10, b: 26 } }); plots[cvEl.id] = p; }
+    p.onDraw = () => drawTime(cvEl, data, ana, color);
     let lo = Infinity, hi = -Infinity;
     for (const y of data.y) if (isFinite(y)) { lo = Math.min(lo, y); hi = Math.max(hi, y); }
     if (ana) for (const y of ana.y) if (isFinite(y)) { lo = Math.min(lo, y); hi = Math.max(hi, y); }

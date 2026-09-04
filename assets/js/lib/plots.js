@@ -88,7 +88,8 @@ const FX = (() => {
           const py = (e.clientY - r.top) * (cv.clientHeight / r.height);
           if (!this._inData(px, py)) return;
           e.preventDefault();
-          const factor = e.deltaY > 0 ? 1 / 1.12 : 1.12;
+          // 向上滚（deltaY<0）= 放大
+          const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
           this._zoomAt(px, py, factor);
         }, { passive: false });
       }
@@ -110,12 +111,12 @@ const FX = (() => {
       cv.addEventListener('pointermove', (e) => {
         const tracked = pointers.has(e.pointerId);
         if (tracked) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-        // 双指捏合缩放
+        // 双指捏合缩放：张开（d 变大）= 放大
         if (this._pinch && pointers.size >= 2) {
           const [a, b] = twoPts();
           const d = Math.max(20, Math.hypot(a.x - b.x, a.y - b.y));
           const [px, py] = toCanvas((a.x + b.x) / 2, (a.y + b.y) / 2);
-          this._zoomAt(px, py, this._pinch.d / d);
+          this._zoomAt(px, py, d / this._pinch.d);
           this._pinch.d = d;
           e.preventDefault();
           return;
@@ -177,8 +178,10 @@ const FX = (() => {
       }
       return U.mapRange(py, this.margin.t + this.drawableH, this.margin.t, this.ymin, this.ymax);
     }
+    // factor>1 = 放大（视野变小），factor<1 = 缩小
     _zoomAt(px, py, factor) {
       if (!this._inData(px, py)) return;
+      const k = 1 / factor;   // 跨度缩放系数与放大倍数互为倒数
       this.userAdjusted = true;
       const wx = this.xAt(px), wy = this.yAt(py);
       const clampSpan = (lo, hi) => {
@@ -189,20 +192,20 @@ const FX = (() => {
       };
       if (this.logX) {
         const lx = Math.log10(wx), a = Math.log10(Math.max(this.xmin, 1e-300)), b = Math.log10(Math.max(this.xmax, 1e-299));
-        this.xmin = Math.pow(10, lx - (lx - a) * factor);
-        this.xmax = Math.pow(10, lx + (b - lx) * factor);
+        this.xmin = Math.pow(10, lx - (lx - a) * k);
+        this.xmax = Math.pow(10, lx + (b - lx) * k);
       } else {
-        this.xmin = wx - (wx - this.xmin) * factor;
-        this.xmax = wx + (this.xmax - wx) * factor;
+        this.xmin = wx - (wx - this.xmin) * k;
+        this.xmax = wx + (this.xmax - wx) * k;
         [this.xmin, this.xmax] = clampSpan(this.xmin, this.xmax);
       }
       if (this.logY) {
         const ly = Math.log10(wy), a = Math.log10(Math.max(this.ymin, 1e-300)), b = Math.log10(Math.max(this.ymax, 1e-299));
-        this.ymin = Math.pow(10, ly - (ly - a) * factor);
-        this.ymax = Math.pow(10, ly + (b - ly) * factor);
+        this.ymin = Math.pow(10, ly - (ly - a) * k);
+        this.ymax = Math.pow(10, ly + (b - ly) * k);
       } else {
-        this.ymin = wy - (wy - this.ymin) * factor;
-        this.ymax = wy + (this.ymax - wy) * factor;
+        this.ymin = wy - (wy - this.ymin) * k;
+        this.ymax = wy + (this.ymax - wy) * k;
         [this.ymin, this.ymax] = clampSpan(this.ymin, this.ymax);
       }
       { const cb = this.onUpdate || this.onDraw; if (cb) cb(); }
@@ -257,8 +260,9 @@ const FX = (() => {
       if (ymin === ymax) { ymin -= 1; ymax += 1; }
       const px = (xmax - xmin) * this.padding, py = (ymax - ymin) * this.padding;
       this.xmin = xmin - px; this.xmax = xmax + px; this.ymin = ymin - py; this.ymax = ymax + py;
-      if (this.logY) this.ymin = Math.max(this.ymin, 1e-12);
-      if (this.logX) this.xmin = Math.max(this.xmin, 1e-12);
+      // 对数轴：padding 不得把下界推到 0 以下——最多缩到原下界的一半
+      if (this.logX) this.xmin = (xmin > 0) ? Math.max(this.xmin, xmin / 2) : 1e-12;
+      if (this.logY) this.ymin = (ymin > 0) ? Math.max(this.ymin, ymin / 2) : 1e-12;
       this._initial = [this.xmin, this.xmax, this.ymin, this.ymax];
     }
     sx(x) {
@@ -286,34 +290,100 @@ const FX = (() => {
     }
     clip() { this.ctx.save(); this.ctx.beginPath(); this.ctx.rect(this.margin.l, this.margin.t, this.drawableW, this.drawableH); this.ctx.clip(); }
     unclip() { this.ctx.restore(); }
+    /* 网格：未缩放时尊重调用方固定步长；缩放后（或未给步长）自适应，
+       目标约 6 条网格线；对数轴按跨度选刻度档位；标签按像素间距过滤防重合 */
     grid(xstep, ystep, { xtickFmt, ytickFmt } = {}) {
       const { ctx } = this;
       ctx.strokeStyle = cvCol('--cv-grid'); ctx.lineWidth = 1; ctx.fillStyle = cvCol('--cv-tick');
       ctx.font = '10px SFMono-Regular, monospace';
+
+      // --- X ---
       ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-      const xs = this.ticks(this.xmin, this.xmax, xstep);
-      for (const x of xs) {
+      const xs = this.axisTicks('x', xstep);
+      let lastPx = -Infinity;
+      for (let i = 0; i < xs.length; i++) {
+        const x = xs[i];
         const px = this.sx(x);
         if (px < this.margin.l - 1 || px > this.margin.l + this.drawableW + 1) continue;
+        const label = xtickFmt ? xtickFmt(x) : this.fmtTick(x, xs.step);
+        const w = ctx.measureText(label).width;
+        if (px - w / 2 < lastPx + 6) continue;   // 与上一条标签重叠 → 跳过标签（网格线仍画）
+        lastPx = px + w / 2;
+        ctx.fillText(label, px, this.margin.t + this.drawableH + 5);
         ctx.beginPath(); ctx.moveTo(px, this.margin.t); ctx.lineTo(px, this.margin.t + this.drawableH); ctx.stroke();
-        ctx.fillText(xtickFmt ? xtickFmt(x) : this.fmtTick(x), px, this.margin.t + this.drawableH + 5);
       }
+      // --- Y ---
       ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-      const ys = this.ticks(this.ymin, this.ymax, ystep);
-      for (const y of ys) {
+      const ys = this.axisTicks('y', ystep);
+      lastPx = -Infinity;
+      for (let i = 0; i < ys.length; i++) {
+        const y = ys[i];
         const py = this.sy(y);
         if (py < this.margin.t - 1 || py > this.margin.t + this.drawableH + 1) continue;
+        const label = ytickFmt ? ytickFmt(y) : this.fmtTick(y, ys.step);
+        const w = ctx.measureText(label).width;
+        if (py - 7 < lastPx + 4) continue;   // 行距不足 → 跳过
+        lastPx = py + 7;
+        ctx.fillText(label, this.margin.l - 6, py);
         ctx.beginPath(); ctx.moveTo(this.margin.l, py); ctx.lineTo(this.margin.l + this.drawableW, py); ctx.stroke();
-        ctx.fillText(ytickFmt ? ytickFmt(y) : this.fmtTick(y), this.margin.l - 6, py);
       }
     }
-    fmtTick(v) {
-      if (this.logX || this.logY) { if (v <= 0) return ''; return Math.abs(v) >= 10000 ? v.toExponential(0) : v.toPrecision(2); }
-      return U.fmt(v, 1);
+    // 轴刻度生成：返回数组并挂 .step（线性）供格式化
+    axisTicks(axis, fixedStep) {
+      const isLog = axis === 'x' ? this.logX : this.logY;
+      const lo = axis === 'x' ? this.xmin : this.ymin;
+      const hi = axis === 'x' ? this.xmax : this.ymax;
+      const pxLen = axis === 'x' ? this.drawableW : this.drawableH;
+      let out = [];
+      if (isLog) {
+        const a = Math.log10(Math.max(lo, 1e-300)), b = Math.log10(Math.max(hi, 1e-299));
+        const decades = b - a;
+        // 跨度大：只标整十；中：1,2,5；小：副刻度 2,5,10
+        let mults, stride = 1;
+        if (decades > 12) { mults = [1]; stride = Math.ceil(decades / 6); }  // 超大跨度：每 stride 个十进位取一条
+        else if (decades > 3.5) mults = [1];
+        else if (decades > 1.6) mults = [1, 2, 5];
+        else mults = [2, 5, 10];
+        for (let e = Math.floor(a); e <= Math.ceil(b); e++) {
+          if (mults.length === 1 && stride > 1 && (e - Math.floor(a)) % stride !== 0) continue;
+          for (const m of mults) {
+            const v = m * Math.pow(10, e);
+            if (v >= lo && v <= hi) out.push(v);
+          }
+        }
+        // 相邻像素过近时抽稀（保底 4 条）
+        const toPx = (v) => axis === 'x' ? this.sx(v) : this.sy(v);
+        while (out.length > 4) {
+          let minGap = Infinity;
+          for (let i = 1; i < out.length; i++) minGap = Math.min(minGap, Math.abs(toPx(out[i]) - toPx(out[i - 1])));
+          if (minGap >= 30) break;
+          out = out.filter((_, i) => i % 2 === 0 || i === out.length - 1);   // 隔一取一（保尾）
+        }
+        return out;
+      }
+      // 线性：用户未缩放且给了固定步长 → 用固定；否则自适应 ~6 格
+      let step = (!this.userAdjusted && fixedStep) ? fixedStep : niceStep((hi - lo) / 6);
+      let v = Math.ceil(lo / step) * step;
+      let guard = 0;
+      for (; v <= hi + step * 1e-9 && guard < 500; v += step, guard++) {
+        if (v >= lo - step * 1e-9 && v <= hi + step * 1e-9) out.push(+v.toPrecision(12));
+      }
+      out.step = step;
+      return out;
+    }
+    // 刻度数字：小数位随步长自适应（步长 0.001 → 3 位）
+    fmtTick(v, step) {
+      if (this.logX || this.logY) { if (v <= 0) return ''; return Math.abs(v) >= 10000 || Math.abs(v) < 0.01 ? v.toExponential(0) : +v.toPrecision(3) + ''; }
+      let d = 0;
+      if (step && step > 0) d = Math.max(0, Math.min(6, -Math.floor(Math.log10(step) + 1e-9)));
+      else d = 1;
+      const n = +v.toFixed(d);
+      return Math.abs(n) >= 1e6 || (Math.abs(n) > 0 && Math.abs(n) < 1e-4) ? n.toExponential(1) : n + '';
     }
     ticks(min, max, step) {
+      // 兼容旧接口：固定步长刻度
       if (this.logX || this.logY) {
-        const a = Math.ceil(Math.log10(min)), b = Math.floor(Math.log10(max));
+        const a = Math.ceil(Math.log10(Math.max(min, 1e-300))), b = Math.floor(Math.log10(Math.max(max, 1e-299)));
         const out = [];
         for (let e = a; e <= b; e++) {
           for (const m of [1, 2, 5]) { const v = m * Math.pow(10, e); if (v >= min && v <= max) out.push(v); }
@@ -403,8 +473,12 @@ const FX = (() => {
       ctx.moveTo(this.margin.l, py); ctx.lineTo(this.margin.l + this.drawableW, py);
       ctx.stroke();
       ctx.setLineDash([]);
-      const txt1 = fmtX ? fmtX(wx) : 'x=' + U.fmt(wx, 4);
-      const txt2 = fmtY ? fmtY(wy, wx) : 'y=' + U.fmt(wy, 4);
+      // 精度随当前视野跨度自适应：跨度的 ~0.1% 作为有效数字
+      const spanX = Math.abs(this.xmax - this.xmin), spanY = Math.abs(this.ymax - this.ymin);
+      const dX = U.clamp(Math.round(-Math.log10(spanX / 1000)), 0, 8);
+      const dY = U.clamp(Math.round(-Math.log10(spanY / 1000)), 0, 8);
+      const txt1 = fmtX ? fmtX(wx) : 'x=' + (+wx.toFixed(dX));
+      const txt2 = fmtY ? fmtY(wy, wx) : 'y=' + (+wy.toFixed(dY));
       ctx.font = '11px SFMono-Regular, monospace';
       const bw = Math.max(ctx.measureText(txt1).width, ctx.measureText(txt2).width) + 16;
       const bh = 38;
