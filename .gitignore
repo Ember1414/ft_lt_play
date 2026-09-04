@@ -1,0 +1,7 @@
+# 本地工具配置
+.claude/
+
+# 依赖与日志
+node_modules/
+*.log
+.wrangler/

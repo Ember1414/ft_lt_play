@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>傅立叶 &amp; 拉普拉斯 · 交互可视学习</title>
+  <meta name="description" content="傅立叶级数、傅立叶变换、拉普拉斯变换、系统分析的交互式可视化学习工具" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23141a26'/%3E%3Ccircle cx='24' cy='32' r='16' fill='none' stroke='%235b9bff' stroke-width='3'/%3E%3Ccircle cx='24' cy='32' r='8' fill='none' stroke='%23b48cff' stroke-width='2.5'/%3E%3Cpath d='M40 32 q4 -10 8 0 t8 0' fill='none' stroke='%2337d0a0' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/inter@5.0.19/index.css" />
+  <link rel="stylesheet" href="assets/css/style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- 侧边导航 -->
+    <aside id="sidebar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">∫</div>
+        <div class="brand-name">傅·拉可视化</div>
+      </div>
+      <nav id="nav" aria-label="主导航">
+        <button class="nav-item" data-module="fs">
+          <span class="nav-icon">◍</span>
+          <span class="nav-label">傅立叶级数</span>
+        </button>
+        <button class="nav-item" data-module="ft">
+          <span class="nav-icon">⇄</span>
+          <span class="nav-label">傅立叶变换</span>
+        </button>
+        <button class="nav-item" data-module="la">
+          <span class="nav-icon">σ+iω</span>
+          <span class="nav-label">拉普拉斯变换</span>
+        </button>
+        <button class="nav-item" data-module="sys">
+          <span class="nav-icon">➤</span>
+          <span class="nav-label">系统分析</span>
+        </button>
+        <button class="nav-item" data-module="derive">
+          <span class="nav-icon">∑</span>
+          <span class="nav-label">公式推导</span>
+        </button>
+        <button class="nav-item" data-module="explore">
+          <span class="nav-icon">✎</span>
+          <span class="nav-label">交互求解</span>
+        </button>
+      </nav>
+      <div class="sidebar-foot">
+        <a href="#" id="about-trigger">关于本项目</a>
+        <span class="version">v1.0 · 纯前端</span>
+      </div>
+    </aside>
+
+    <!-- 主体 -->
+    <main id="main">
+      <header id="topbar">
+        <div class="module-title" id="module-title"></div>
+        <div class="topbar-actions">
+          <button class="icon-btn" id="btn-play" title="播放动画" disabled>▶</button>
+          <button class="icon-btn" id="btn-reset" title="重置" disabled>↺</button>
+          <button class="icon-btn" id="btn-frame" title="逐帧">⏯</button>
+        </div>
+      </header>
+      <section id="content" class="content">
+        <div id="placeholder" class="placeholder">
+          <div class="ph-inner">
+            <div class="ph-mark">∫</div>
+            <h2>傅立叶 &amp; 拉普拉斯 可视化学习工具</h2>
+            <p>从左侧选择一个模块开始探索，动鼠标、拖滑块、看反馈。</p>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- 关于弹窗 -->
+  <div id="about-mask" class="mask hidden">
+    <div class="dialog">
+      <h3>关于本项目</h3>
+      <p>一个纯前端的信号与系统交互式可视化学习工具，覆盖：</p>
+      <ul>
+        <li>傅立叶级数 · 画圈套画圈动画 / 谐波分解</li>
+        <li>傅立叶变换 · 时域↔频域联动 / 卷积定理</li>
+        <li>拉普拉斯变换 · s 平面 / 极点-零点与稳定性</li>
+        <li>系统分析 · 传递函数 → 波特图 / 阶跃响应</li>
+        <li>公式推导 · 逐步演算 / 性质表</li>
+        <li>交互求解 · 输入表达式 / 手绘 / 语音</li>
+      </ul>
+      <p class="muted">无服务端、无上传，全部在浏览器本地计算。部署于 Cloudflare Pages。</p>
+      <button id="about-close" class="btn primary">知道了</button>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjs@12.4.3/lib/browser/math.js"></script>
+  <script src="assets/js/lib/util.js"></script>
+  <script src="assets/js/lib/mathdsp.js"></script>
+  <script src="assets/js/lib/plots.js"></script>
+  <script src="assets/js/lib/fx.js"></script>
+  <script src="assets/js/app.js"></script>
+  <script src="assets/js/modules/fourier-series.js"></script>
+  <script src="assets/js/modules/fourier-transform.js"></script>
+  <script src="assets/js/modules/laplace.js"></script>
+  <script src="assets/js/modules/system.js"></script>
+  <script src="assets/js/modules/derive.js"></script>
+  <script src="assets/js/modules/explore.js"></script>
+</body>
+</html>
