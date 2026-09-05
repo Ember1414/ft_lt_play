@@ -1,7 +1,7 @@
 /* ============================================================
  * fourier-series.js — 傅立叶级数
  *   1) 画圈套画圈：任意闭合路径分解为一圈圈旋转的“圆套圆”
- *      支持滚轮缩放 / 拖拽平移 / 双击复位
+ *      支持滚轮缩放 / 拖拽平移 / 双击复位；形状可选预设或 ✏️ 手绘自定义
  *   2) 谐波叠加：方波逐步由正弦合成（Gibbs 现象）
  * ============================================================ */
 App.register('fs', (host) => {
@@ -11,8 +11,8 @@ App.register('fs', (host) => {
   const view = { k: 1, cx: 0, cy: 0 };   // 主画布视图：缩放系数 + 世界坐标中心
   let traceJustCleared = false;
 
-  const shapes = ['square', 'triangle', 'heart', 'star', 'butterfly', 'gear', 'spiral'];
-  const shapeNames = { square: '方形路径', triangle: '三角', heart: '爱心', star: '五角星', butterfly: '蝴蝶', gear: '齿轮', spiral: '螺旋' };
+  const shapes = ['square', 'triangle', 'heart', 'star', 'butterfly', 'gear', 'spiral', 'custom'];
+  const shapeNames = { square: '方形路径', triangle: '三角', heart: '爱心', star: '五角星', butterfly: '蝴蝶', gear: '齿轮', spiral: '螺旋', custom: '✏️ 手绘' };
 
   // ---------- DOM ----------
   host.innerHTML = `
@@ -21,6 +21,13 @@ App.register('fs', (host) => {
         <h3>配置</h3>
         <div class="ctrl"><label>笔画形状</label>
           <div class="row" id="fs-shapes"></div>
+        </div>
+        <div class="ctrl" id="fs-custom-wrap" style="display:none">
+          <div class="canvas-wrap" style="margin-bottom:8px"><canvas class="draw-canvas" id="fs-drawcv" style="height:170px"></canvas></div>
+          <div class="row" style="justify-content:space-between">
+            <button class="btn" id="fs-drclear" style="padding:4px 10px;font-size:12px">🗑 清空重画</button>
+            <span class="hint" style="margin:0">画一条闭合曲线，松手即生成（首尾自动相连）</span>
+          </div>
         </div>
         <div class="ctrl"><label>圈数上限 <span class="val" id="fs-terms-v"></span></label>
           <input type="range" id="fs-terms" min="1" max="120" value="40">
@@ -72,15 +79,83 @@ App.register('fs', (host) => {
 
   // 形状按钮
   const shapeRow = $('#fs-shapes');
+  const customWrap = $('#fs-custom-wrap');
   shapes.forEach((k) => {
     const c = U.el('button', { class: 'chip' + (k === state.shape ? ' active' : ''), 'data-shape': k }, shapeNames[k]);
     c.addEventListener('click', () => {
       shapes.forEach((x) => { const b = shapeRow.querySelector(`[data-shape="${x}"]`); b.className = 'chip'; });
       c.className = 'chip active';
       state.shape = k;
+      customWrap.style.display = k === 'custom' ? '' : 'none';
+      if (k === 'custom') fitDraw();   // display:none 时无法测宽，展开后重新适配
       recompute();
     });
     shapeRow.append(c);
+  });
+
+  /* ---------- ✏️ 手绘自定义形状：画板 → 弧长重采样 → DFT ---------- */
+  const drawCv = $('#fs-drawcv');
+  const dctx = drawCv.getContext('2d');
+  let customPts = [], customShape = null, drawingStroke = false, strokeDone = false;
+
+  function fitDraw() {
+    const dpr = window.devicePixelRatio || 1;
+    const w = drawCv.clientWidth || drawCv.parentElement.clientWidth || 300;
+    const h = drawCv.clientHeight || 170;
+    drawCv.width = Math.round(w * dpr);
+    drawCv.height = Math.round(h * dpr);
+    dctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    repaintDraw();
+  }
+  function repaintDraw() {
+    const dpr = window.devicePixelRatio || 1;
+    const w = drawCv.width / dpr, h = drawCv.height / dpr;
+    dctx.fillStyle = cv('--cv-bg');
+    dctx.fillRect(0, 0, w, h);
+    if (!customPts.length) return;
+    dctx.strokeStyle = cv('--cv-text');
+    dctx.lineWidth = 2; dctx.lineJoin = 'round'; dctx.lineCap = 'round';
+    dctx.beginPath();
+    for (let i = 0; i < customPts.length; i++) { const p = customPts[i]; i ? dctx.lineTo(p.x, p.y) : dctx.moveTo(p.x, p.y); }
+    if (strokeDone) dctx.closePath();
+    dctx.stroke();
+  }
+  drawCv.addEventListener('pointerdown', (e) => {
+    drawingStroke = true; strokeDone = false; customPts = [];
+    try { drawCv.setPointerCapture(e.pointerId); } catch (err) { }
+    e.preventDefault();
+    repaintDraw();
+  });
+  drawCv.addEventListener('pointermove', (e) => {
+    if (!drawingStroke) return;
+    const r = drawCv.getBoundingClientRect();
+    const x = e.clientX - r.left, y = e.clientY - r.top;
+    const last = customPts[customPts.length - 1];
+    if (last && Math.hypot(x - last.x, y - last.y) < 2) return;   // 抽稀
+    customPts.push({ x, y });
+    dctx.strokeStyle = cv('--cv-text');
+    dctx.lineWidth = 2; dctx.lineJoin = 'round'; dctx.lineCap = 'round';
+    dctx.beginPath();
+    if (last) { dctx.moveTo(last.x, last.y); dctx.lineTo(x, y); } else { dctx.moveTo(x, y); dctx.lineTo(x + 0.1, y); }
+    dctx.stroke();
+  });
+  function endStroke() {
+    if (!drawingStroke) return;
+    drawingStroke = false; strokeDone = true;
+    repaintDraw();
+    let L = 0;
+    for (let i = 1; i < customPts.length; i++) L += Math.hypot(customPts[i].x - customPts[i - 1].x, customPts[i].y - customPts[i - 1].y);
+    if (L >= 40) {   // 过短的误触不生成
+      customShape = FX_LIB.customShapePoints(customPts, 512);
+      if (state.shape === 'custom') recompute();
+    }
+  }
+  drawCv.addEventListener('pointerup', endStroke);
+  drawCv.addEventListener('pointercancel', endStroke);
+  $('#fs-drclear').addEventListener('click', () => {
+    customPts = []; customShape = null; strokeDone = false;
+    repaintDraw();
+    if (state.shape === 'custom') recompute();
   });
 
   const termsEl = $('#fs-terms'), termsV = $('#fs-terms-v');
@@ -98,7 +173,9 @@ App.register('fs', (host) => {
 
   let shapeCache = [];
   function recompute() {
-    const pts = FX_LIB.shapePoints(state.shape, 512);
+    const pts = state.shape === 'custom'
+      ? (customShape || [])
+      : FX_LIB.shapePoints(state.shape, 512);
     shapeCache = pts;
     phasors = DSP.dftPhasors(pts.filter((p) => p && isFinite(p.re) && isFinite(p.im)));
     traceTail = [];
@@ -247,7 +324,8 @@ App.register('fs', (host) => {
     // 文字
     ctxC.fillStyle = cv('--cv-tick'); ctxC.font = '11px SFMono-Regular, monospace';
     ctxC.textAlign = 'left';
-    ctxC.fillText(`圈数 = ${Math.min(state.terms, phasors.length)} · 最大幅值 ≈ ${U.fmt(phasors[0] ? phasors[0].amp : 0, 3)} · 缩放 ${view.k.toFixed(1)}×`, 12, 20);
+    const needHint = state.shape === 'custom' && !shapeCache.length ? ' · 请先在左侧 ✏️ 手绘画板画一条闭合曲线' : '';
+    ctxC.fillText(`圈数 = ${Math.min(state.terms, phasors.length)} · 最大幅值 ≈ ${U.fmt(phasors[0] ? phasors[0].amp : 0, 3)} · 缩放 ${view.k.toFixed(1)}×${needHint}`, 12, 20);
   }
 
   /* ---------- 谐波叠加图（FX.Plot，支持缩放/读数） ---------- */
@@ -351,9 +429,9 @@ App.register('fs', (host) => {
 
   function togglePlay() { state.playing = !state.playing; return state.playing; }
   function reset() { state.t = 0; traceTail = []; view.k = 1; view.cx = 0; view.cy = 0; }
-  const onResize = () => { draw(); drawHarmonics(); drawSpec(); };
+  const onResize = () => { fitDraw(); draw(); drawHarmonics(); drawSpec(); };
   window.addEventListener('resize', onResize);
 
-  return { title: '傅立叶级数', api: { togglePlay, reset, dispose, onTheme: () => { draw(); drawHarmonics(); drawSpec(); } } };
+  return { title: '傅立叶级数', api: { togglePlay, reset, dispose, onTheme: () => { repaintDraw(); draw(); drawHarmonics(); drawSpec(); } } };
   function dispose() { loop.stop(); window.removeEventListener('resize', onResize); }
 });

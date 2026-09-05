@@ -23,6 +23,18 @@ const FX_LIB = (() => {
     }
     return out;
   }
+  /* 手绘点列（任意像素坐标 {x,y}）→ 闭合、弧长均匀重采样、居中归一化的复数点列
+     与 shapePoints 同一规范（外接尺寸归一到 [-1,1]），可直接喂给 DFT */
+  function customShapePoints(pts, N = 512) {
+    if (!pts || pts.length < 3) return [];
+    const P = resamplePath(pts.map((p) => ({ re: p.x, im: -p.y })), N, true);
+    if (!P.length) return P;
+    let x0 = P[0].re, x1 = P[0].re, y0 = P[0].im, y1 = P[0].im;
+    for (const p of P) { x0 = Math.min(x0, p.re); x1 = Math.max(x1, p.re); y0 = Math.min(y0, p.im); y1 = Math.max(y1, p.im); }
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, s = Math.max(x1 - x0, y1 - y0) || 1;
+    return P.map((p) => ({ re: ((p.re - cx) / s) * 2, im: ((p.im - cy) / s) * 2 }));
+  }
+
   function verts(list) { return list.map(([x, y]) => ({ re: x, im: y })); }
   function shapePoints(kind, N = 512) {
     let P = [];
@@ -264,7 +276,7 @@ const FX_LIB = (() => {
     } catch (e) { return null; }
   }
 
-  return { shapePoints, ftSignals, laplacePresets, parseTF, parseTFFields, tfToFields, parsePoly, parseTimeExpr };
+  return { shapePoints, customShapePoints, ftSignals, laplacePresets, parseTF, parseTFFields, tfToFields, parsePoly, parseTimeExpr };
 })();
 
 window.FX_LIB = FX_LIB;
