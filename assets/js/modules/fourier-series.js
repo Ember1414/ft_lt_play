@@ -19,6 +19,10 @@ App.register('fs', (host) => {
     <div class="module layout">
       <div class="pane">
         <h3>配置</h3>
+        <div class="row" style="justify-content:flex-end;margin:-4px 0 10px">
+          <button class="btn" id="fs-share" title="复制分享链接（形状与参数）" style="padding:5px 10px;font-size:12px">🔗 分享</button>
+          <button class="btn" id="fs-png" title="导出当前画面为 PNG" style="padding:5px 10px;font-size:12px">📷 PNG</button>
+        </div>
         <div class="ctrl"><label>笔画形状</label>
           <div class="row" id="fs-shapes"></div>
         </div>
@@ -38,11 +42,14 @@ App.register('fs', (host) => {
         <div class="ctrl"><label class="row" style="display:flex;align-items:center;gap:8px">
           <input type="checkbox" id="fs-circles-toggle" checked> 显示旋转圆与半径线
         </label></div>
+        <div class="ctrl row" style="gap:8px">
+          <button class="btn" id="fs-play">⏸ 暂停</button>
+          <button class="btn" id="fs-frame" title="暂停并前进一步">⏯ 逐帧</button>
+          <button class="btn" id="fs-reset">↺ 重置</button>
+        </div>
         <div class="hint">每条路径经 <b>DFT</b> 分解为若干相量（频域），每个相量贡献一圈旋转的圆：
           <div class="formula-center" id="fs-formula">z(t)</div>
         </div>
-        <div class="hint">🖱️ 滚轮缩放 · 拖拽平移 · 双击复位。轨迹画满一个完整周期（绿色闭环）后会自动重新绘制。</div>
-        <div class="statbar" id="fs-stats"></div>
       </div>
       <div class="pane">
         <h3>画圈套画圈 · 傅立叶绘制</h3>
@@ -59,14 +66,24 @@ App.register('fs', (host) => {
       </details>
       <details class="pane full plot-fold">
         <summary>谐波叠加 · 方波逐步合成（Gibbs 现象）</summary>
-        <div class="canvas-wrap" style="height:240px"><canvas class="plot" id="fs-harmonics"></canvas></div>
-        <div class="legend">
-          <span><span class="sw" style="background:#ffb454"></span>方波目标</span>
-          <span><span class="sw" style="background:#5b9bff"></span>部分和 S<sub>n</sub></span>
-          <span><span class="sw" style="background:#4c5874"></span>叠加中的各次谐波</span>
+        <div class="row" id="fs-harm-view" style="margin-bottom:8px">
+          <button class="chip active" data-v="2d">2D 平面</button>
+          <button class="chip" data-v="3d">3D 瀑布（可旋转/缩放）</button>
+        </div>
+        <div id="fs-harm-2d">
+          <div class="canvas-wrap" style="height:240px"><canvas class="plot" id="fs-harmonics"></canvas></div>
+          <div class="legend">
+            <span><span class="sw" style="background:#ffb454"></span>方波目标</span>
+            <span><span class="sw" style="background:#5b9bff"></span>部分和 S<sub>n</sub></span>
+            <span><span class="sw" style="background:#4c5874"></span>叠加中的各次谐波</span>
+          </div>
+        </div>
+        <div id="fs-harm-3d" class="hidden">
+          <div class="canvas-wrap" style="height:380px"><canvas id="fs-wf3d" class="wf3d"></canvas></div>
         </div>
         <div class="hint">方波 = 奇次正弦之和 <b>S<sub>n</sub>(t) = (4/π)·Σ<sub>k=1..n</sub> sin((2k-1)·2πt)/(2k-1)</b>。
-          在跳变处始终存在约 9% 的过冲，这是不可消除的 Gibbs 现象，不是动画误差。此图同样支持滚轮缩放与悬停读数。</div>
+          在跳变处始终存在约 9% 的过冲，这是不可消除的 Gibbs 现象，不是动画误差。</div>
+        <div class="statbar" id="fs-stats"></div>
       </details>
     </div>`;
 
@@ -89,6 +106,7 @@ App.register('fs', (host) => {
       customWrap.style.display = k === 'custom' ? '' : 'none';
       if (k === 'custom') fitDraw();   // display:none 时无法测宽，展开后重新适配
       recompute();
+      fsSyncHash();
     });
     shapeRow.append(c);
   });
@@ -159,12 +177,67 @@ App.register('fs', (host) => {
   });
 
   const termsEl = $('#fs-terms'), termsV = $('#fs-terms-v');
-  termsEl.addEventListener('input', () => { state.terms = +termsEl.value; termsV.textContent = state.terms; drawHarmonics(); });
+  termsEl.addEventListener('input', () => { state.terms = +termsEl.value; termsV.textContent = state.terms; drawHarmonics(); if (wf.canvas && !$('#fs-harm-3d').classList.contains('hidden')) wfDraw(); fsSyncHash(); });
   const speedEl = $('#fs-speed'), speedV = $('#fs-speed-v');
-  speedEl.addEventListener('input', () => { state.speed = +speedEl.value; speedV.textContent = state.speed.toFixed(1) + '×'; });
-  $('#fs-circles-toggle').addEventListener('change', (e) => state.showCircles = e.target.checked);
+  speedEl.addEventListener('input', () => { state.speed = +speedEl.value; speedV.textContent = state.speed.toFixed(1) + '×'; fsSyncHash(); });
+  $('#fs-circles-toggle').addEventListener('change', (e) => { state.showCircles = e.target.checked; fsSyncHash(); });
+  // 本地播放控制（与键盘空格快捷键共用同一套 api，状态经 flt-play 事件同步）
+  const fsPlayBtn = $('#fs-play');
+  const onPlayEvt = (e) => { fsPlayBtn.textContent = e.detail ? '⏸ 暂停' : '▶ 播放'; };
+  window.addEventListener('flt-play', onPlayEvt);
+  fsPlayBtn.addEventListener('click', () => { const r = togglePlay(); fsPlayBtn.textContent = r ? '⏸ 暂停' : '▶ 播放'; });
+  $('#fs-frame').addEventListener('click', () => { frame(); fsPlayBtn.textContent = '▶ 播放'; });
+  $('#fs-reset').addEventListener('click', () => { reset(); });
   termsV.textContent = state.terms;
   speedV.textContent = '1.0×';
+
+  /* ---------- 分享链接 / PNG 导出 ---------- */
+  let fsHashTimer = null;
+  function fsWriteHash() {
+    try {
+      const p = new URLSearchParams();
+      p.set('fs', state.shape === 'custom' ? 'square' : state.shape);
+      p.set('n', state.terms); p.set('v', state.speed); p.set('c', state.showCircles ? '1' : '0');
+      history.replaceState(null, '', '#' + p.toString());
+    } catch (e) { }
+  }
+  function fsSyncHash() { clearTimeout(fsHashTimer); fsHashTimer = setTimeout(fsWriteHash, 300); }
+  function fsApplyStateToControls() {
+    termsEl.value = state.terms; termsV.textContent = state.terms;
+    speedEl.value = state.speed; speedV.textContent = state.speed.toFixed(1) + '×';
+    $('#fs-circles-toggle').checked = state.showCircles;
+    if (state.shape !== 'custom') {
+      const b = shapeRow.querySelector('[data-shape="' + state.shape + '"]');
+      if (b) { shapeRow.querySelectorAll('.chip').forEach((x) => x.classList.remove('active')); b.classList.add('active'); }
+    }
+  }
+  // URL 分享参数还原（#fs=形状&n=圈数&v=速度&c=显示圆）
+  {
+    const fp = new URLSearchParams(location.hash.replace(/^#/, ''));
+    if (fp.get('fs') != null) {
+      const s = fp.get('fs');
+      if (shapes.includes(s) && s !== 'custom') state.shape = s;
+      const n = +fp.get('n'); if (n >= 1 && n <= 120) state.terms = Math.round(n);
+      const v = +fp.get('v'); if (v >= 0.2 && v <= 3) state.speed = v;
+      if (fp.get('c') != null) state.showCircles = fp.get('c') === '1';
+      customWrap.style.display = 'none';
+      fsApplyStateToControls();
+    }
+  }
+  $('#fs-share').addEventListener('click', () => {
+    fsWriteHash();
+    const url = location.origin + location.pathname + location.hash;
+    const btn = $('#fs-share');
+    const done = () => { btn.textContent = '✓ 已复制'; setTimeout(() => { btn.textContent = '🔗 分享'; }, 1500); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(done, done);
+    else done();
+  });
+  $('#fs-png').addEventListener('click', () => {
+    const a = document.createElement('a');
+    a.download = 'fourier-series-' + state.shape + '.png';
+    a.href = circleCanvas.toDataURL('image/png');
+    a.click();
+  });
 
   function fit(sizeEl) {
     sizeEl.width = (sizeEl.clientWidth || sizeEl.parentElement.clientWidth || 400) * (window.devicePixelRatio || 1);
@@ -411,6 +484,176 @@ App.register('fs', (host) => {
     return Math.sqrt(s / M);
   }
 
+  /* ---------- 3D 瀑布视图：部分和 S_k(t) 沿谐波次数 k 展开成曲面族 ----------
+     自写投影引擎：yaw（绕竖直轴）+ pitch（绕水平轴）+ 透视缩放。
+     手势约定：拖动只旋转，滚轮/捏合只缩放，无平移 —— 与 2D 图的坐标平移手势完全隔离。 */
+  const wf = {
+    yaw: -0.62, pitch: 0.42, zoom: 1, canvas: null, raf: 0, needsDraw: false,
+    pointers: new Map(), pinchBase: 0
+  };
+  function wfReset() { wf.yaw = -0.62; wf.pitch = 0.42; wf.zoom = 1; wfDraw(); }
+  function wfResize() {
+    const cvEl = wf.canvas; if (!cvEl) return;
+    const dpr = window.devicePixelRatio || 1;
+    const w = cvEl.clientWidth || 600, h = cvEl.clientHeight || 380;
+    cvEl.width = Math.round(w * dpr); cvEl.height = Math.round(h * dpr);
+    wfDraw();
+  }
+  function wfProject(x, y, z, W, H) {
+    // 世界坐标：t∈[0,2]→x∈[-1.25,1.25]，幅值→y∈[-1.1,1.1]，k→z∈[0,1.7]
+    const cy = Math.cos(wf.yaw), sy = Math.sin(wf.yaw);
+    let X = x * cy - z * sy, Z = x * sy + z * cy;
+    const cp = Math.cos(wf.pitch), sp = Math.sin(wf.pitch);
+    let Y = y * cp - Z * sp; Z = y * sp + Z * cp;
+    const persp = 4.2;
+    const s = (persp / (persp - Z)) * wf.zoom * Math.min(W, H) * 0.30;
+    return { X: W / 2 + X * s, Y: H / 2 - Y * s, depth: Z };
+  }
+  function wfDraw() {
+    const cvEl = wf.canvas; if (!cvEl || !cvEl.clientWidth) return;
+    const g = cvEl.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const W = cvEl.clientWidth, H = cvEl.clientHeight;
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.fillStyle = cv('--cv-bg'); g.fillRect(0, 0, W, H);
+    const n = Math.min(state.terms, 40);
+    const NT = 160;
+    const Z0 = 0, Z1 = 1.7;
+    // 坐标框架：三条轴
+    const axes = [
+      [[-1.25, 0, Z0], [1.25, 0, Z0]],
+      [[-1.25, 0, Z0], [-1.25, 1.15, Z0]],
+      [[-1.25, 0, Z0], [-1.25, 0, Z1]]
+    ];
+    g.lineWidth = 1.2;
+    for (const [a, b] of axes) {
+      const pa = wfProject(a[0], a[1], a[2], W, H), pb = wfProject(b[0], b[1], b[2], W, H);
+      g.strokeStyle = cv('--cv-axis-hi');
+      g.beginPath(); g.moveTo(pa.X, pa.Y); g.lineTo(pb.X, pb.Y); g.stroke();
+    }
+    // t 轴刻度
+    g.fillStyle = cv('--cv-tick'); g.font = '10px SFMono-Regular, monospace'; g.textAlign = 'center';
+    for (const tv of [0, 0.5, 1, 1.5, 2]) {
+      const p = wfProject(-1.25 + tv / 2 * 2.5, 0, Z0, W, H);
+      g.fillText(U.fmt(tv, 1), p.X, p.Y + 12);
+    }
+    g.save(); g.translate(14, H / 2); g.rotate(-Math.PI / 2); g.textAlign = 'center';
+    g.fillText('幅值 Sₖ(t)', 0, 0); g.restore();
+    g.textAlign = 'left';
+    g.fillText('t →', wfProject(1.25, 0, Z0, W, H).X - 24, wfProject(1.25, 0, Z0, W, H).Y + 12);
+    g.fillText('k →', wfProject(-1.25, 0, Z1, W, H).X, wfProject(-1.25, 0, Z1, W, H).Y - 6);
+    // 底板网格（z=Z0 平面）
+    g.strokeStyle = cv('--cv-grid'); g.lineWidth = 1;
+    for (let i = 0; i <= 8; i++) {
+      const t = -1.25 + (i / 8) * 2.5;
+      const a = wfProject(t, 0, Z0, W, H), b = wfProject(t, 0, Z1, W, H);
+      g.beginPath(); g.moveTo(a.X, a.Y); g.lineTo(b.X, b.Y); g.stroke();
+    }
+    for (let j = 0; j <= 4; j++) {
+      const z = Z0 + (j / 4) * (Z1 - Z0);
+      const a = wfProject(-1.25, 0, z, W, H), b = wfProject(1.25, 0, z, W, H);
+      g.beginPath(); g.moveTo(a.X, a.Y); g.lineTo(b.X, b.Y); g.stroke();
+    }
+    // 曲线：各次谐波分量（幅度 |4/π(2k−1)|），从最远（k 大）画到最近
+    const K = Math.min(Math.max(n, 1), 20);
+    for (let ki = K; ki >= 1; ki--) {
+      const k = ki;                      // 第 k 个奇次谐波 2k−1
+      const z = Z0 + ((K - ki) / Math.max(1, K - 1)) * (Z1 - Z0);
+      const amp = 4 / (Math.PI * (2 * k - 1));
+      const hue = 200 + (ki / Math.max(1, K)) * 130;
+      g.strokeStyle = K > 1 ? `hsla(${hue}, 75%, 64%, 0.95)` : cv('--cv-line1');
+      g.lineWidth = 1.5;
+      g.beginPath();
+      for (let i = 0; i <= NT; i++) {
+        const t = (i / NT) * 2;
+        const yv = amp * Math.sin(2 * Math.PI * (2 * k - 1) * t);
+        const p = wfProject(-1.25 + t, U.clamp(yv, -1.4, 1.4), z, W, H);
+        i ? g.lineTo(p.X, p.Y) : g.moveTo(p.X, p.Y);
+      }
+      g.stroke();
+      // 左端 k 标注
+      const lp = wfProject(-1.25, 0, z, W, H);
+      g.fillStyle = cv('--cv-tick'); g.font = '9px SFMono-Regular, monospace'; g.textAlign = 'right';
+      g.fillText('k=' + (2 * k - 1), lp.X - 4, lp.Y + 3);
+    }
+    // 部分和（当前圈数）高亮置于最前
+    g.strokeStyle = cv('--cv-warn'); g.lineWidth = 2.2;
+    g.beginPath();
+    for (let i = 0; i <= NT; i++) {
+      const t = (i / NT) * 2;
+      const p = wfProject(-1.25 + t, U.clamp(squareSum(t, n), -1.5, 1.5), Z0 - 0.3, W, H);
+      i ? g.lineTo(p.X, p.Y) : g.moveTo(p.X, p.Y);
+    }
+    g.stroke();
+    g.fillStyle = cv('--cv-label'); g.font = '11px SFMono-Regular, monospace'; g.textAlign = 'left';
+    g.fillText(`各次谐波分量瀑布（k=1…${2 * K - 1}）· 橙线 = 部分和 S(n=${n}) · 虚线 = 方波`, 12, 18);
+    // 目标方波（最近端，醒目）
+    g.strokeStyle = cv('--cv-warn'); g.lineWidth = 2; g.setLineDash([6, 4]);
+    g.beginPath();
+    for (let i = 0; i <= 300; i++) {
+      const t = (i / 300) * 2;
+      const p = wfProject(-1.25 + t, U.clamp(squarePartial(t), -1.6, 1.6), Z0 - 0.28, W, H);
+      i ? g.lineTo(p.X, p.Y) : g.moveTo(p.X, p.Y);
+    }
+    g.stroke(); g.setLineDash([]);
+    g.fillStyle = cv('--cv-label'); g.font = '11px SFMono-Regular, monospace';
+    g.fillText(`部分和瀑布：k = 1 … ${n}（圈数滑块同步）`, 12, 18);
+  }
+  function wfBind() {
+    const cvEl = wf.canvas;
+    cvEl.addEventListener('pointerdown', (e) => {
+      wf.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (wf.pointers.size === 2) {
+        const [a, b] = [...wf.pointers.values()];
+        wf.pinchBase = Math.max(20, Math.hypot(a.x - b.x, a.y - b.y));
+      }
+      try { cvEl.setPointerCapture(e.pointerId); } catch (err) { }
+      e.preventDefault();
+    });
+    cvEl.addEventListener('pointermove', (e) => {
+      if (!wf.pointers.has(e.pointerId)) return;
+      const prev = wf.pointers.get(e.pointerId);
+      wf.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (wf.pointers.size >= 2 && wf.pinchBase) {
+        const [a, b] = [...wf.pointers.values()];
+        const d = Math.max(20, Math.hypot(a.x - b.x, a.y - b.y));
+        wf.zoom = U.clamp(wf.zoom * (d / wf.pinchBase), 0.4, 4);
+        wf.pinchBase = d;
+      } else if (wf.pointers.size === 1) {
+        // 拖动仅旋转视角（yaw/pitch），无平移 → 不会误触坐标移动
+        wf.yaw += (e.clientX - prev.x) * 0.008;
+        wf.pitch = U.clamp(wf.pitch + (e.clientY - prev.y) * 0.006, -1.25, 1.25);
+      }
+      wfDraw();
+    });
+    const endP = (e) => { wf.pointers.delete(e.pointerId); if (wf.pointers.size < 2) wf.pinchBase = 0; };
+    cvEl.addEventListener('pointerup', endP);
+    cvEl.addEventListener('pointercancel', endP);
+    cvEl.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      wf.zoom = U.clamp(wf.zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1), 0.4, 4);
+      wfDraw();
+    }, { passive: false });
+    cvEl.addEventListener('dblclick', wfReset);
+  }
+  function wfInit() {
+    wf.canvas = $('#fs-wf3d');
+    if (!wf.canvas || wf.canvas.dataset.bound) return;
+    wf.canvas.dataset.bound = '1';
+    wfBind();
+    wfResize();
+  }
+  $('#fs-harm-view').addEventListener('click', (e) => {
+    const b = e.target.closest('.chip'); if (!b) return;
+    $('#fs-harm-view').querySelectorAll('.chip').forEach((x) => x.classList.toggle('active', x === b));
+    const v3d = b.dataset.v === '3d';
+    if (v3d) b.closest('details').open = true;   // 自动展开，避免画布 0 高度
+    $('#fs-harm-2d').classList.toggle('hidden', v3d);
+    $('#fs-harm-3d').classList.toggle('hidden', !v3d);
+    if (v3d) { wfInit(); wfResize(); }
+    else drawHarmonics();
+  });
+
   // 动画：默认一圈约 24 秒（0.0007/帧 @60fps）
   const loop = U.loop(() => {
     if (state.playing) {
@@ -428,10 +671,25 @@ App.register('fs', (host) => {
   loop.start();
 
   function togglePlay() { state.playing = !state.playing; return state.playing; }
+  // 逐帧：暂停并前进一小步（回绕时下一帧重画完整闭环）
+  function frame() {
+    state.playing = false;
+    const prev = state.t;
+    state.t = (state.t + 0.002) % 1;
+    if (state.t < prev) traceJustCleared = true;
+    draw();
+    return true;
+  }
   function reset() { state.t = 0; traceTail = []; view.k = 1; view.cx = 0; view.cy = 0; }
-  const onResize = () => { fitDraw(); draw(); drawHarmonics(); drawSpec(); };
+  const onResize = () => { fitDraw(); draw(); drawHarmonics(); drawSpec(); if (wf.canvas && !$('#fs-harm-3d').classList.contains('hidden')) wfResize(); };
   window.addEventListener('resize', onResize);
 
-  return { title: '傅立叶级数', api: { togglePlay, reset, dispose, onTheme: () => { repaintDraw(); draw(); drawHarmonics(); drawSpec(); } } };
-  function dispose() { loop.stop(); window.removeEventListener('resize', onResize); }
+  return { title: '傅立叶级数', api: { togglePlay, frame, reset, dispose, onTheme: () => { repaintDraw(); draw(); drawHarmonics(); drawSpec(); } } };
+  function dispose() {
+    loop.stop();
+    window.removeEventListener('resize', onResize);
+    window.removeEventListener('pointerup', endFinger);
+    window.removeEventListener('pointercancel', endFinger);
+    window.removeEventListener('flt-play', onPlayEvt);
+  }
 });

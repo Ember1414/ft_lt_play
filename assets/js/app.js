@@ -11,23 +11,28 @@
       this.nav = document.getElementById('nav');
       this.title = document.getElementById('module-title');
       this.content = document.getElementById('content');
-      this.$play = document.getElementById('btn-play');
-      this.$reset = document.getElementById('btn-reset');
       this.$theme = document.getElementById('btn-theme');
       this.navButtons = U.$$('.nav-item');
 
-      // 导航事件
+      // 导航事件（手机端选中后自动收起抽屉侧边栏）
       this.nav.addEventListener('click', (e) => {
         const b = e.target.closest('.nav-item');
-        if (b) this.open(b.dataset.module);
+        if (b) { this.open(b.dataset.module); if (this._closeDrawer) this._closeDrawer(); }
       });
 
-      // 全局播放/重置
-      this.$play.addEventListener('click', () => {
-        const r = this._call('togglePlay');
-        if (typeof r === 'boolean') this.$play.textContent = r ? '⏸' : '▶';
-      });
-      this.$reset.addEventListener('click', () => this._call('reset'));
+      // 移动端抽屉侧边栏（遮罩用 hidden 类切换，避免 !important 规则冲突）
+      const menuBtn = document.getElementById('btn-menu');
+      const mask = document.getElementById('sidebar-mask');
+      const setDrawer = (open) => {
+        document.body.classList.toggle('sidebar-open', open);
+        if (mask) mask.classList.toggle('hidden', !open);
+      };
+      const closeDrawer = () => setDrawer(false);
+      if (menuBtn) menuBtn.addEventListener('click', () => setDrawer(!document.body.classList.contains('sidebar-open')));
+      if (mask) mask.addEventListener('click', closeDrawer);
+      this._closeDrawer = closeDrawer;
+
+      // 播放/重置/逐帧为模块本地控件（见各模块），此处仅保留键盘快捷键
 
       // 主题切换（深/浅），持久化到 localStorage
       const savedTheme = localStorage.getItem('flt-theme') === 'light' ? 'light' : 'dark';
@@ -44,9 +49,46 @@
       document.getElementById('about-close').addEventListener('click', () => mk.classList.add('hidden'));
       mk.addEventListener('click', (e) => { if (e.target === mk) mk.classList.add('hidden'); });
 
-      // 默认打开第一个
-      const first = this.navButtons[0] && this.navButtons[0].dataset.module;
+      // 默认打开第一个；URL 带分享参数时直达对应模块
+      // #ex= 交互求解 · #hn= 系统分析 · #lan= 拉普拉斯 · #ft= 傅立叶变换 · #fs= 傅立叶级数
+      let first = this.navButtons[0] && this.navButtons[0].dataset.module;
+      try {
+        const hp = new URLSearchParams(location.hash.replace(/^#/, ''));
+        if (hp.get('ex') != null) first = 'explore';
+        else if (hp.get('hn') != null) first = 'sys';
+        else if (hp.get('lan') != null) first = 'la';
+        else if (hp.get('ft') != null) first = 'ft';
+        else if (hp.get('fs') != null) first = 'fs';
+        else if (hp.get('zt') != null) first = 'zt';
+        else if (hp.get('blk') != null) first = 'blk';
+      } catch (e) { }
       if (first) this.open(first);
+
+      // 全局键盘快捷键（输入框内不触发）
+      document.addEventListener('keydown', (e) => {
+        const t = e.target;
+        const tag = (t && t.tagName || '').toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || tag === 'select' || (t && t.isContentEditable)) return;
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        if (e.key === ' ') {
+          e.preventDefault();
+          const r = this._call('togglePlay');
+          if (typeof r === 'boolean') window.dispatchEvent(new CustomEvent('flt-play', { detail: r }));
+        } else if (e.key === 'r' || e.key === 'R') {
+          this._call('reset');
+        } else if (e.key === 'f' || e.key === 'F') {
+          this._call('frame');
+        } else if (e.key === 't' || e.key === 'T') {
+          this.$theme.click();
+        } else if (e.key === 'Escape') {
+          if (this._closeDrawer) this._closeDrawer();
+          const mk = document.getElementById('about-mask');
+          if (mk && !mk.classList.contains('hidden')) mk.classList.add('hidden');
+        } else if (e.key >= '1' && e.key <= '9') {
+          const b = this.navButtons[+e.key - 1];
+          if (b) { this.open(b.dataset.module); if (this._closeDrawer) this._closeDrawer(); }
+        }
+      });
     },
 
     applyTheme(t) {
@@ -75,12 +117,9 @@
       const mod = factory(this.content);
       if (FX.enablePlotChrome) FX.enablePlotChrome(this.content);
       const api = mod.api || mod;
-      this.title.innerHTML = mod.title + (mod.subtitle ? '<small>' + mod.subtitle + '</small>' : '');
+      const group = (this.navButtons.find((b) => b.dataset.module === name) || {}).dataset?.group || '';
+      this.title.innerHTML = mod.title + (mod.subtitle ? '<small>' + mod.subtitle + '</small>' : '') + (group ? '<small style="margin-left:10px;color:var(--text-faint)">· ' + group + '</small>' : '');
       this.current = { name, api };
-      this.$play.disabled = !api.togglePlay;
-      this.$reset.disabled = !api.reset;
-      // 有动画的模块默认在播放 → 图标为暂停
-      this.$play.textContent = api.togglePlay ? '⏸' : '▶';
     }
   };
 

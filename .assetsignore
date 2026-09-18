@@ -1,0 +1,12 @@
+.wrangler
+.claude
+.git
+node_modules
+.assetsignore
+.playwright-cli
+.codebuddy
+.pw-check.js
+.pw-dbg.js
+.gcd-test.js
+.shot-blk4.png
+.shot-blk5.png

@@ -5,33 +5,71 @@
  * ============================================================ */
 App.register('ft', (host) => {
   const cv = FX.cvCol;
-  let tab = 'map';
-  const rendered = { map: false, conv: false };
+  /* 分享状态：#ft=map&sig=rect&p=W:1.2,B:0.8 */
+  const ftShare = (() => {
+    try {
+      const p = new URLSearchParams(location.hash.replace(/^#/, ''));
+      const pvals = {};
+      (p.get('p') || '').split(',').forEach((kv) => { const i = kv.indexOf(':'); if (i > 0) { const v = +kv.slice(i + 1); if (isFinite(v)) pvals[kv.slice(0, i)] = v; } });
+      const tb = p.get('ft');
+      return { tab: (tb === 'conv' || tb === 'samp') ? tb : 'map', sig: p.get('sig') || null, pvals };
+    } catch (e) { return { tab: 'map', sig: null, pvals: {} }; }
+  })();
+  let tab = ftShare.tab;
+  const rendered = { map: false, conv: false, samp: false };
   let convRaf = null;
+
+  let ftHashTimer = null;
+  function ftWriteHash() {
+    try {
+      const p = new URLSearchParams();
+      p.set('ft', tab);
+      if (tab === 'map' && ftShare.sig) { p.set('sig', ftShare.sig); p.set('p', Object.entries(ftShare.pvals).map(([k, v]) => k + ':' + v).join(',')); }
+      history.replaceState(null, '', '#' + p.toString());
+    } catch (e) { }
+  }
+  function ftSyncHash() { clearTimeout(ftHashTimer); ftHashTimer = setTimeout(ftWriteHash, 300); }
 
   host.innerHTML = `
     <div class="module">
       <div class="tabs row" style="margin-bottom:14px"></div>
       <div id="ft-tab-map"></div>
       <div id="ft-tab-conv" class="hidden"></div>
+      <div id="ft-tab-samp" class="hidden"></div>
     </div>`;
 
+  function applyTabVisibility() {
+    host.querySelector('#ft-tab-map').classList.toggle('hidden', tab !== 'map');
+    host.querySelector('#ft-tab-conv').classList.toggle('hidden', tab !== 'conv');
+    host.querySelector('#ft-tab-samp').classList.toggle('hidden', tab !== 'samp');
+  }
   function tabBar() {
     const tabs = host.querySelector('.tabs');
     tabs.innerHTML = '';
     const mk = (id, label) => U.el('button', { class: 'chip' + (tab === id ? ' active' : ''), 'data-tab': id }, label);
-    tabs.append(mk('map', '时域 ↔ 频域 (常见函数)'), mk('conv', '卷积定理'));
+    tabs.append(mk('map', '时域 ↔ 频域 (常见函数)'), mk('conv', '卷积定理'), mk('samp', '采样与重建'));
+    const sh = U.el('button', { class: 'btn', title: '复制分享链接（当前页签/信号/参数）', style: 'padding:5px 10px;font-size:12px' }, '🔗 分享');
+    sh.addEventListener('click', () => {
+      ftWriteHash();
+      const url = location.origin + location.pathname + location.hash;
+      const done = () => { sh.textContent = '✓ 已复制'; setTimeout(() => { sh.textContent = '🔗 分享'; }, 1500); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(done, done);
+      else done();
+    });
+    tabs.append(sh);
     tabs.addEventListener('click', (e) => {
       const t = e.target.closest('.chip'); if (!t) return;
       tab = t.dataset.tab;
-      host.querySelector('#ft-tab-map').classList.toggle('hidden', tab !== 'map');
-      host.querySelector('#ft-tab-conv').classList.toggle('hidden', tab !== 'conv');
+      applyTabVisibility();
       tabs.querySelectorAll('.chip').forEach((x) => x.classList.toggle('active', x.dataset.tab === tab));
       // 惰性渲染：画布必须可见才有尺寸
       if (tab === 'conv' && !rendered.conv) { renderConv(); rendered.conv = true; }
       else if (tab === 'map' && !rendered.map) { renderMap(); rendered.map = true; }
+      else if (tab === 'samp' && !rendered.samp) { renderSamp(); rendered.samp = true; }
       else if (tab === 'conv') redrawConv();
       else if (tab === 'map') redrawMap();
+      else if (tab === 'samp') redrawSamp();
+      ftSyncHash();
     });
   }
 
@@ -49,7 +87,7 @@ App.register('ft', (host) => {
           <div class="hint" id="ft-note"></div>
         </div>
         <div class="pane">
-          <h3>时域 <code>x(t)</code> <small style="color:var(--text-faint);text-transform:none">悬停读数</small></h3>
+          <h3>时域 <code>x(t)</code></h3>
           <div class="canvas-wrap" style="height:150px"><canvas class="plot" id="ft-time"></canvas></div>
           <h3 style="margin-top:14px">频域 <code>|X(f)|</code>（幅度）</h3>
           <div class="canvas-wrap" style="height:150px"><canvas class="plot" id="ft-mag"></canvas></div>
@@ -61,10 +99,10 @@ App.register('ft', (host) => {
         </div>
       </div>`;
     const sigRow = host.querySelector('#ft-signals');
-    let active = 'rect';
+    let active = (ftShare.sig && FX_LIB.ftSignals.some((s) => s.id === ftShare.sig)) ? ftShare.sig : 'rect';
     FX_LIB.ftSignals.forEach((s) => {
       const c = U.el('button', { class: 'chip' + (s.id === active ? ' active' : ''), 'data-id': s.id }, s.name);
-      c.addEventListener('click', () => { active = s.id; sigRow.querySelectorAll('.chip').forEach((x) => x.classList.toggle('active', x.dataset.id === s.id)); buildParams(); recompute(); });
+      c.addEventListener('click', () => { active = s.id; ftShare.sig = s.id; sigRow.querySelectorAll('.chip').forEach((x) => x.classList.toggle('active', x.dataset.id === s.id)); buildParams(); recompute(); ftSyncHash(); });
       sigRow.append(c);
     });
     const paramsBox = host.querySelector('#ft-params');
@@ -72,20 +110,23 @@ App.register('ft', (host) => {
     function buildParams() {
       const sig = FX_LIB.ftSignals.find((s) => s.id === active);
       params = sig.params();
+      // 分享还原：把 URL 中保存的参数值套到当前信号（越界自动收敛）
+      params.forEach((p) => { const sv = ftShare.pvals[p.k]; if (sv != null && isFinite(sv)) p.v = U.clamp(sv, p.min, p.max); });
       paramsBox.innerHTML = '';
       params.forEach((p) => {
         const wrap = U.el('div', { class: 'ctrl' });
         const lab = U.el('label', { html: p.label + ' <span class="val"></span>' });
         const inp = U.el('input', { type: 'range', min: p.min, max: p.max, step: p.step || 0.01, value: p.v, 'data-k': p.k });
-        inp.addEventListener('input', () => { p.v = +inp.value; lab.querySelector('.val').textContent = p.fmt ? p.fmt(+inp.value) : U.fmt(+inp.value); recompute(); });
+        inp.addEventListener('input', () => { p.v = +inp.value; ftShare.pvals[p.k] = p.v; lab.querySelector('.val').textContent = p.fmt ? p.fmt(+inp.value) : U.fmt(+inp.value); recompute(); ftSyncHash(); });
         lab.querySelector('.val').textContent = p.fmt ? p.fmt(p.v) : U.fmt(p.v);
         wrap.append(lab, inp);
         paramsBox.append(wrap);
       });
       host.querySelector('#ft-tex').innerHTML = '';
-      FX.span(sig.tex, host.querySelector('#ft-tex'));
-      host.querySelector('#ft-note').innerHTML = '';
-      host.querySelector('#ft-note').append(FX.span(sig.ft), document.createElement('br'), FX.span(sig.note));
+      host.querySelector('#ft-tex').append(FX.span(sig.tex, 'formula-lg'));
+      const noteBox = host.querySelector('#ft-note');
+      noteBox.innerHTML = '';
+      noteBox.append(FX.span(sig.ft), document.createElement('br'), document.createTextNode(sig.note));
     }
     function paramVal(k) { const p = params.find((x) => x.k === k); return p ? p.v : 0; }
 
@@ -177,6 +218,7 @@ App.register('ft', (host) => {
           <div class="ctrl row">
             <button class="btn primary" id="cv-play">▶ 播放卷积</button>
             <button class="btn" id="cv-reset">↺ 重置</button>
+            <span class="row" id="cv-speed" style="gap:6px"></span>
           </div>
           <div class="statbar" id="cv-check"></div>
           <div class="hint"><b>怎么读这张图：</b>下图第 1 幅中蓝线为 f(τ)；粉线是<b>翻转并平移</b>后的 g(t−τ)；
@@ -203,7 +245,18 @@ App.register('ft', (host) => {
       tri: { name: '三角', f: (t) => Math.max(0, 1 - Math.abs(t)), t0: -1.2, t1: 1.2 },
       rect2: { name: '矩形(宽0.4)', f: (t) => (Math.abs(t) < 0.2 ? 1 : 0), t0: -1.2, t1: 1.2 }
     };
-    convCtx = { fid: 'rect', gid: 'gauss', animT: 0, playing: false, data: null, plots: {} };
+    convCtx = { fid: 'rect', gid: 'gauss', animT: 0, playing: false, speed: 1, data: null, plots: {} };
+
+    // 播放速度：慢 / 正常 / 快
+    const speedRow = host.querySelector('#cv-speed');
+    [['慢', 0.5], ['正常', 1], ['快', 2]].forEach(([name, v]) => {
+      const c = U.el('button', { class: 'chip' + (v === 1 ? ' active' : ''), 'data-v': v }, name);
+      c.addEventListener('click', () => {
+        convCtx.speed = v;
+        speedRow.querySelectorAll('.chip').forEach((x) => x.classList.toggle('active', x === c));
+      });
+      speedRow.append(c);
+    });
 
     function chipRow(el, cur, cb) {
       el.innerHTML = '';
@@ -349,7 +402,7 @@ App.register('ft', (host) => {
         let last = performance.now();
         const tick = (now) => {
           if (!p.playing || !document.body.contains(host)) return;
-          p.animT = (p.animT + (now - last) * 0.022) % 100;   // ~4.5s 单程
+          p.animT = (p.animT + (now - last) * 0.022 * (convCtx.speed || 1)) % 100;
           last = now;
           ct.value = p.animT;
           drawConv();
@@ -365,10 +418,152 @@ App.register('ft', (host) => {
   }
   function redrawConv() { if (convCtx) { convCtx.plots = {}; renderConv(); } }
 
-  // 初始渲染
-  tabBar();
-  renderMap(); rendered.map = true;
+  /* ================= 子模块 C：采样与重建（奈奎斯特–香农） ================= */
+  let sampCtx = null;
+  function renderSamp() {
+    const box = host.querySelector('#ft-tab-samp');
+    box.innerHTML = `
+      <div class="layout">
+        <div class="pane">
+          <h3>采样定理 · 奈奎斯特–香农</h3>
+          <div class="ctrl"><label>信号</label><div class="row" id="sp-sig"></div></div>
+          <div class="ctrl"><label>采样率 fs <span class="val" id="sp-fsv"></span></label>
+            <input type="range" id="sp-fs" min="1" max="60" step="0.5" value="12"></div>
+          <div class="ctrl"><label>重建方式</label><div class="row" id="sp-method"></div></div>
+          <div class="statbar" id="sp-stats"></div>
+          <div class="hint"><b>采样定理</b>：fs &gt; 2B（B 为信号最高频率）时才能无失真恢复。fs &lt; 2B 时发生<b>混叠</b>——高频折叠成低频假象。
+            理想重建：x_r(t)=Σ x[n]·sinc(fs·t−n)。切换到 fs 边界附近观察重建波形如何先恶化再恢复。</div>
+        </div>
+        <div class="pane">
+          <h3>时域：原信号 · 采样点 · 重建信号</h3>
+          <div class="canvas-wrap" style="height:210px"><canvas class="plot" id="sp-time"></canvas></div>
+          <h3 style="margin-top:10px">采样序列频谱（含混叠效果）</h3>
+          <div class="canvas-wrap" style="height:160px"><canvas class="plot" id="sp-freq"></canvas></div>
+        </div>
+      </div>`;
 
-  return { title: '傅立叶变换', api: { dispose, onTheme: () => { if (mapCtx && mapCtx.draw) mapCtx.draw(); if (convCtx && convCtx.data && convCtx.drawAll) convCtx.drawAll(); } } };
+    const sigs = {
+      sine2: { name: '双正弦 3+7Hz', f: (t) => Math.sin(2 * Math.PI * 3 * t) + 0.6 * Math.sin(2 * Math.PI * 7 * t), B: 7 },
+      sine5: { name: '正弦 5Hz', f: (t) => Math.sin(2 * Math.PI * 5 * t), B: 5 },
+      sinc: { name: 'sinc (B=4Hz)', f: (t) => { const x = Math.PI * 4 * t; return Math.abs(x) < 1e-9 ? 1 : Math.sin(x) / x; }, B: 4 },
+      gauss: { name: '高斯脉冲', f: (t) => Math.exp(-2 * t * t), B: 3 }
+    };
+    const methods = { zoh: '零阶保持', lin: '线性插值', sinc: '理想内插 sinc' };
+    sampCtx = { sig: 'sine2', method: 'lin', fs: 12, plots: {} };
+
+    const sigRow = box.querySelector('#sp-sig');
+    Object.entries(sigs).forEach(([k, s]) => {
+      const c = U.el('button', { class: 'chip' + (k === sampCtx.sig ? ' active' : ''), 'data-k': k }, s.name);
+      c.addEventListener('click', () => {
+        sampCtx.sig = k;
+        sigRow.querySelectorAll('.chip').forEach((x) => x.classList.toggle('active', x.dataset.k === k));
+        drawSamp();
+        ftSyncHash();
+      });
+      sigRow.append(c);
+    });
+    const mRow = box.querySelector('#sp-method');
+    Object.entries(methods).forEach(([k, name]) => {
+      const c = U.el('button', { class: 'chip' + (k === sampCtx.method ? ' active' : ''), 'data-k': k }, name);
+      c.addEventListener('click', () => {
+        sampCtx.method = k;
+        mRow.querySelectorAll('.chip').forEach((x) => x.classList.toggle('active', x.dataset.k === k));
+        drawSamp();
+      });
+      mRow.append(c);
+    });
+    const fsIn = box.querySelector('#sp-fs');
+    fsIn.addEventListener('input', () => { sampCtx.fs = +fsIn.value; box.querySelector('#sp-fsv').textContent = sampCtx.fs.toFixed(1) + ' Hz'; drawSamp(); });
+    box.querySelector('#sp-fsv').textContent = sampCtx.fs.toFixed(1) + ' Hz';
+
+    // samples[0] 对应全局采样序号 n0（n0 = ceil(T0·fs)，可为负）：
+    // 重建时必须用「全局序号 − n0」对齐数组下标，否则重建波形与采样点错位 fs 个点
+    function reconstruct(t, samples, fs, method, n0) {
+      if (method === 'zoh') {
+        const i = U.clamp(Math.floor(t * fs) - n0, 0, samples.length - 1);
+        return (Math.floor(t * fs) - n0 >= 0) ? samples[i] : 0;
+      }
+      if (method === 'lin') {
+        // 线性插值（采样点在 n/fs 处，数组从 n0 开始）
+        const x = t * fs - n0;
+        const i0 = Math.floor(x);
+        const f0 = U.clamp(x - i0, 0, 1);
+        const a = U.clamp(i0, 0, samples.length - 1), b = U.clamp(i0 + 1, 0, samples.length - 1);
+        return samples[a] + (samples[b] - samples[a]) * f0;
+      }
+      // 理想 sinc 内插（第 n 个数组元素对应全局序号 n0+n）
+      let s = 0;
+      for (let n = 0; n < samples.length; n++) {
+        const arg = Math.PI * (t * fs - (n0 + n));
+        s += samples[n] * (Math.abs(arg) < 1e-9 ? 1 : Math.sin(arg) / arg);
+      }
+      return s;
+    }
+
+    function drawSamp() {
+      const d = sampCtx; if (!d) return;
+      const sig = sigs[d.sig];
+      const T0 = -1, T1 = 1, N = 1400;
+      // 原信号
+      const tArr = [], xArr = [];
+      for (let i = 0; i <= N; i++) { const t = T0 + (i / N) * (T1 - T0); tArr.push(t); xArr.push(sig.f(t)); }
+      // 采样
+      const n0 = Math.ceil(T0 * d.fs), n1 = Math.floor(T1 * d.fs);
+      const samples = [], sampT = [];
+      for (let n = n0; n <= n1; n++) { samples.push(sig.f(n / d.fs)); sampT.push(n / d.fs); }
+      // 重建
+      const rArr = tArr.map((t) => reconstruct(t, samples, d.fs, d.method, n0));
+
+      // 时域图
+      let tp = d.plots.time;
+      if (!tp) { tp = new FX.Plot(box.querySelector('#sp-time')); tp.onDraw = drawSamp; d.plots.time = tp; }
+      let lo = Infinity, hi = -Infinity;
+      for (const v of xArr) if (isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+      for (const v of rArr) if (isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+      if (!isFinite(lo)) { lo = -1; hi = 1; }
+      const pad = (hi - lo) * 0.12 || 0.5;
+      tp.setRange(T0, T1, lo - pad, hi + pad);
+      tp.clear(); tp.grid(); tp.axis(true);
+      tp.clip();
+      tp.line(tArr, rArr, { color: cv('--cv-line2'), width: 1.6 });
+      tp.line(tArr, xArr, { color: cv('--cv-line1'), width: 2 });
+      tp.dots(sampT, samples, { color: cv('--cv-warn'), r: 3 });
+      tp.unclip();
+      tp.label('蓝=原信号 · 橙点=采样 · 绿=重建', tp.margin.l + 8, tp.margin.t + 12, { color: cv('--cv-label'), size: 11 });
+
+      // 频谱图：采样序列的频谱（含混叠）
+      let fp = d.plots.freq;
+      if (!fp) { fp = new FX.Plot(box.querySelector('#sp-freq'), { padding: 0.02 }); fp.onDraw = drawSamp; d.plots.freq = fp; }
+      const sp = DSP.spectrum(samples, 1 / d.fs);
+      let mm = 1e-9; for (const v of sp.mag) if (v > mm) mm = v;
+      fp.setRange(0, sp.f[sp.f.length - 1], 0, mm * 1.1);
+      fp.clear(); fp.grid(); fp.axis(true);
+      fp.clip();
+      fp.line(sp.f, sp.mag, { color: cv('--cv-line3'), width: 2, fill: cv('--cv-fill-purple') });
+      fp.line([2 * d.fs - sig.B, 2 * d.fs - sig.B], [0, mm], { color: cv('--cv-danger'), width: 1 });
+      fp.unclip();
+      fp.label('fs/2=' + U.fmt(d.fs / 2, 1) + 'Hz · 信号带宽 B≈' + sig.B + 'Hz', fp.margin.l + 8, fp.margin.t + 12, { color: cv('--cv-label'), size: 11 });
+
+      const alias = d.fs < 2 * sig.B;
+      box.querySelector('#sp-stats').innerHTML = `
+        <div class="stat"><span class="k">采样率 fs</span><span class="v">${U.fmt(d.fs, 1)} Hz</span></div>
+        <div class="stat"><span class="k">奈奎斯特率 2B</span><span class="v">${U.fmt(2 * sig.B, 1)} Hz</span></div>
+        <div class="stat"><span class="k">混叠状态</span><span class="v" style="color:${alias ? cv('--cv-danger') : cv('--cv-line2')}">${alias ? '⚠ 混叠发生' : '✓ 可无失真重建'}</span></div>`;
+    }
+    sampCtx.drawAll = drawSamp;
+    drawSamp();
+    if (FX.enablePlotChrome) FX.enablePlotChrome(box);
+  }
+  function redrawSamp() { if (sampCtx && sampCtx.drawAll) sampCtx.drawAll(); }
+
+  // 初始渲染：分享链接指定页签时直接进入对应页
+  tabBar();
+  applyTabVisibility();
+  if (tab === 'conv') { renderConv(); rendered.conv = true; }
+  else if (tab === 'samp') { renderSamp(); rendered.samp = true; }
+  else { renderMap(); rendered.map = true; }
+  ftWriteHash();
+
+  return { title: '傅立叶变换', api: { dispose, onTheme: () => { if (mapCtx && mapCtx.draw) mapCtx.draw(); if (convCtx && convCtx.data && convCtx.drawAll) convCtx.drawAll(); if (sampCtx && sampCtx.drawAll) sampCtx.drawAll(); } } };
   function dispose() { if (convRaf) cancelAnimationFrame(convRaf); }
 });

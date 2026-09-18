@@ -38,18 +38,40 @@ App.register('derive', (host) => {
     lt: {
       name: '常用拉普拉斯变换对',
       rows: [
-        [g('\\delta(t)'), '1'],
-        [g('u(t)'), '\\frac{1}{s}'],
-        [g('t^{n}\\,u(t)'), '\\frac{n!}{s^{n+1}}'],
-        [g('e^{-at}u(t)'), '\\frac{1}{s+a}'],
-        [g('\\cos(\\omega_0 t)u(t)'), '\\frac{s}{s^2+\\omega_0^2}'],
-        [g('\\sin(\\omega_0 t)u(t)'), '\\frac{\\omega_0}{s^2+\\omega_0^2}'],
-        [g('e^{-at}\\cos(\\omega_0 t)u(t)'), '\\frac{s+a}{(s+a)^2+\\omega_0^2}'],
-        [g('e^{-at}\\sin(\\omega_0 t)u(t)'), '\\frac{\\omega_0}{(s+a)^2+\\omega_0^2}']
-      ].map((r, i) => {
-        // g() 只能构建元素；这里直接存 tex 字符串，渲染时转换
-        return r;
-      })
+        ['\\delta(t)', '1'],
+        ['u(t)', '\\frac{1}{s}'],
+        ['t^{n}\\,u(t)', '\\frac{n!}{s^{n+1}}'],
+        ['e^{-at}u(t)', '\\frac{1}{s+a}'],
+        ['\\cos(\\omega_0 t)u(t)', '\\frac{s}{s^2+\\omega_0^2}'],
+        ['\\sin(\\omega_0 t)u(t)', '\\frac{\\omega_0}{s^2+\\omega_0^2}'],
+        ['e^{-at}\\cos(\\omega_0 t)u(t)', '\\frac{s+a}{(s+a)^2+\\omega_0^2}'],
+        ['e^{-at}\\sin(\\omega_0 t)u(t)', '\\frac{\\omega_0}{(s+a)^2+\\omega_0^2}']
+      ]
+    },
+    zt: {
+      name: 'Z 变换性质',
+      rows: [
+        ['线性', 'a\\,x[n]+b\\,y[n]', 'aX(z)+bY(z)'],
+        ['延迟 k 拍', 'x[n-k]\\,u[n-k]', 'z^{-k}X(z)'],
+        ['超前 k 拍', 'x[n+k]', 'z^{k}\\!\\left(X(z)-\\sum_{m=0}^{k-1}x[m]z^{-m}\\right)'],
+        ['指数加权', 'a^{n}x[n]', 'X(z/a)'],
+        ['卷积和', 'x[n]*y[n]', 'X(z)\\,Y(z)'],
+        ['初值定理', 'x[0]=\\lim_{z\\to\\infty}X(z)', '\\text{(因果序列)}'],
+        ['终值定理', '\\lim_{n\\to\\infty}x[n]', '\\lim_{z\\to 1}(z-1)X(z)'],
+        ['与 s 域联系', 'z=e^{sT}', '\\text{单位圆}\\leftrightarrow j\\omega\\text{ 轴}']
+      ]
+    },
+    ztp: {
+      name: '常用 Z 变换对',
+      rows: [
+        ['\\delta[n]', '1', '\\text{全部 }z'],
+        ['u[n]', '\\frac{z}{z-1}', '|z|>1'],
+        ['a^{n}u[n]', '\\frac{z}{z-a}', '|z|>|a|'],
+        ['n\\,a^{n}u[n]', '\\frac{az}{(z-a)^2}', '|z|>|a|'],
+        ['\\cos(\\omega_0 n)u[n]', '\\frac{z(z-\\cos\\omega_0)}{z^2-2z\\cos\\omega_0+1}', '|z|>1'],
+        ['\\sin(\\omega_0 n)u[n]', '\\frac{z\\sin\\omega_0}{z^2-2z\\cos\\omega_0+1}', '|z|>1'],
+        ['r^{n}\\cos(\\omega_0 n)u[n]', '\\frac{z(z-r\\cos\\omega_0)}{z^2-2rz\\cos\\omega_0+r^2}', '|z|>r']
+      ]
     }
   };
   function g(tex) { return { t: tex }; }
@@ -103,6 +125,16 @@ App.register('derive', (host) => {
           body: 'X(\\omega)=\\frac{2\\sin(\\omega T/2)}{\\omega}=T\\cdot\\frac{\\sin(\\omega T/2)}{\\omega T/2}=T\\,\\mathrm{sinc}\\!\\left(\\frac{\\omega T}{2\\pi}\\right)=T\\,\\mathrm{sinc}(T f)' }
       ]
     },
+    zsum: {
+      name: 'Z 变换：a^{n}u[n] 的定义求和',
+      desc: '单边 Z 变换定义 X(z)=Σ_{n=0}^{∞} x[n] z^{-n}，对指数序列用几何级数求和。',
+      steps: [
+        { t: '定义代入', body: 'X(z)=\\sum_{n=0}^{\\infty}a^{n}z^{-n}=\\sum_{n=0}^{\\infty}\\left(az^{-1}\\right)^{n}' },
+        { t: '几何级数（需 |az^{-1}|<1，即 |z|>|a|）', body: '=\\frac{1}{1-az^{-1}}=\\frac{z}{z-a}, \\qquad \\text{ROC: } |z|>|a|' },
+        { t: '极点与 ROC', desc: '极点 z=a 在 ROC 边界上；a 在单位圆内 ⇔ 序列有界收敛（稳定）。', body: 'z=a\\;\\text{(一阶极点)}, \\quad |a|<1 \\Leftrightarrow \\text{稳定}' },
+        { t: '频响（单位圆上的 Z 变换）', desc: '令 z=e^{jω}，ROC 含单位圆时可代入。', body: 'H(e^{j\\omega})=\\frac{1}{1-ae^{-j\\omega}}' }
+      ]
+    },
     conv1: {
       name: '小例子：卷积求响应',
       desc: '系统 h(t)=e^{-t}u(t)，输入 x(t)=e^{-2t}u(t)，求输出 y(t)=x∗h。',
@@ -116,39 +148,27 @@ App.register('derive', (host) => {
     }
   };
 
-  /* ---------- 自定义推导：输入 f(t) → 拉普拉斯 + 傅里叶 ---------- */
-  // 解析因果信号线性组合，如 3*exp(-2*t)*u(t) + sin(5*t)*u(t) - 2*t^2*exp(-1*t)*u(t)
-  function parseCombo(str) {
-    const s = String(str).replace(/\s+/g, '').replace(/−/g, '-').replace(/×/g, '*').replace(/π/g, 'pi');
-    if (!s) return null;
-    const items = [];
-    let i = 0;
-    while (i < s.length) {
-      let sign = 1;
-      if (s[i] === '+') i++;
-      else if (s[i] === '-') { sign = -1; i++; }
-      if (i >= s.length) return null;
-      let coef = 1;
-      let m = s.slice(i).match(/^(\d+(?:\.\d+)?)/);
-      if (m) {
-        coef = parseFloat(m[1]);
-        i += m[1].length;
-        if (s[i] === '*') i++;
-        if (i >= s.length || s[i] === '+' || s[i] === '-') { items.push({ sign, coef, kind: 'const' }); continue; }
-      }
-      const rest = s.slice(i);
-      let mt;
-      if ((mt = rest.match(/^t\^(\d+)\*exp\(-(\d+(?:\.\d+)?)\*(?:t)\)/))) items.push({ sign, coef, kind: 'texp', n: +mt[1], a: +mt[2] }), i += mt[0].length;
-      else if ((mt = rest.match(/^exp\(-(\d+(?:\.\d+)?)\*?t\)/))) items.push({ sign, coef, kind: 'exp', a: +mt[1] }), i += mt[0].length;
-      else if ((mt = rest.match(/^sin\((\d+(?:\.\d+)?)\*?t\)/))) items.push({ sign, coef, kind: 'sin', w: +mt[1] }), i += mt[0].length;
-      else if ((mt = rest.match(/^cos\((\d+(?:\.\d+)?)\*?t\)/))) items.push({ sign, coef, kind: 'cos', w: +mt[1] }), i += mt[0].length;
-      else if ((mt = rest.match(/^t\^(\d+)/))) items.push({ sign, coef, kind: 'tpow', n: +mt[1] }), i += mt[0].length;
-      else return null;
-      // 可选 *u(t)
-      if (s.slice(i).startsWith('*u(t)')) i += 5;
-      else if (s.slice(i).startsWith('u(t)')) i += 4;
+  // 步骤标题：支持 tm（KaTeX 内联数学）+ t（纯文本），避免标题里出现 e^(-2t) 之类的代码感写法
+  function stepHeadEl(st, i) {
+    const head = U.el('button', { class: 'step-head' });
+    head.append(U.el('span', { class: 'arrow' }, '▶'));
+    const txt = U.el('span', { style: 'display:flex;align-items:center;gap:6px;flex-wrap:wrap' });
+    if (st.tm) {
+      txt.append(document.createTextNode((i + 1) + '. '));
+      txt.append(FX.span(st.tm));
+      txt.append(document.createTextNode(st.t));
+    } else {
+      txt.textContent = `${i + 1}. ${st.t}`;
     }
-    return items.length ? items : null;
+    head.append(txt);
+    return head;
+  }
+
+  /* ---------- 自定义推导：输入 f(t) → 拉普拉斯 + 傅里叶 ---------- */
+  // 解析复用 TR.parseTimeCombo（宽松格式 + 共享语法）；u(t) 项等价于常数项 c·u(t)
+  function parseCombo(str) {
+    const items = TR.parseTimeCombo(str);
+    return items ? items.map((it) => (it.kind === 'u' ? { ...it, kind: 'const' } : it)) : null;
   }
   const fact = (n) => { let r = 1; for (let k = 2; k <= n; k++) r *= k; return r; };
   const num2tex = (v) => (Number.isInteger(v) ? String(v) : String(+v.toFixed(4)));
@@ -214,26 +234,26 @@ App.register('derive', (host) => {
       const A = it.a != null ? num2tex(it.a) : '', W = it.w != null ? num2tex(it.w) : '', N = it.n != null ? it.n : '';
       switch (it.kind) {
         case 'exp': return [
-          { t: `e^(-${A}t)u(t)：定义积分`, desc: `单边拉普拉斯定义直接积分，收敛条件 Re(s)>-${A}。`, body: `\\int_0^{\\infty}e^{-${A}t}e^{-st}dt=\\left[-\\frac{e^{-(s+${A})t}}{s+${A}}\\right]_0^{\\infty}=\\frac{1}{s+${A}}` },
+          { tm: `e^{-${A}t}u(t)`, t: '：定义积分', desc: `单边拉普拉斯定义直接积分，收敛条件 Re(s)>-${A}。`, body: `\\int_0^{\\infty}e^{-${A}t}e^{-st}dt=\\left[-\\frac{e^{-(s+${A})t}}{s+${A}}\\right]_0^{\\infty}=\\frac{1}{s+${A}}` },
           { t: '傅里叶（衰减信号，ROC 含 jω 轴）', desc: '令 s=jω 直接代入。', body: `F(j\\omega)=\\frac{1}{${A}+j\\omega}` }
         ];
         case 'texp': return [
-          { t: `t^${N}e^(-${A}t)u(t)：s 域微分性质`, desc: `由 L{t^n f(t)}=(-1)^n d^nF/ds^n，对 1/(s+a) 求 ${N} 阶导。`, body: `(-1)^{${N}}\\frac{d^{${N}}}{ds^{${N}}}\\frac{1}{s+${A}}=\\frac{${fact(N)}}{(s+${A})^{${N + 1}}}` },
+          { tm: `t^{${N}}e^{-${A}t}u(t)`, t: '：s 域微分性质', desc: `由 L{t^n f(t)}=(-1)^n d^nF/ds^n，对 1/(s+a) 求 ${N} 阶导。`, body: `(-1)^{${N}}\\frac{d^{${N}}}{ds^{${N}}}\\frac{1}{s+${A}}=\\frac{${fact(N)}}{(s+${A})^{${N + 1}}}` },
           { t: '傅里叶', desc: '令 s=jω。', body: `F(j\\omega)=\\frac{${fact(N)}}{(${A}+j\\omega)^{${N + 1}}}` }
         ];
         case 'sin': return [
-          { t: `sin(${W}t)u(t)：欧拉展开`, desc: '正弦拆成一对共轭指数。', body: `\\sin(${W}t)=\\frac{e^{j${W}t}-e^{-j${W}t}}{2j}` },
+          { tm: `\\sin(${W}t)u(t)`, t: '：欧拉展开', desc: '正弦拆成一对共轭指数。', body: `\\sin(${W}t)=\\frac{e^{j${W}t}-e^{-j${W}t}}{2j}` },
           { t: 's 域平移性质', desc: 'L{e^{at}f(t)}=F(s-a)，对 L{u(t)}=1/s 平移。', body: `\\mathcal{L}\\{e^{\\pm j${W}t}u(t)\\}=\\frac{1}{s\\mp j${W}}` },
           { t: '合并', desc: '通分相减。', body: `\\frac{1}{2j}\\left[\\frac{1}{s-j${W}}-\\frac{1}{s+j${W}}\\right]=\\frac{${W}}{s^{2}+${num2tex(it.w * it.w)}}` },
           { t: '傅里叶（含冲激谱线）', desc: '正弦无衰减，频谱在 ±ω₀ 处有冲激谱线。', body: `F(j\\omega)=\\frac{\\pi}{2j}\\left[\\delta(\\omega-${W})-\\delta(\\omega+${W})\\right]` }
         ];
         case 'cos': return [
-          { t: `cos(${W}t)u(t)：欧拉展开`, desc: '余弦拆成一对共轭指数。', body: `\\cos(${W}t)=\\frac{e^{j${W}t}+e^{-j${W}t}}{2}` },
+          { tm: `\\cos(${W}t)u(t)`, t: '：欧拉展开', desc: '余弦拆成一对共轭指数。', body: `\\cos(${W}t)=\\frac{e^{j${W}t}+e^{-j${W}t}}{2}` },
           { t: 's 域平移 + 合并', desc: '同正弦路径。', body: `\\frac{1}{2}\\left[\\frac{1}{s-j${W}}+\\frac{1}{s+j${W}}\\right]=\\frac{s}{s^{2}+${num2tex(it.w * it.w)}}` },
           { t: '傅里叶（含冲激谱线）', desc: '余弦的频谱为 ±ω₀ 处两条冲激谱线。', body: `F(j\\omega)=\\frac{\\pi}{2}\\left[\\delta(\\omega-${W})+\\delta(\\omega+${W})\\right]` }
         ];
         case 'tpow': return [
-          { t: `t^${N}u(t)：分部积分归纳`, desc: 'L{t·u(t)}=1/s²；反复用频域微分性质 L{tⁿf}=(-1)ⁿF⁽ⁿ⁾(s)。', body: `\\mathcal{L}\\{t^{${N}}u(t)\\}=\\frac{${fact(N)}}{s^{${N + 1}}}` },
+          { tm: `t^{${N}}u(t)`, t: '：分部积分归纳', desc: 'L{t·u(t)}=1/s²；反复用频域微分性质 L{tⁿf}=(-1)ⁿF⁽ⁿ⁾(s)。', body: `\\mathcal{L}\\{t^{${N}}u(t)\\}=\\frac{${fact(N)}}{s^{${N + 1}}}` },
           { t: '傅里叶（分布意义）', desc: '幂信号频谱含 ω=0 处的 δ 导数项与主值项。', body: `F(j\\omega)=\\frac{${fact(N)}}{(j\\omega)^{${N + 1}}}+\\pi j^{${N}}\\delta^{(${N})}(\\omega)` }
         ];
         case 'const': return [
@@ -266,13 +286,15 @@ App.register('derive', (host) => {
     const content = host.querySelector('#dv-content');
     content.innerHTML = `
       <div class="pane" style="margin-bottom:14px;background:var(--panel-2)">
-        <h3>输入 f(t)（因果信号线性组合）</h3>
-        <div class="row">
-          <input type="text" id="dv-cin" placeholder="3*exp(-2*t)*u(t) + sin(5*t)*u(t) - t^2*exp(-1*t)*u(t)" style="flex:1" spellcheck="false">
+        <h3>输入函数 → 逐步变换推导</h3>
+        <p class="hint" style="margin-top:-6px">输入一个因果信号 f(t)，这里会像教科书一样<b>逐项写出拉普拉斯变换的推导步骤</b>（定义积分 / 欧拉展开 / s 域性质），给出 ROC 与傅里叶变换，最后用数值积分验证每一步得到的 F(s)。</p>
+        <div class="input-bar" style="margin-top:10px">
+          <input type="text" id="dv-cin" placeholder="3*exp(-2*t)*u(t) + sin(5*t)*u(t) - t^2*exp(-1*t)*u(t)" spellcheck="false" autocomplete="off">
           <button class="btn primary" id="dv-cgo">推导</button>
         </div>
+        <div class="hint" id="dv-cstatus" style="margin-top:8px"></div>
         <div class="row" id="dv-cex" style="margin-top:10px"></div>
-        <div class="hint">支持的项：<code>c*exp(-a*t)*u(t)</code>、<code>c*sin(w*t)*u(t)</code>、<code>c*cos(w*t)*u(t)</code>、<code>c*t^n*u(t)</code>、<code>c*t^n*exp(-a*t)*u(t)</code>、常数 c。系数与参数支持小数；用 + - 连接多项。</div>
+        <div class="hint">支持的项：<code>c*exp(-a*t)*u(t)</code>、<code>c*sin(w*t)*u(t)</code>、<code>c*cos(w*t)*u(t)</code>、<code>c*t^n*u(t)</code>、<code>c*t^n*exp(-a*t)*u(t)</code>、<code>u(t)</code>、常数 c。写法宽松：<code>2sin(3t)</code>、<code>e^(-2t)</code>、<code>t²e^{-t}</code>、<code>sin(2πt)</code> 都可以；用 + - 连接多项。</div>
       </div>
       <div id="dv-cout"><p class="hint">输入表达式后点击“推导”。</p></div>`;
     const examples = [
@@ -298,7 +320,7 @@ App.register('derive', (host) => {
       const wrap = U.el('div', { class: 'steps' });
       steps.forEach((st, i) => {
         const step = U.el('div', { class: 'step' + (i === 0 || i === steps.length - 1 ? ' open' : '') });
-        const head = U.el('button', { class: 'step-head' }, `<span class="arrow">▶</span><span>${i + 1}. ${st.t}</span>`);
+        const head = stepHeadEl(st, i);
         head.addEventListener('click', () => step.classList.toggle('open'));
         const body = U.el('div', { class: 'step-body' });
         if (st.desc) body.append(U.el('p', { class: 'desc' }, st.desc));
@@ -328,6 +350,24 @@ App.register('derive', (host) => {
     };
     content.querySelector('#dv-cgo').addEventListener('click', runCustom);
     content.querySelector('#dv-cin').addEventListener('keydown', (e) => { if (e.key === 'Enter') runCustom(); });
+
+    // 输入实时校验：显示识别结果或具体错误提示
+    const cin = content.querySelector('#dv-cin');
+    const statusEl = content.querySelector('#dv-cstatus');
+    let stTimer = null;
+    const kindName = { exp: '指数', texp: '幂×指数', sin: '正弦', cos: '余弦', tpow: '幂', const: '常数' };
+    function checkInput() {
+      const items = parseCombo(cin.value);
+      if (!cin.value.trim()) { statusEl.innerHTML = ''; return; }
+      if (!items) {
+        statusEl.innerHTML = '<span style="color:var(--danger)">✗ 暂无法解析：每项需为 c*exp(-a*t)*u(t)、c*sin(w*t)*u(t)、c*cos(w*t)*u(t)、c*t^n*u(t)、c*t^n*exp(-a*t)*u(t) 或常数，用 + - 连接。</span>';
+        return;
+      }
+      const summary = items.map((it) => (it.sign < 0 ? '−' : '') + (it.coef === 1 ? '' : num2tex(it.coef)) + (kindName[it.kind] || it.kind)).join('、');
+      statusEl.innerHTML = `<span style="color:var(--accent-2)">✓ 已识别 ${items.length} 项：${summary}</span>`;
+    }
+    cin.addEventListener('input', () => { clearTimeout(stTimer); stTimer = setTimeout(checkInput, 250); });
+    checkInput();
     content.querySelector('#dv-cin').value = '2*exp(-1*t)*u(t)+sin(5*t)*u(t)';
     runCustom();
   }
@@ -338,6 +378,12 @@ App.register('derive', (host) => {
       <div class="pane">
         <h3>选择推导 / 性质表</h3>
         <div class="row" id="dv-nav" style="flex-direction:column;align-items:stretch"></div>
+        <div class="row" style="gap:6px;margin-top:12px;align-items:center">
+          <span class="hint" style="margin:0;flex:1">公式大小</span>
+          <button class="chip" id="dv-zout" title="缩小公式">A−</button>
+          <button class="chip" id="dv-zin" title="放大公式">A+</button>
+          <button class="chip" id="dv-zreset" title="恢复默认">100%</button>
+        </div>
       </div>
       <div class="pane" id="dv-main">
         <div id="dv-content"></div>
@@ -359,14 +405,18 @@ App.register('derive', (host) => {
     nav.append(b);
   }
   // 导航：自定义 + 表格组 + 推导组
-  navButton('🧮 自定义推导（输入函数）', 'custom');
+  navButton('🧮 输入函数 → 变换推导', 'custom');
+  const g1 = U.el('div', { style: 'color:var(--text-faint);font-size:12px;margin:8px 4px 4px' }, '性质与变换对'); nav.append(g1);
   navButton('性质表 · 傅立叶变换', 'ft');
   navButton('性质表 · 拉普拉斯', 'la');
   navButton('常用变换对对照表', 'lt');
-  nav.append(document.createElement('hr'), (() => { const h = U.el('div', { style: 'color:var(--text-faint);font-size:12px;margin:6px 4px' }, '逐步推导'); nav.append(h); return h; })());
+  navButton('性质表 · Z 变换', 'zt');
+  navButton('常用 Z 变换对（含 ROC）', 'ztp');
+  const g2 = U.el('div', { style: 'color:var(--text-faint);font-size:12px;margin:8px 4px 4px' }, '逐步推导'); nav.append(g2);
   navButton('方波的傅立叶级数', 'square');
   navButton('L{e^{-at}u(t)} 定义积分', 'laplace');
   navButton('矩形 ↔ sinc 变换', 'rect');
+  navButton('Z{a^n u[n]} 定义求和', 'zsum');
   navButton('小例子：卷积求响应', 'conv1');
 
   function renderTable(key) {
@@ -376,11 +426,18 @@ App.register('derive', (host) => {
     const table = document.createElement('table');
     table.className = 'tbl';
     const thead = document.createElement('tr');
-    for (const h of (key === 'lt' ? ['信号 f(t)', '拉普拉斯 F(s)'] : ['名称', '时域 / f(t)', '频域 / F(s)'])) { const th = document.createElement('th'); th.textContent = h; thead.append(th); }
+    const heads = key === 'lt' ? ['信号 f(t)', '拉普拉斯 F(s)']
+      : key === 'ztp' ? ['序列 x[n]', 'Z 变换 X(z)', 'ROC']
+      : key === 'zt' ? ['性质', '时域 / 序列域', 'z 域']
+      : ['名称', '时域 / f(t)', '频域 / F(s)'];
+    for (const h of heads) { const th = document.createElement('th'); th.textContent = h; thead.append(th); }
     table.append(thead);
     for (const r of t.rows) {
       const tr = document.createElement('tr');
-      if (key === 'ft' || key === 'la') {
+      if (key === 'ztp') {
+        tr.append(tdTex(r[0]), tdTex(r[1]));
+        const roc = document.createElement('td'); roc.textContent = r[2]; tr.append(roc);
+      } else if (r.length === 3) {
         const td1 = document.createElement('td'); td1.textContent = r[0]; tr.append(td1);
         tr.append(tdTex(r[1]), tdTex(r[2]));
       } else {
@@ -402,7 +459,7 @@ App.register('derive', (host) => {
     const wrap = document.createElement('div'); wrap.className = 'steps'; content.append(wrap);
     d.steps.forEach((st, i) => {
       const step = U.el('div', { class: 'step' + (i === 0 ? ' open' : '') });
-      const head = U.el('button', { class: 'step-head' }, `<span class="arrow">▶</span><span>${i + 1}. ${st.t}</span>`);
+      const head = stepHeadEl(st, i);
       head.addEventListener('click', () => step.classList.toggle('open'));
       const body = U.el('div', { class: 'step-body' });
       if (st.desc) body.append((() => { const dd = U.el('p', { class: 'desc' }, st.desc); return dd; })());
@@ -415,6 +472,18 @@ App.register('derive', (host) => {
   }
 
   renderItem('custom');
+
+  // 公式大小：缩放主面板根字号（KaTeX 为 em 相对尺寸，随根字号等比缩放）
+  const dvMain = host.querySelector('#dv-main');
+  let zscale = 1;
+  const zReset = host.querySelector('#dv-zreset');
+  const applyZ = () => {
+    dvMain.style.fontSize = zscale + 'em';
+    zReset.textContent = Math.round(zscale * 100) + '%';
+  };
+  host.querySelector('#dv-zin').addEventListener('click', () => { zscale = Math.min(1.7, +(zscale + 0.1).toFixed(2)); applyZ(); });
+  host.querySelector('#dv-zout').addEventListener('click', () => { zscale = Math.max(0.8, +(zscale - 0.1).toFixed(2)); applyZ(); });
+  zReset.addEventListener('click', () => { zscale = 1; applyZ(); });
 
   return { title: '公式推导', api: { dispose } };
   function dispose() { }

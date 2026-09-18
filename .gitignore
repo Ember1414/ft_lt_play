@@ -1,5 +1,7 @@
 # 本地工具配置
 .claude/
+.codebuddy/
+.playwright-cli/
 
 # 依赖与日志
 node_modules/

@@ -66,8 +66,8 @@ const DSP = (() => {
       }
       re = nre; im = nim;
     }
-    // 结果应为实系数（共轭根配对），返回自高到低
-    const out = re.map((r, i) => r * cc);
+    // 结果应为实系数（共轭根配对）；内部按升幂累积，返回前转为自高到低
+    const out = re.map((r, i) => r * cc).reverse();
     return out;
   }
 
@@ -168,6 +168,8 @@ const DSP = (() => {
 
   /* ---------- 状态空间仿真（可控标准型 / RK4） ---------- */
   // num: 自高到低, den: 自高到低(首项=1)，返回 u(t) 的零状态响应
+  // 状态链 x1'=x2, …, xn' = -a_n·x1 - a_{n-1}·x2 - … - a_1·xn + u
+  // 输出 y = b0·u + Σ (b_{n-j} - b0·a_{n-j})·x_j（b0 为分子最高次系数，即高频直通增益）
   function ltiResponse(num, den, u, tmin, tmax, steps) {
     const n = den.length - 1;
     const norm = den[0];
@@ -175,8 +177,9 @@ const DSP = (() => {
     let b = num.slice();
     while (b.length < n + 1) b.unshift(0);
     b = b.map((x) => x / norm);
-    const bn = b[n] || 0;
-    const C = b.map((x, j) => (j < n ? x - a[j + 1] * bn : 0)); // j=0..n-1
+    const b0 = b[0];
+    const C = [];
+    for (let j = 0; j < n; j++) C.push(b[n - j] - b0 * a[n - j]);
 
     const dt = (tmax - tmin) / steps;
     const t = new Float64Array(steps + 1);
@@ -186,7 +189,7 @@ const DSP = (() => {
       const tv = tmin + i * dt;
       t[i] = tv;
       const uv = u(tv);
-      let yout = bn * uv;
+      let yout = b0 * uv;
       for (let j = 0; j < n; j++) yout += C[j] * x[j];
       y[i] = yout;
 
@@ -194,15 +197,16 @@ const DSP = (() => {
         const out = new Float64Array(n);
         for (let j = 0; j < n - 1; j++) out[j] = v[j + 1];
         let acc = 0;
-        for (let j = 0; j < n; j++) acc -= a[j + 1] * v[j];
+        for (let j = 0; j < n; j++) acc -= a[n - j] * v[j];
         out[n - 1] = acc + uv;
         return out;
       };
-      const add = (p, q, k) => { for (let j = 0; j < n; j++) p[j] += q[j] * k; return p; };
+      // RK4：状态步进 x + k·h（注意原实现参数顺序反了，导致 k1 未参与积分）
+      const stepX = (v, k, h) => { const o = new Float64Array(n); for (let j = 0; j < n; j++) o[j] = v[j] + k[j] * h; return o; };
       const k1 = deriv(x);
-      const k2 = deriv(add(new Float64Array(k1), x, dt / 2));
-      const k3 = deriv(add(new Float64Array(k2), x, dt / 2));
-      const k4 = deriv(add(new Float64Array(k3), x, dt));
+      const k2 = deriv(stepX(x, k1, dt / 2));
+      const k3 = deriv(stepX(x, k2, dt / 2));
+      const k4 = deriv(stepX(x, k3, dt));
       for (let j = 0; j < n; j++) x[j] += (dt / 6) * (k1[j] + 2 * k2[j] + 2 * k3[j] + k4[j]);
     }
     return { t: Array.from(t), y: Array.from(y) };

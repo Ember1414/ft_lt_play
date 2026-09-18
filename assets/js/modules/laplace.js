@@ -10,6 +10,7 @@ App.register('la', (host) => {
   let poleSpecs = [], zeroSpecs = []; // {re, im≥0}：im>0 表示共轭对
   let num, den;
   let showROC = true;
+  let plots = {};   // 全部画图实例（含实时预览迷你图）
 
   host.innerHTML = `
     <div class="module layout">
@@ -20,25 +21,33 @@ App.register('la', (host) => {
           <button class="chip" id="la-custom-mode">✎ 在图上点选</button>
           <button class="chip active" id="la-roc-toggle">显示 ROC</button>
           <button class="btn" id="la-clear">清空</button>
-        </div>
-        <div class="ctrl"><label>手动输入 H(s)</label></div>
-        <div class="tf-frac">
-          <input type="text" id="la-num" placeholder="分子  如 1 或 s+2" spellcheck="false" aria-label="分子">
-          <div class="tf-bar" title="分数线"></div>
-          <input type="text" id="la-den" placeholder="分母  如 s^2+0.5*s+1.25" spellcheck="false" aria-label="分母">
-        </div>
-        <div class="row" id="la-struct" style="margin-bottom:10px"></div>
-        <div class="ctrl"><label>或直接输入极点（逗号分隔，支持 j）</label>
-          <input type="text" id="la-poles-in" placeholder="-0.25+1.09j, -0.25-1.09j" spellcheck="false"></div>
-        <div class="ctrl"><label>零点（可留空）</label>
-          <input type="text" id="la-zeros-in" placeholder="" spellcheck="false"></div>
-        <div class="ctrl row">
-          <button class="btn primary" id="la-apply">应用输入</button>
           <button class="btn" id="la-reset-view">复位视图</button>
         </div>
-        <div class="hint">点选模式：<b>左键</b>加极点(红)、<b>右键</b>加零点(蓝)、<b>拖动</b>移动、<b>双击</b>删除；带虚部的点自动生成共轭对。
-          s 平面支持<b>滚轮缩放</b>，视图随零极点自动留边；复位视图按当前点重新适配。</div>
+        <details class="plot-fold" id="la-input-fold">
+          <summary>手动输入 H(s) / 零极点</summary>
+          <div class="tf-frac" style="margin-top:6px">
+            <input type="text" id="la-num" placeholder="分子  如 1 或 s+2" spellcheck="false" aria-label="分子">
+            <div class="tf-bar" title="分数线"></div>
+            <input type="text" id="la-den" placeholder="分母  如 s^2+0.5*s+1.25" spellcheck="false" aria-label="分母">
+          </div>
+          <div class="row kbd" id="la-pad" style="margin:2px 0 8px"></div>
+          <div class="hint" id="la-preview" style="margin-bottom:8px"></div>
+          <div class="row" id="la-struct" style="margin-bottom:10px"></div>
+          <div class="ctrl"><label>或直接输入极点（逗号分隔，支持 j）</label>
+            <input type="text" id="la-poles-in" placeholder="-0.25+1.09j, -0.25-1.09j" spellcheck="false"></div>
+          <div class="ctrl"><label>零点（可留空）</label>
+            <input type="text" id="la-zeros-in" placeholder="" spellcheck="false"></div>
+          <div class="ctrl row">
+            <button class="btn primary" id="la-apply">应用输入</button>
+            <button class="btn" id="la-share" title="复制当前 H(s) 的分享链接">🔗 分享</button>
+          </div>
+          <div class="ctrl"><label>实时预览 · 阶跃响应（输入即算）</label>
+            <div class="canvas-wrap" style="height:120px"><canvas class="plot" id="la-mini"></canvas></div>
+          </div>
+          <div class="hint">H(s) 支持因式如 <code>(s+1)*(s+3)</code>；零极点格式：逗号分隔，如 <code>-0.25+1.09j, -2, 0.5</code>。</div>
+        </details>
         <div class="formula-center" id="la-tex"></div>
+        <div class="hint" id="la-note"></div>
         <div id="la-status" class="statbar"></div>
       </div>
       <div class="pane">
@@ -50,10 +59,10 @@ App.register('la', (host) => {
           <span style="color:var(--danger)">右侧 = 不稳定</span>
           <span style="color:var(--purple)">■ ROC</span>
         </div>
-        <div class="hint" style="margin-top:6px">反变换 h(t)=L⁻¹{H(s)} 由极点<b>位置</b>和 <b>ROC</b> 共同唯一确定：
-          ROC 在最右极点右侧（因果系统）→ 各极点项为 e^(p·t) 形式。</div>
+        <div class="hint" style="margin-top:6px">点选模式：<b>左键</b>加极点(红)、<b>右键</b>加零点(蓝)、<b>拖动</b>移动、<b>双击</b>删除；带虚部的点自动生成共轭对。
+          反变换 h(t)=L⁻¹{H(s)} 由极点<b>位置</b>和 <b>ROC</b> 共同唯一确定：ROC 在最右极点右侧（因果系统）→ 各极点项为 e^(p·t) 形式。</div>
       </div>
-      <details class="pane full plot-fold" open>
+      <details class="pane full plot-fold">
         <summary>时域响应联动</summary>
         <div class="layout right-side">
           <div class="pane">
@@ -66,7 +75,6 @@ App.register('la', (host) => {
           </div>
         </div>
         <div class="formula-center" id="la-inverse"></div>
-        <div class="hint" id="la-note"></div>
       </details>
     </div>`;
 
@@ -155,19 +163,101 @@ App.register('la', (host) => {
   ['#la-num', '#la-den', '#la-poles-in', '#la-zeros-in'].forEach((sel) => {
     $(sel).addEventListener('keydown', (e) => { if (e.key === 'Enter') applyInputs(); });
   });
-  function applyInputs() {
+
+  /* ---------- H(s) 输入实时预览 + 自动应用 + 迷你波形 ---------- */
+  const laFrac = $('#la-num').closest('.tf-frac');
+  // 符号键盘（光标处插入）
+  {
+    const padRow = $('#la-pad');
+    ['s', '^2', '^3', '*', '/', '(', ')', '+', '-'].forEach((tok) => {
+      const b = U.el('button', { class: 'chip pad-key', title: '插入 ' + tok }, tok === '^2' ? 's²' : tok === '^3' ? 's³' : tok);
+      b.addEventListener('click', () => {
+        const inp = document.activeElement && (document.activeElement.id === 'la-num' || document.activeElement.id === 'la-den') ? document.activeElement : $('#la-den');
+        const s = inp.selectionStart == null ? inp.value.length : inp.selectionStart;
+        const e2 = inp.selectionEnd == null ? s : inp.selectionEnd;
+        inp.value = inp.value.slice(0, s) + tok + inp.value.slice(e2);
+        inp.focus();
+        try { inp.setSelectionRange(s + tok.length, s + tok.length); } catch (err) { }
+        inp.dispatchEvent(new Event('input'));
+      });
+      padRow.append(b);
+    });
+  }
+  let laPvTimer = null, laAutoTimer = null;
+  // 返回解析结果（无效时为 null），同时刷新预览徽标
+  function laPreview() {
+    const nStr = $('#la-num').value.trim(), dStr = $('#la-den').value.trim();
+    const box = $('#la-preview');
+    if (!nStr && !dStr) { box.innerHTML = ''; laFrac.classList.remove('invalid'); drawMini(null); return null; }
+    const t = FX_LIB.parseTFFields(nStr || '1', dStr || '1');
+    if (!t || !t.den || !t.den[0]) {
+      laFrac.classList.add('invalid');
+      box.innerHTML = '<span style="color:var(--danger)">✗ 解析失败：支持 s^2、2*s、(s+1)*(s+3) 等写法</span>';
+      drawMini(null);
+      return null;
+    }
+    laFrac.classList.remove('invalid');
+    const d0 = t.den[0], nn = t.num.map((c) => c / d0), dd = t.den.map((c) => c / d0);
+    const bad = nn.length > dd.length;
+    box.innerHTML = bad ? '<span style="color:var(--warn)">⚠ 非真分式（分子阶次 > 分母阶次）</span>' : '<span style="color:var(--accent-2)">✓ </span>';
+    box.append(FX.span('H(s)=\\dfrac{' + texPoly(nn) + '}{' + texPoly(dd) + '}'));
+    return bad ? null : { num: nn, den: dd };
+  }
+  // 迷你阶跃响应：轻量递推，输入即算
+  let miniTF = null;
+  function drawMini(tf) {
+    const cvEl = $('#la-mini');
+    if (!cvEl) return;
+    if (tf) miniTF = tf;
+    let p = plots['la-mini'];
+    if (!p) {
+      p = new FX.Plot(cvEl, { margin: { l: 44, r: 12, t: 10, b: 24 } });
+      p.onDraw = () => drawMini(miniTF);   // 折叠面板展开/容器尺寸变化时自动重绘
+      plots['la-mini'] = p;
+    }
+    if (!tf) { p.clear(); p.label('输入有效的 H(s) 后自动显示', p.margin.l + 16, p.margin.t + 40, { color: cv('--cv-label'), size: 12 }); return; }
+    const poles = DSP.polyRoots(tf.den);
+    const unstable = poles.some((q) => q.re > 1e-9);
+    let nearest = Infinity;
+    for (const q of poles) if (Math.abs(q.re) > 1e-9) nearest = Math.min(nearest, Math.abs(q.re));
+    const tmax = unstable ? 4 : U.clamp(4 / (nearest || 1), 0.8, 16);
+    const res = DSP.ltiResponse(tf.num, tf.den, (t) => (t >= 0 ? 1 : 0), 0, tmax, 800);
+    let lo = Infinity, hi = -Infinity;
+    for (const v of res.y) if (isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+    if (!isFinite(lo)) { lo = 0; hi = 1; }
+    if (hi - lo < 1e-6) { lo -= 1; hi += 1; }
+    const pad = (hi - lo) * 0.12;
+    p.setRange(res.t[0], res.t[res.t.length - 1], lo - pad, hi + pad);
+    p.clear(); p.grid(); p.axis(true);
+    p.clip(); p.line(res.t, res.y, { color: cv('--cv-line2'), width: 2 }); p.unclip();
+    p.crosshair((t) => 't=' + U.fmt(t, 3), (y) => 'y=' + U.fmt(y, 4));
+  }
+  ['#la-num', '#la-den'].forEach((sel) => $(sel).addEventListener('input', () => {
+    clearTimeout(laPvTimer); clearTimeout(laAutoTimer);
+    laPvTimer = setTimeout(() => {
+      const t = laPreview();
+      // 输入合法（真分式）即自动应用，无需手点「应用输入」；出错只提示不打断
+      if (t) laAutoTimer = setTimeout(() => applyInputs(true), 550);
+    }, 250);
+  }));
+  laPreview();
+  function applyInputs(fromAuto) {
     const numStr = ($('#la-num').value || '').trim();
     const denStr = ($('#la-den').value || '').trim();
     const poleStr = $('#la-poles-in').value.trim();
     const zeroStr = $('#la-zeros-in').value.trim();
     if (numStr || denStr) {
       const t = FX_LIB.parseTFFields(numStr || '1', denStr || '1');
-      if (!t || !t.den || !t.den[0]) { $('#la-note').innerHTML = '<span style="color:var(--danger)">H(s) 解析失败，示例：分子 1，分母 s^2+0.5*s+1.25</span>'; return; }
+      if (!t || !t.den || !t.den[0]) { if (!fromAuto) $('#la-note').innerHTML = '<span style="color:var(--danger)">H(s) 解析失败，示例：分子 1，分母 s^2+0.5*s+1.25</span>'; return; }
+      if (t.num.length > t.den.length) { if (!fromAuto) $('#la-note').innerHTML = '<span style="color:var(--danger)">分子阶次需 ≤ 分母阶次（非真分式无法仿真时域响应）。</span>'; return; }
       num = t.num; den = t.den;
       const d0 = den[0];
       num = num.map((c) => c / d0); den = den.map((c) => c / d0);
       poleSpecs = rootsToSpecs(DSP.polyRoots(den));
       zeroSpecs = rootsToSpecs(DSP.polyRoots(num));
+      mode = 'custom';
+      $('#la-custom-mode').classList.add('active');
+      pRow.querySelectorAll('.chip').forEach((x) => x.classList.remove('active'));
       $('#la-note').textContent = '由 H(s) 求根得到零极点。';
     } else if (poleStr || zeroStr) {
       const ps = parseComplexList(poleStr), zs = parseComplexList(zeroStr);
@@ -184,7 +274,24 @@ App.register('la', (host) => {
     if (spPlot) spPlot.userAdjusted = false;
     syncInputs();
     renderTex();
+    laWriteHash();
     redraw();
+  }
+
+  // 多项式 → 可解析字符串（自高到低，显式 * 号，保号）
+  function polyToStr(c) {
+    return c.map((x, i) => {
+      const p = c.length - 1 - i;
+      const a = +Math.abs(x).toFixed(6);
+      return (x < 0 ? '-' : '+') + a + (p === 0 ? '' : p === 1 ? '*s' : '*s^' + p);
+    }).join('').replace(/^\+/, '');
+  }
+  function laWriteHash() {
+    try {
+      const nStr = $('#la-num').value.trim() || polyToStr(num);
+      const dStr = $('#la-den').value.trim() || polyToStr(den);
+      history.replaceState(null, '', '#lan=' + encodeURIComponent(nStr) + '&lad=' + encodeURIComponent(dStr));
+    } catch (e) { }
   }
 
   function rootsToSpecs(roots) {
@@ -230,83 +337,14 @@ App.register('la', (host) => {
   function renderTex() {
     const hostEl = $('#la-tex');
     hostEl.innerHTML = '';
-    const tex = 'H(s)=\\dfrac{' + texPoly(num) + '}{' + texPoly(den) + '}';
-    if (window.katex) window.katex.render(tex, hostEl, { throwOnError: false, displayMode: true });
-    else hostEl.textContent = polyStr(num) + ' / ' + polyStr(den);
+    FX.katex('H(s)=\\dfrac{' + texPoly(num) + '}{' + texPoly(den) + '}', hostEl, { displayMode: true });
   }
-  function texPoly(c) {
-    let out = '';
-    for (let i = 0; i < c.length; i++) {
-      const pow = c.length - 1 - i, a = c[i];
-      if (Math.abs(a) < 1e-9) continue;
-      const sgn = i === 0 ? '' : (a > 0 ? '+' : '-');
-      const coeff = (Math.abs(Math.abs(a) - 1) < 1e-9 && pow > 0) ? '' : U.fmt(Math.abs(a), 3);
-      const sPart = pow === 0 ? '' : (pow === 1 ? 's' : 's^{' + pow + '}');
-      out += sgn + coeff + sPart;
-    }
-    return out || '0';
-  }
+  function texPoly(c) { return U.polyTex(c); }
   function polyStr(c) {
     return c.map((x, i) => (Math.abs(x) < 1e-9 ? '' : (i === 0 ? '' : (x > 0 ? ' + ' : ' - ')) + Math.abs(x) + 's^' + (c.length - 1 - i))).join('') || '0';
   }
 
-  /* ---------- 留数法部分分式（数值） ---------- */
-  function partialFractions(num, den, poles) {
-    const n = den.length - 1;
-    const dd = [];
-    for (let i = 0; i < n; i++) dd.push(den[i] * (n - i));
-    const terms = [];
-    const used = new Array(poles.length).fill(false);
-    for (let i = 0; i < poles.length; i++) {
-      if (used[i]) continue;
-      const p = poles[i];
-      const dp = DSP.horner(dd, p);
-      if (Math.hypot(dp.re, dp.im) < 1e-6) return null;
-      const r = DSP.cdiv(DSP.horner(num, p), dp);
-      if (Math.abs(p.im) > 1e-6) {
-        let j = -1;
-        for (let k = 0; k < poles.length; k++) {
-          if (k !== i && !used[k] && Math.abs(poles[k].re - p.re) < 1e-4 && Math.abs(poles[k].im + p.im) < 1e-4) { j = k; break; }
-        }
-        if (j < 0) return null;
-        used[j] = true;
-        terms.push({ p: { re: p.re, im: Math.abs(p.im) }, r, pair: true });
-      } else {
-        terms.push({ p: { re: p.re, im: 0 }, r: { re: r.re, im: 0 }, pair: false });
-      }
-      used[i] = true;
-    }
-    return terms;
-  }
-  function evalTerms(terms, t, denom) {
-    let y = 0;
-    for (const { p, r, pair } of terms) {
-      const rr = denom === 's' ? DSP.cdiv(r, p) : r;
-      if (pair) y += 2 * Math.exp(p.re * t) * (rr.re * Math.cos(p.im * t) - rr.im * Math.sin(p.im * t));
-      else y += rr.re * Math.exp(p.re * t);
-    }
-    return y;
-  }
-  function texInverse(terms, kind) {
-    if (!terms) return '';
-    const fx = (v) => { const n = Math.abs(v) < 1e-12 ? 0 : +v.toFixed(2); return (n < 0 ? '-' : '') + Math.abs(n); };
-    let s = kind === 'imp' ? 'h(t)=L^{-1}\\{H(s)\\}=' : 'y_{step}(t)=';
-    let first = true;
-    const part = (txt) => { s += (first ? '' : '+') + txt; first = false; };
-    for (const { p, r, pair } of terms) {
-      const rr = kind === 'step' ? DSP.cdiv(r, p) : r;
-      const et = 'e^{' + fx(p.re) + 't}';
-      if (pair) {
-        const A = fx(rr.re), B = fx(-rr.im);
-        const cosPart = Math.abs(+rr.re.toFixed(2)) < 0.005 ? '' : A + '\\cos(' + fx(p.im) + 't)';
-        const sinPart = Math.abs(+rr.im.toFixed(2)) < 0.005 ? '' : (B.startsWith('-') ? B : '+') + B + '\\sin(' + fx(p.im) + 't)';
-        part('2' + et + '\\left(' + (cosPart || sinPart || '0') + (cosPart ? sinPart : '') + '\\right)');
-      } else {
-        part(fx(rr.re) + (Math.abs(p.re) < 1e-9 ? '' : et));
-      }
-    }
-    return s;
-  }
+  /* ---------- 留数法部分分式（含重极点）：引擎在 TR 中共享 ---------- */
 
   /* ---------- 稳定性 ---------- */
   function stability() {
@@ -337,21 +375,21 @@ App.register('la', (host) => {
     const dt = tmax / steps;
     const imp = { t: step.t.slice(0, -1), y: [] };
     for (let i = 0; i < steps; i++) imp.y.push((step.y[i + 1] - step.y[i]) / dt);
-    const roots = poles;
-    const pf = partialFractions(num, den, roots);
+    const pfImp = TR.partialFracGroups(num, den);
+    const pfStep = TR.partialFracGroups(num, den.concat(0));   // Y(s)=H(s)/s：分母乘 s
     let ana = null;
-    if (pf) {
-      const impAna = { t: imp.t, y: imp.t.map((t) => evalTerms(pf, t, 'none')) };
-      const hasPoleAt0 = Math.abs(den[den.length - 1]) < 1e-9;
-      const constTerm = hasPoleAt0 ? null : num[num.length - 1] / den[den.length - 1];
-      const stepAna = hasPoleAt0 ? null : { t: step.t, y: step.t.map((t) => constTerm + evalTerms(pf, t, 's')) };
-      ana = { pf, imp: impAna, step: stepAna, texImp: texInverse(pf, 'imp'), texStep: hasPoleAt0 ? '' : texInverse(pf, 'step') };
+    if (pfImp && pfImp.ok && pfStep && pfStep.ok) {
+      ana = {
+        imp: { t: imp.t, y: imp.t.map((t) => TR.evalLaplaceGroups(pfImp.groups, t)) },
+        step: { t: step.t, y: step.t.map((t) => TR.evalLaplaceGroups(pfStep.groups, t)) },
+        texImp: TR.texLaplaceGroups(pfImp.groups, 'h(t)=L^{-1}\\{H(s)\\}=') + (Math.abs(pfImp.direct) > 1e-12 ? '+\\text{（另有 }' + U.fmt(pfImp.direct, 2) + '\\delta(t)\\text{ 冲激项）}' : ''),
+        texStep: TR.texLaplaceGroups(pfStep.groups, 'y_{step}(t)=')
+      };
     }
     return { step, imp, tmax, ana };
   }
 
   /* ---------- 绘图 ---------- */
-  let plots = {};
   function redraw() {
     drawSP();
     const { step, imp, ana } = simulate();
@@ -507,6 +545,7 @@ App.register('la', (host) => {
     else if (e.button === 2) { zeroSpecs.push({ re: p.re, im: Math.abs(p.im) }); dragKind = null; }
     else { poleSpecs.push({ re: p.re, im: Math.abs(p.im) }); dragKind = null; }
     buildFromPZ();
+    syncInputs();
   });
   spCv.addEventListener('mousemove', (e) => {
     if (!dragKind) return;
@@ -514,7 +553,7 @@ App.register('la', (host) => {
     const lst = dragKind === 'pole' ? poleSpecs : zeroSpecs;
     if (lst[dragIdx]) { lst[dragIdx] = { re: p.re, im: Math.abs(p.im) }; buildFromPZ(); }
   });
-  window.addEventListener('mouseup', () => { dragKind = null; dragIdx = -1; });
+  window.addEventListener('mouseup', () => { if (dragKind) syncInputs(); dragKind = null; dragIdx = -1; });
   spCv.addEventListener('dblclick', (e) => {
     if (mode !== 'custom') return;
     const p = canvasPos(e);
@@ -526,8 +565,27 @@ App.register('la', (host) => {
     syncInputs();
   });
 
-  // 初始化
-  usePreset('second_under');
+  // 初始化：URL 带分享的 H(s)（#lan=..&lad=..）时还原，否则用默认预设
+  $('#la-share').addEventListener('click', () => {
+    laWriteHash();
+    const url = location.origin + location.pathname + location.hash;
+    const btn = $('#la-share');
+    const done = () => { btn.textContent = '✓ 已复制'; setTimeout(() => { btn.textContent = '🔗 分享'; }, 1500); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(done, done);
+    else done();
+  });
+  {
+    const lp = new URLSearchParams(location.hash.replace(/^#/, ''));
+    const hn = lp.get('lan'), hd = lp.get('lad');
+    if (hn != null && hd != null) {
+      $('#la-num').value = hn;
+      $('#la-den').value = hd;
+      $('#la-input-fold').open = true;
+      applyInputs();
+    } else {
+      usePreset('second_under');
+    }
+  }
   syncInputs();
 
   return { title: '拉普拉斯变换', api: { dispose, onTheme: () => { drawSP(); redraw(); } } };

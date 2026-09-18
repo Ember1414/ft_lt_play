@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.css" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/inter@5.0.19/index.css" />
-  <link rel="stylesheet" href="assets/css/style.css" />
+  <link rel="stylesheet" href="assets/css/style.css?v=5.9" />
 </head>
 <body>
   <div id="app">
@@ -20,46 +20,59 @@
         <div class="brand-name">傅·拉可视化</div>
       </div>
       <nav id="nav" aria-label="主导航">
-        <button class="nav-item" data-module="fs">
+        <div class="nav-group">学习 · 信号与变换</div>
+        <button class="nav-item" data-module="fs" data-group="学习 · 信号与变换">
           <span class="nav-icon">◍</span>
           <span class="nav-label">傅立叶级数</span>
         </button>
-        <button class="nav-item" data-module="ft">
+        <button class="nav-item" data-module="ft" data-group="学习 · 信号与变换">
           <span class="nav-icon">⇄</span>
           <span class="nav-label">傅立叶变换</span>
         </button>
-        <button class="nav-item" data-module="la">
+        <button class="nav-item" data-module="la" data-group="学习 · 信号与变换">
           <span class="nav-icon">σ+iω</span>
           <span class="nav-label">拉普拉斯变换</span>
         </button>
-        <button class="nav-item" data-module="sys">
+        <button class="nav-item" data-module="zt" data-group="学习 · 信号与变换">
+          <span class="nav-icon">z⁻¹</span>
+          <span class="nav-label">Z 变换</span>
+        </button>
+        <div class="nav-group">分析 · 控制系统</div>
+        <button class="nav-item" data-module="sys" data-group="分析 · 控制系统">
           <span class="nav-icon">➤</span>
           <span class="nav-label">系统分析</span>
         </button>
-        <button class="nav-item" data-module="derive">
-          <span class="nav-icon">∑</span>
-          <span class="nav-label">公式推导</span>
+        <button class="nav-item" data-module="pid" data-group="分析 · 控制系统">
+          <span class="nav-icon">⊕</span>
+          <span class="nav-label">PID 整定</span>
         </button>
-        <button class="nav-item" data-module="explore">
+        <button class="nav-item" data-module="blk" data-group="分析 · 控制系统">
+          <span class="nav-icon">▣</span>
+          <span class="nav-label">系统框图</span>
+        </button>
+        <div class="nav-group">工具 · 求解与推导</div>
+        <button class="nav-item" data-module="explore" data-group="工具 · 求解与推导">
           <span class="nav-icon">✎</span>
           <span class="nav-label">交互求解</span>
+        </button>
+        <button class="nav-item" data-module="derive" data-group="工具 · 求解与推导">
+          <span class="nav-icon">∑</span>
+          <span class="nav-label">公式推导</span>
         </button>
       </nav>
       <div class="sidebar-foot">
         <a href="#" id="about-trigger">帮助 / 使用说明</a>
-        <span class="version">v1.4 · 纯前端</span>
+        <span class="version">v3.2 · 纯前端</span>
       </div>
     </aside>
 
     <!-- 主体 -->
     <main id="main">
       <header id="topbar">
+        <button class="icon-btn" id="btn-menu" title="打开导航菜单" aria-label="打开导航菜单">☰</button>
         <div class="module-title" id="module-title"></div>
         <div class="topbar-actions">
           <button class="icon-btn" id="btn-theme" title="切换主题">☀️</button>
-          <button class="icon-btn" id="btn-play" title="播放动画" disabled>▶</button>
-          <button class="icon-btn" id="btn-reset" title="重置" disabled>↺</button>
-          <button class="icon-btn" id="btn-frame" title="逐帧">⏯</button>
         </div>
       </header>
       <section id="content" class="content">
@@ -74,18 +87,25 @@
     </main>
   </div>
 
+  <!-- 移动端侧边栏遮罩 -->
+  <div id="sidebar-mask" class="hidden"></div>
+
   <!-- 帮助弹窗 -->
   <div id="about-mask" class="mask hidden">
     <div class="dialog" style="max-width:600px;max-height:86vh;overflow:auto">
       <h3>帮助 · 如何使用</h3>
       <ul style="line-height:1.7">
-        <li><b>通用图表操作</b>：滚轮缩放 · 拖拽平移 · 双击复位 · 悬停十字线读数（手机：双指捏合缩放、单指平移）。拖图框底边改高度、右边改宽度、右下角同时改；桌面端可拖两栏之间的分隔条。部分次要图默认折叠，点标题展开。右上角 ☀️/🌙 切换深浅主题。</li>
-        <li><b>傅立叶级数</b>：选择形状观看"圆套圆"动画；调节圈数与速度。选 <b>✏️ 手绘</b>可在左侧画板画任意闭合曲线，松手即自动生成动画（可"清空重画"）。谐波谱与方波合成默认折叠，点开即可看。</li>
-        <li><b>傅立叶变换</b>：左侧选常见函数并调参数，右侧时域/幅度谱联动；相位谱按需展开。"卷积定理"页拖动滑块观看翻转-平移-重叠面积如何累积出 h(t)。</li>
-        <li><b>拉普拉斯变换</b>：按分数线填写分子/分母，或点结构模板；也可输入零极点列表，或在 s 平面点选（左键极点 / 右键零点 / 拖动移动 / 双击删除）。ROC、稳定性、时域响应与反变换解析式联动。</li>
-        <li><b>系统分析</b>：分数线输入 H(s)，或用一阶/二阶/超前/滞后/PID 模板。切换波特图 / 奈奎斯特图 / 根轨迹；时域响应按需展开。</li>
-        <li><b>公式推导</b>：性质表与逐步推导（点击步骤展开）；"自定义推导"输入因果信号组合（如 <code>3*exp(-2*t)*u(t)+sin(5*t)*u(t)</code>），自动生成拉普拉斯/傅里叶推导并用数值积分验证。</li>
-        <li><b>交互求解</b>：输入表达式自动识别（含 s 与 / 为传递函数，否则按时域信号），或用示例一键填入；"手绘画圈"画任意闭合曲线观看傅立叶绘制过程；"语音输入"念表达式自动转换（Chrome/Edge 支持）。</li>
+        <li><b>导航分组</b>：左侧按学习（信号与变换：傅立叶级数/傅立叶变换/拉普拉斯/Z 变换）→ 分析（控制系统：系统分析/PID 整定/系统框图）→ 工具（交互求解/公式推导）组织，顶栏显示当前分组。</li>
+        <li><b>通用图表操作</b>：所有图表随窗口自动适配尺寸，滚轮缩放、拖拽平移、双击复位、悬停读数（手机：双指捏合缩放、单指平移）。折叠面板点标题展开。手机端 ☰ 打开侧边栏；快捷键：<code>空格</code> 播放/暂停 · <code>R</code> 重置 · <code>F</code> 逐帧 · <code>T</code> 切主题 · <code>1–9</code> 切模块 · <code>Esc</code> 关闭弹层（仅对含动画的模块生效）。</li>
+        <li><b>傅立叶级数</b>：圆套圈动画（预设/手绘形状）；谐波叠加支持 <b>2D/3D 瀑布</b>切换——3D 视图拖动仅旋转、滚轮/捏合缩放、双击复位，向下滑动不会误移动坐标。<b>🔗 分享</b> / <b>📷 PNG</b>。</li>
+        <li><b>傅立叶变换</b>：常见函数时域↔频域联动；卷积定理动画（播放速度可调）；<b>采样与重建</b>页签演示奈奎斯特判据、混叠与零阶保持/线性/sinc 重建（重建波形与采样点严格对齐）。</li>
+        <li><b>拉普拉斯变换</b>：预设/手动 H(s)（符号键盘 + 输入即自动应用 + 实时阶跃预览）/零极点/s 平面点选，ROC 与稳定性联动，留数法解析解对照。</li>
+        <li><b>Z 变换</b>（新）：z 域传函 H(z)，z 平面零极点与单位圆稳定性判据、ROC、频率响应 H(e^{jω})、冲激/阶跃响应递推；配套公式推导（公式推导页含 Z 性质表/变换对/推导步骤）。</li>
+        <li><b>系统分析</b>：波特图/奈奎斯特图/根轨迹（适用于任意开环 L(s)：× 极点起点 · ○ 零点终点 · 虚线渐近线 · ◇ 实轴分离/汇合点 · 金点虚轴穿越 K*；<b>K 滑杆</b>拖动即查看该增益下的闭环极点与稳定性）；PM/GM 裕度；劳斯判据面板；<b>特征方程分析</b>（输入 D(s)=0 自动求根、判稳、给出 ζ/ωₙ 与自由响应曲线）。</li>
+        <li><b>PID 整定</b>：闭环仿真，调 Kp/Ki/Kd 看响应指标与闭环极点。</li>
+        <li><b>系统框图</b>：勾选两块做<b>串联/并联</b>，或单块做<b>负/正反馈</b>，自动合成传函、推导<b>状态空间 (A,B,C,D)</b>。框图采用车道化正交布线（反馈回环独立车道、嵌套逐层下移，保证零交叉），求和圈标注 +/−，端口标 R(s)/Y(s)。点「载入示例」快速体验。</li>
+        <li><b>交互求解</b>：表达式自动识别（时域/传函）、实时识别徽标、符号键盘、历史记录、分享链接、手绘画圈、语音输入；符号变换含 f(t)→F(s) / F(s)→f(t) / f(t)→F(jω) / <b>F(s)→X(z)（冲激不变法，采样周期 T 可调）</b> / x(n)→X(z) / X(z)→x(n)。</li>
+        <li><b>公式推导</b>：性质表（傅立叶/拉普拉斯/Z）与变换对（含 ROC）、逐步推导（含 Z{aⁿu[n]}）、<b>输入函数→变换推导</b>（输入 f(t) 自动逐项推导 + 数值验证）；左栏 A+/A− 可放大公式。</li>
       </ul>
       <p class="muted">无服务端、无上传，全部在浏览器本地计算。部署于 Cloudflare Pages。</p>
       <button id="about-close" class="btn primary">知道了</button>
@@ -93,17 +113,23 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.js"></script>
+  <script>window.katex || document.write('<script src="https://unpkg.com/katex@0.16.21/dist/katex.min.js"><\/script>');</script>
   <script src="https://cdn.jsdelivr.net/npm/mathjs@12.4.3/lib/browser/math.js"></script>
-  <script src="assets/js/lib/util.js"></script>
-  <script src="assets/js/lib/mathdsp.js"></script>
-  <script src="assets/js/lib/plots.js"></script>
-  <script src="assets/js/lib/fx.js"></script>
-  <script src="assets/js/app.js"></script>
-  <script src="assets/js/modules/fourier-series.js"></script>
-  <script src="assets/js/modules/fourier-transform.js"></script>
-  <script src="assets/js/modules/laplace.js"></script>
-  <script src="assets/js/modules/system.js"></script>
-  <script src="assets/js/modules/derive.js"></script>
-  <script src="assets/js/modules/explore.js"></script>
+  <script>window.math || document.write('<script src="https://unpkg.com/mathjs@12.4.3/lib/browser/math.js"><\/script>');</script>
+  <script src="assets/js/lib/util.js?v=5.9"></script>
+  <script src="assets/js/lib/mathdsp.js?v=5.9"></script>
+  <script src="assets/js/lib/plots.js?v=5.9"></script>
+  <script src="assets/js/lib/fx.js?v=5.9"></script>
+  <script src="assets/js/lib/transforms.js?v=5.9"></script>
+  <script src="assets/js/app.js?v=5.9"></script>
+  <script src="assets/js/modules/fourier-series.js?v=5.9"></script>
+  <script src="assets/js/modules/fourier-transform.js?v=5.9"></script>
+  <script src="assets/js/modules/laplace.js?v=5.9"></script>
+  <script src="assets/js/modules/system.js?v=5.9"></script>
+  <script src="assets/js/modules/pid.js?v=5.9"></script>
+  <script src="assets/js/modules/zt.js?v=5.9"></script>
+  <script src="assets/js/modules/blockdiag.js?v=5.9"></script>
+  <script src="assets/js/modules/derive.js?v=5.9"></script>
+  <script src="assets/js/modules/explore.js?v=5.9"></script>
 </body>
 </html>

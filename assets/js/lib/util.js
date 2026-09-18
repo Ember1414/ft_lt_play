@@ -66,7 +66,20 @@ const U = (() => {
   // Knuth 洗牌（保留原数组）
   const shuffle = (arr) => { const a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [a[i], a[j]] = [a[j], a[i]]; } return a; };
 
-  return { $, $$, clamp, lerp, mapRange, el, html, loop, throttle, fmt, toDb, angle, mag, cadd, cscale, cmul, cexp, polar, fitRange, shuffle };
+  // 多项式 → KaTeX 片段（自高到低系数；全零返回 '0'）
+  const polyTex = (c) => {
+    let out = '';
+    for (let i = 0; i < c.length; i++) {
+      const pow = c.length - 1 - i, a = c[i];
+      if (Math.abs(a) < 1e-9) continue;
+      const sgn = i === 0 ? '' : (a > 0 ? '+' : '-');
+      const coef = (Math.abs(Math.abs(a) - 1) < 1e-9 && pow > 0) ? '' : fmt(Math.abs(a), 3);
+      out += sgn + coef + (pow === 0 ? '' : pow === 1 ? 's' : 's^{' + pow + '}');
+    }
+    return out || '0';
+  };
+
+  return { $, $$, clamp, lerp, mapRange, el, html, loop, throttle, fmt, toDb, angle, mag, cadd, cscale, cmul, cexp, polar, fitRange, shuffle, polyTex };
 })();
 
 window.U = U;

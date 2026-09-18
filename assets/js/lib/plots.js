@@ -15,12 +15,38 @@ const FX = (() => {
   }
   function refreshTheme() { themeVer++; FX.themeVer = themeVer; }
 
-  /* ---------- KaTeX ---------- */
+  /* ---------- KaTeX（含无 KaTeX 时的可读兜底，绝不显示源码） ---------- */
+  function texToText(tex) {
+    return String(tex)
+      .replace(/\\dfrac\s*{([^{}]*)}\s*{([^{}]*)}/g, '($1)/($2)')
+      .replace(/\\frac\s*{([^{}]*)}\s*{([^{}]*)}/g, '($1)/($2)')
+      .replace(/\\sqrt\s*{([^{}]*)}/g, '√($1)')
+      .replace(/\\begin\{bmatrix\}/g, '⎡').replace(/\\end\{bmatrix\}/g, '⎤')
+      .replace(/\^{([^{}]*)}/g, '^$1')
+      .replace(/\\text\s*{([^{}]*)}/g, '$1')
+      .replace(/\\operatorname\{([^{}]*)\}/g, '$1')
+      .replace(/\\left|\\right|\\!|\\,|\\;|\\quad|\\qquad/g, ' ')
+      .replace(/\\delta/g, 'δ').replace(/\\omega/g, 'ω').replace(/\\Omega/g, 'Ω')
+      .replace(/\\pi/g, 'π').replace(/\\sigma/g, 'σ').replace(/\\infty/g, '∞')
+      .replace(/\\times/g, '×').replace(/\\cdot/g, '·').replace(/\\pm/g, '±')
+      .replace(/\\sum/g, 'Σ').replace(/\\int/g, '∫').replace(/\\approx/g, '≈')
+      .replace(/\\neq/g, '≠').replace(/\\leq/g, '≤').replace(/\\geq/g, '≥')
+      .replace(/\\alpha/g, 'α').replace(/\\beta/g, 'β').replace(/\\theta/g, 'θ')
+      .replace(/\\zeta/g, 'ζ').replace(/\\lambda/g, 'λ').replace(/\\mu/g, 'μ')
+      .replace(/\\tau/g, 'τ').replace(/\\rho/g, 'ρ').replace(/\\phi/g, 'φ')
+      .replace(/\\cos/g, 'cos').replace(/\\sin/g, 'sin').replace(/\\tan/g, 'tan')
+      .replace(/\\log/g, 'log').replace(/\\ln/g, 'ln').replace(/\\exp/g, 'exp')
+      .replace(/\\[a-zA-Z]+/g, '')
+      .replace(/[{}]/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  }
   function katex(tex, el, { displayMode = false } = {}) {
-    if (!window.katex) { if (el) el.textContent = tex; return; }
+    if (!el) return;
+    if (!window.katex) { el.classList.add('tex-fallback'); el.textContent = texToText(tex); return; }
     try {
       window.katex.render(tex, el, { throwOnError: false, displayMode });
-    } catch (e) { if (el) el.textContent = tex; }
+    } catch (e) { el.classList.add('tex-fallback'); el.textContent = texToText(tex); }
   }
   function span(tex, cls = '') {
     const s = document.createElement('span');
@@ -55,7 +81,11 @@ const FX = (() => {
       this._bind();
       canvas._fxPlot = this;
       if (typeof ResizeObserver !== 'undefined' && canvas.parentElement) {
-        this.ro = new ResizeObserver(() => { this._setupSize(); if (this.onDraw) this.onDraw(); });
+        this.ro = new ResizeObserver(() => {
+          // 模块切换后旧画布已脱离文档：断开监听，避免旧回调访问已销毁的 DOM
+          if (!canvas.isConnected) { this.ro.disconnect(); return; }
+          this._setupSize(); if (this.onDraw) this.onDraw();
+        });
         this.ro.observe(canvas.parentElement);
       }
     }
@@ -579,11 +609,11 @@ const FX = (() => {
       const setW = (nw) => {
         wrap.style.width = Math.max(140, Math.min(1400, nw)) + 'px';
         const pane = wrap.closest('.pane');
-        const lay = wrap.closest('.layout');
-        if (pane && lay && st.paneW) {
+        if (pane && st.paneW) {
           const dw = nw - st.w;
-          const pw = Math.max(220, Math.min(1400, st.paneW + dw));
-          pane.style.minWidth = pw + 'px';
+          // 仅在放大时抬高 pane 最小宽；缩回原尺寸即清除，避免残留撑宽产生多余空白/边界
+          if (dw > 4) pane.style.minWidth = Math.min(1400, st.paneW + dw) + 'px';
+          else pane.style.minWidth = '';
         }
       };
       bindDrag(hs, begin, (e) => setH(st.h + (e.clientY - st.y)));

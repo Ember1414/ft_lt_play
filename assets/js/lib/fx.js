@@ -169,16 +169,16 @@ const FX_LIB = (() => {
     parts.push(s.slice(start));
     return parts;
   }
-  function parseMonomial(t) {
+  function parseMonomial(t, v = 's') {
     let sign = 1;
     if (t[0] === '+') t = t.slice(1);
     else if (t[0] === '-') { sign = -1; t = t.slice(1); }
     if (!t) return [0];
-    if (!t.includes('s')) {
+    if (!t.includes(v)) {
       const c = parseFloat(t);
       return isNaN(c) ? null : [sign * c];
     }
-    const idx = t.indexOf('s');
+    const idx = t.indexOf(v);
     const coefText = t.slice(0, idx).replace('*', '');
     const pPart = t.slice(idx + 1);
     const power = pPart ? parseInt(pPart.replace('^', ''), 10) : 1;
@@ -189,18 +189,51 @@ const FX_LIB = (() => {
     out[0] = sign * c;
     return out;
   }
-  function parseFactor(f) {
-    f = stripOuter(f);
+  function parseFactor(f, v = 's') {
     if (!f) return [1];
-    if (f.includes('(')) return parsePoly(f);
-    for (let i = 1; i < f.length; i++) if (f[i] === '+' || f[i] === '-') return parsePoly(f);
-    return parseMonomial(f);
+    // 括号幂：(s+1)^2 → 多项式自乘（支持二重/三重极点的自然写法）
+    const pm = f.match(/^\((.+)\)\^(\d+)$/);
+    if (pm) {
+      const base = parsePoly(pm[1], v);
+      if (!base) return null;
+      let out = [1];
+      for (let i = 0; i < +pm[2]; i++) out = polyMul(out, base);
+      return out;
+    }
+    // 单目项直接解析（s、2*s、z^2、常数…），成功即返回——避免与 parsePoly 互递归
+    const mono = parseMonomial(f, v);
+    if (mono) return mono;
+    // 外层成对括号：剥壳后字符串严格缩短，递归必然终止
+    if (f[0] === '(' && f[f.length - 1] === ')') {
+      let d = 0, wrapped = true;
+      for (let i = 0; i < f.length; i++) {
+        if (f[i] === '(') d++;
+        else if (f[i] === ')') { d--; if (d === 0 && i < f.length - 1) { wrapped = false; break; } }
+      }
+      if (wrapped) return parsePoly(f.slice(1, -1), v);
+    }
+    // 顶层（括号外）含 +/-：按和差拆项（与 parsePoly 的 splitDepth 深度规则一致）
+    let d = 0;
+    for (let i = 0; i < f.length; i++) {
+      if (f[i] === '(') d++;
+      else if (f[i] === ')') d--;
+      else if (d === 0 && i > 0 && (f[i] === '+' || f[i] === '-')) return parsePoly(f, v);
+    }
+    return null;
   }
-  function parsePoly(str) {
+  function parsePoly(str, v = 's') {
     if (str == null) return null;
-    let s = String(str).replace(/\s+/g, '').replace(/\*\*/g, '^');
+    let s = String(str).replace(/\s+/g, '').replace(/\*\*/g, '^').replace(/\^\((\d+)\)/g, '^$1');
     if (!s) return [0];
-    s = s.replace(/\)\(/g, ')*(').replace(/(\d)\(/g, '$1*(').replace(/s\(/g, 's*(').replace(/\)s/g, ')*s').replace(/\)(\d)/g, ')*$1');
+    // 括号不平衡直接判非法：否则 parseFactor↔parsePoly 会无限互递归导致栈溢出
+    let bal = 0;
+    for (const c of s) {
+      if (c === '(') bal++;
+      else if (c === ')') bal--;
+      if (bal < 0) return null;
+    }
+    if (bal !== 0) return null;
+    s = s.replace(/\)\(/g, ')*(').replace(new RegExp('(\\d)\\(', 'g'), '$1*(').replace(new RegExp(v + '\\(', 'g'), v + '*(').replace(new RegExp('\\)' + v, 'g'), ')*' + v).replace(new RegExp('\\)(\\d)', 'g'), ')*$1');
     s = stripOuter(s);
     const terms = splitDepth(s, (c, i, start) => i > start && (c === '+' || c === '-'));
     let acc = null;
@@ -213,7 +246,7 @@ const FX_LIB = (() => {
       const factors = splitDepth(term, (c) => c === '*').map((f) => f.replace(/^\*/, '')).filter(Boolean);
       let prod = [1];
       for (const f of factors) {
-        const piece = parseFactor(f);
+        const piece = parseFactor(f, v);
         if (!piece) return null;
         prod = polyMul(prod, piece);
       }
@@ -223,24 +256,24 @@ const FX_LIB = (() => {
     return acc || [0];
   }
 
-  function parseTF(str) {
+  function parseTF(str, v = 's') {
     if (!str) return null;
     const s = String(str).replace(/\s+/g, '').replace(/\*\*/g, '^');
     const parts = splitDepth(s, (c) => c === '/');
-    const num = parsePoly(parts[0]);
+    const num = parsePoly(parts[0], v);
     const denStr = parts.slice(1).map((p) => p.replace(/^\//, '')).join('/');
-    const den = denStr ? parsePoly(denStr) : [1];
+    const den = denStr ? parsePoly(denStr, v) : [1];
     if (!num || !den) return null;
     if (!(den[0] || 0)) return null;
     return { num, den };
   }
-  function parseTFFields(numStr, denStr) {
+  function parseTFFields(numStr, denStr, v = 's') {
     numStr = (numStr || '').trim();
     denStr = (denStr || '').trim();
-    if (!denStr && /\/.+/.test(numStr)) return parseTF(numStr);
+    if (!denStr && /\/.+/.test(numStr)) return parseTF(numStr, v);
     if (!numStr) numStr = '1';
     if (!denStr) denStr = '1';
-    return parseTF('(' + numStr + ')/(' + denStr + ')');
+    return parseTF('(' + numStr + ')/(' + denStr + ')', v);
   }
   function tfToFields(str) {
     const s = String(str || '').replace(/\s+/g, '');

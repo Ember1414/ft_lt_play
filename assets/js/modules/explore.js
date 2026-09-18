@@ -8,12 +8,15 @@ App.register('explore', (host) => {
   const cv = FX.cvCol;
   let tab = 'expr';
   let exprRedraw = null, tfRedraw = null, drawReset = null;
-  const rendered = { expr: false, draw: false, voice: false };
+  const rendered = { expr: false, sym: false, draw: false, voice: false };
+  let dloop = null, epicy = null, loopRunning = false;   // 手绘动画循环（模块级，便于清理）
+  let speechRec = null;                                   // 语音识别实例（dispose 时停止）
 
   host.innerHTML = `
     <div class="module">
       <div class="row" id="ex-tabs" style="margin-bottom:14px"></div>
       <div id="ex-expr" class="hidden"></div>
+      <div id="ex-sym" class="hidden"></div>
       <div id="ex-draw" class="hidden"></div>
       <div id="ex-voice" class="hidden"></div>
     </div>`;
@@ -23,10 +26,17 @@ App.register('explore', (host) => {
     const box = host.querySelector('#ex-expr');
     box.innerHTML = `
       <div class="pane" style="margin-bottom:16px">
-        <div class="row">
-          <input type="text" id="ex-input" placeholder="例：exp(-2*t)*sin(10*t)*u(t)   或   5/(s^2+0.5*s+1.25)" style="flex:1">
+        <h3>输入表达式 · 自动识别时域信号 / 传递函数</h3>
+        <div class="input-bar">
+          <input type="text" id="ex-input" placeholder="例：exp(-2*t)*sin(10*t)*u(t)   或   5/(s^2+0.5*s+1.25)" spellcheck="false" autocomplete="off">
           <button class="btn primary" id="ex-go">求解</button>
+          <button class="btn" id="ex-share" title="复制当前表达式的分享链接">🔗</button>
         </div>
+        <div class="row" style="margin-top:10px;align-items:center">
+          <span id="ex-type" class="hint" style="margin:0"></span>
+        </div>
+        <div class="row kbd" id="ex-pad" style="margin-top:10px"></div>
+        <div class="row" id="ex-history" style="margin-top:10px"></div>
         <div class="row" id="ex-examples" style="margin-top:10px"></div>
         <div class="hint">自动识别：含 <code>s</code> 变量且含 <code>/</code> → 按<b>传递函数</b>求解（波特图+阶跃+极点零点）；否则按 <code>t</code> 的<b>时域信号</b>求解（波形+频谱）。
           可用函数：<code>u(t)</code> 阶跃、<code>sinc(x)</code>、<code>rect(x)</code>、<code>tri(x)</code>、<code>exp/ln/sin/cos/tan/abs/sign/sqrt</code>，<code>pi</code>。</div>
@@ -46,9 +56,94 @@ App.register('explore', (host) => {
     const exRow = box.querySelector('#ex-examples');
     examples.forEach(([expr, name]) => {
       const c = U.el('button', { class: 'chip', title: expr }, name);
-      c.addEventListener('click', () => { const inp = box.querySelector('#ex-input'); inp.value = expr; go(); });
+      c.addEventListener('click', () => { const inp = box.querySelector('#ex-input'); inp.value = expr; inp.dispatchEvent(new Event('input')); go(); });
       exRow.append(c);
     });
+
+    /* ---------- 符号键盘：在光标处插入 token（手机端友好） ---------- */
+    const pad = box.querySelector('#ex-pad');
+    const tokens = ['t', 'u(t)', 'sin(', 'cos(', 'tan(', 'exp(', 'ln(', 'sqrt(', 'abs(',
+      'sinc(', 'rect(', 'tri(', '^2', 'pi', '(', ')', '*', '/', '+', '-'];
+    tokens.forEach((tok) => {
+      const b = U.el('button', { class: 'chip pad-key', title: '插入 ' + tok }, tok === '^2' ? 'x²' : tok === 'pi' ? 'π' : tok);
+      b.addEventListener('click', () => {
+        const inp = box.querySelector('#ex-input');
+        const s = inp.selectionStart == null ? inp.value.length : inp.selectionStart;
+        const e = inp.selectionEnd == null ? s : inp.selectionEnd;
+        inp.value = inp.value.slice(0, s) + tok + inp.value.slice(e);
+        const pos = s + tok.length;
+        inp.focus();
+        try { inp.setSelectionRange(pos, pos); } catch (err) {}
+        inp.dispatchEvent(new Event('input'));
+      });
+      pad.append(b);
+    });
+
+    /* ---------- 实时识别徽标（输入即校验，无需先点求解） ---------- */
+    const typeEl = box.querySelector('#ex-type');
+    let typeTimer = null;
+    const detectType = (str) => {
+      if (!str) { typeEl.innerHTML = ''; return; }
+      const bare = str.replace(/\s+/g, '');
+      const isTF = /(^|[^a-zA-Z0-9_])s([^a-zA-Z0-9_]|$)/.test(bare) && bare.includes('/');
+      if (isTF) {
+        const t = FX_LIB.parseTF(str);
+        const ok = t && t.den && t.den[0] && t.num.length <= t.den.length;
+        typeEl.innerHTML = ok
+          ? '<span style="color:var(--accent-2)">✓ 识别为传递函数 H(s)：将绘制波特图 · 阶跃响应 · 零极点</span>'
+          : '<span style="color:var(--danger)">✗ 传递函数格式有误（需为 s 的多项式之比，且分子阶次 ≤ 分母阶次）</span>';
+      } else {
+        const f = FX_LIB.parseTimeExpr(str);
+        typeEl.innerHTML = f
+          ? '<span style="color:var(--accent-2)">✓ 识别为时域信号 x(t)：将绘制波形 · 幅度谱 · 相位谱</span>'
+          : '<span style="color:var(--danger)">✗ 暂无法解析，请检查括号与函数名（支持 u(t)、sinc、rect、tri、exp…）</span>';
+      }
+    };
+    const inpEl = box.querySelector('#ex-input');
+    inpEl.addEventListener('input', () => {
+      clearTimeout(typeTimer);
+      typeTimer = setTimeout(() => detectType(inpEl.value.trim()), 220);
+    });
+
+    /* ---------- 历史记录（localStorage，最近 10 条，点击回填） ---------- */
+    const HKEY = 'flt-expr-history';
+    let exprHistory = [];   // 注意：不可命名 history，会遮蔽全局 history 对象
+    try { exprHistory = JSON.parse(localStorage.getItem(HKEY) || '[]'); if (!Array.isArray(exprHistory)) exprHistory = []; } catch (e) { exprHistory = []; }
+    const histRow = box.querySelector('#ex-history');
+    function renderHistory() {
+      histRow.innerHTML = '';
+      if (!exprHistory.length) return;
+      histRow.append(U.el('span', { class: 'hint', style: 'margin:0' }, '历史：'));
+      exprHistory.slice(0, 8).forEach((expr) => {
+        const short = expr.length > 22 ? expr.slice(0, 22) + '…' : expr;
+        const c = U.el('button', { class: 'chip', title: expr }, short);
+        c.addEventListener('click', () => {
+          const inp = box.querySelector('#ex-input');
+          inp.value = expr;
+          inp.dispatchEvent(new Event('input'));
+          go();
+        });
+        histRow.append(c);
+      });
+      const clr = U.el('button', { class: 'chip', title: '清空历史' }, '🗑');
+      clr.addEventListener('click', () => { exprHistory = []; localStorage.removeItem(HKEY); renderHistory(); });
+      histRow.append(clr);
+    }
+    function addHistory(str) {
+      exprHistory = [str, ...exprHistory.filter((x) => x !== str)].slice(0, 10);
+      try { localStorage.setItem(HKEY, JSON.stringify(exprHistory)); } catch (e) {}
+      renderHistory();
+    }
+    renderHistory();
+
+    /* ---------- 分享链接：表达式写入 URL hash ---------- */
+    function shareLink(str) {
+      const url = location.origin + location.pathname + '#ex=' + encodeURIComponent(str);
+      const done = () => { typeEl.innerHTML = '<span style="color:var(--accent-2)">🔗 分享链接已复制</span>'; };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(done, () => { location.hash = 'ex=' + encodeURIComponent(str); });
+      } else { location.hash = 'ex=' + encodeURIComponent(str); done(); }
+    }
 
     const go = () => {
       const str = box.querySelector('#ex-input').value.trim();
@@ -57,11 +152,34 @@ App.register('explore', (host) => {
       const bare = str.replace(/\s+/g, '');
       const isTF = /(^|[^a-zA-Z0-9_])s([^a-zA-Z0-9_]|$)/.test(bare) && bare.includes('/');
       const res = box.querySelector('#ex-result');
+      // 仅在解析成功时写入历史与 URL
+      let ok = false;
+      if (isTF) {
+        const t = FX_LIB.parseTF(str);
+        ok = !!(t && t.den && t.den[0] && t.num.length <= t.den.length);
+      } else {
+        ok = !!FX_LIB.parseTimeExpr(str);
+      }
+      if (!ok) { if (isTF) renderTF(res, str); else renderTime(res, str); return; }
+      addHistory(str);
+      try { history.replaceState(null, '', '#ex=' + encodeURIComponent(str)); } catch (e) {}
       if (isTF) renderTF(res, str); else renderTime(res, str);
     };
     box.querySelector('#ex-go').addEventListener('click', go);
+    box.querySelector('#ex-share').addEventListener('click', () => shareLink(box.querySelector('#ex-input').value.trim() || inpEl2.value));
     box.querySelector('#ex-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
-    box.querySelector('#ex-input').value = 'exp(-2*t)*sin(10*t)*u(t)';
+
+    // 初始值：优先 URL 分享参数，其次历史最近一条，最后默认示例
+    const urlExpr = new URLSearchParams(location.hash.replace(/^#/, '')).get('ex');
+    const inpEl2 = box.querySelector('#ex-input');
+    if (urlExpr) {
+      inpEl2.value = urlExpr;
+    } else if (exprHistory.length) {
+      inpEl2.value = exprHistory[0];
+    } else {
+      inpEl2.value = 'exp(-2*t)*sin(10*t)*u(t)';
+    }
+    inpEl2.dispatchEvent(new Event('input'));
     go();
   }
 
@@ -139,7 +257,7 @@ App.register('explore', (host) => {
         <div class="formula-center" id="ex-h"></div>
       </div>
       <div class="pane"><h3>波特图 幅度(dB)</h3><div class="canvas-wrap" style="height:150px"><canvas class="plot" id="ex-bmag"></canvas></div></div>
-      <div class="pane"><h3>阶跃响应</h3><div class="canvas-wrap" style="height:150px"><canvas class="plot" id="ex-step"></canvas></div></div>
+      <details class="pane plot-fold"><summary>阶跃响应</summary><div class="canvas-wrap" style="height:150px"><canvas class="plot" id="ex-step"></canvas></div></details>
       <div class="pane"><h3>极点零点</h3><div class="canvas-wrap" style="height:220px"><canvas class="plot" id="ex-pz"></canvas></div></div>
       <div class="pane"><h3>关键指标</h3><div id="ex-metrics" class="statbar"></div></div>`;
     if (FX.enablePlotChrome) FX.enablePlotChrome(res);
@@ -187,17 +305,7 @@ App.register('explore', (host) => {
       <div class="stat"><span class="k">DC 增益</span><span class="v">${U.fmt(dc)}</span></div>
       <div class="stat"><span class="k">稳定性</span><span class="v" style="color:${stable ? cv('--cv-line2') : cv('--cv-danger')}">${stable ? '稳定' : '不稳定'}</span></div>`;
   }
-  function polyTex(c) {
-    let out = '';
-    for (let i = 0; i < c.length; i++) {
-      const pow = c.length - 1 - i, a = c[i];
-      if (Math.abs(a) < 1e-9) continue;
-      const sgn = i === 0 ? '' : (a >= 0 ? '+' : '-');
-      const coef = (Math.abs(Math.abs(a) - 1) < 1e-9 && pow > 0) ? '' : U.fmt(Math.abs(a), 3);
-      out += sgn + coef + (pow === 0 ? '' : pow === 1 ? 's' : 's^{' + pow + '}');
-    }
-    return out || '0';
-  }
+  function polyTex(c) { return U.polyTex(c); }
 
   /* ---------- 手绘 ---------- */
   function renderDraw() {
@@ -220,25 +328,49 @@ App.register('explore', (host) => {
       </div>`;
     const cvs = box.querySelector('#ex-drawcv');
     const g = cvs.getContext('2d');
-    function clearInput() { g.fillStyle = cv('--cv-bg'); g.fillRect(0, 0, cvs.width, cvs.height); }
-    drawReset = clearInput;
+    // 关键修复：画布按 DPR 设定物理分辨率并缩放上下文——
+    // 旧代码从未设置 canvas 尺寸（默认 300×150 被拉伸到满宽），导致笔迹呈马赛克
+    function fitCv() {
+      const dpr = window.devicePixelRatio || 1;
+      const w = cvs.clientWidth || 600, h = cvs.clientHeight || 220;
+      const nw = Math.round(w * dpr), nh = Math.round(h * dpr);
+      if (cvs.width !== nw || cvs.height !== nh) { cvs.width = nw; cvs.height = nh; }
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    function clearInput() { fitCv(); g.fillStyle = cv('--cv-bg'); g.fillRect(0, 0, cvs.clientWidth, cvs.clientHeight); }
+    function strokePath() {
+      g.strokeStyle = cv('--cv-text'); g.lineWidth = 2; g.lineJoin = 'round'; g.lineCap = 'round';
+      g.beginPath();
+      for (let i = 0; i < pts.length; i++) { const c = pts[i]; i ? g.lineTo(c.x, c.y) : g.moveTo(c.x, c.y); }
+      g.stroke();
+    }
+    function repaintStroke() { clearInput(); if (pts.length) strokePath(); }
+    drawReset = repaintStroke;   // 主题切换时重绘底色与已画轨迹
     clearInput();
     let drawing = false, pts = [];
     cvs.addEventListener('pointerdown', (e) => { drawing = true; pts = []; clearInput(); try { cvs.setPointerCapture(e.pointerId); } catch (err) {} e.preventDefault(); });
-    window.addEventListener('pointerup', () => { drawing = false; });
+    const onWinUp = () => { drawing = false; };
+    window.addEventListener('pointerup', onWinUp);
     cvs.addEventListener('pointermove', (e) => {
       if (!drawing) return;
       const r = cvs.getBoundingClientRect();
-      pts.push({ x: (e.clientX - r.left) * (cvs.width / r.width), y: (e.clientY - r.top) * (cvs.height / r.height) });
-      g.strokeStyle = cv('--cv-text'); g.lineWidth = 2; g.lineJoin = 'round'; g.beginPath();
-      for (let i = 0; i < pts.length; i++) { const c = pts[i]; i ? g.lineTo(c.x, c.y) : g.moveTo(c.x, c.y); }
+      const x = e.clientX - r.left, y = e.clientY - r.top;
+      const last = pts[pts.length - 1];
+      if (last && Math.hypot(x - last.x, y - last.y) < 1.5) return;   // 抽稀，笔迹更顺滑
+      pts.push({ x, y });
+      g.strokeStyle = cv('--cv-text'); g.lineWidth = 2; g.lineJoin = 'round'; g.lineCap = 'round';
+      g.beginPath();
+      if (last) { g.moveTo(last.x, last.y); g.lineTo(x, y); } else { g.moveTo(x, y); g.lineTo(x + 0.1, y); }
       g.stroke();
     });
+    // 容器尺寸变化时保持清晰（桌面适配）
+    if (typeof ResizeObserver !== 'undefined' && cvs.parentElement) {
+      const drawRO = new ResizeObserver(() => { if (!cvs.isConnected) { drawRO.disconnect(); return; } repaintStroke(); });
+      drawRO.observe(cvs.parentElement);
+    }
     box.querySelector('#ex-drcl').addEventListener('click', () => { pts = []; clearInput(); });
 
-    let epicy = null;
-    const dloop = U.loop(() => { if (epicy) drawFrame(); });
-    let loopRunning = false;
+    dloop = U.loop(() => { if (epicy) drawFrame(); });
     box.querySelector('#ex-dran').addEventListener('click', () => {
       if (pts.length < 30) { box.querySelector('#ex-drstat').innerHTML = '<span class="hint">请先在上图画一条曲线。</span>'; return; }
       const sm = resample(pts, 480);
@@ -274,7 +406,8 @@ App.register('explore', (host) => {
       if (!o || !o.clientWidth) return;
       const dpr = window.devicePixelRatio || 1;
       const W = o.clientWidth, H = o.clientHeight;
-      if (o.width !== Math.round(W * dpr)) { o.width = W * dpr; o.height = H * dpr; }
+      const nw = Math.round(W * dpr), nh = Math.round(H * dpr);
+      if (o.width !== nw || o.height !== nh) { o.width = nw; o.height = nh; }
       const g2 = o.getContext('2d');
       g2.setTransform(dpr, 0, 0, dpr, 0, 0);
       g2.fillStyle = cv('--cv-bg'); g2.fillRect(0, 0, W, H);
@@ -333,6 +466,7 @@ App.register('explore', (host) => {
     const outBox = box.querySelector('#ex-voice-text');
     if (!SR) { outBox.innerHTML = '<span class="hint" style="color:var(--danger)">当前浏览器不支持 Web Speech API，请使用 Chrome/Edge。</span>'; return; }
     const rec = new SR(); rec.lang = 'zh-CN'; rec.interimResults = true; rec.continuous = true;
+    speechRec = rec;
     let finalTxt = '';
     rec.onresult = (e) => {
       let cur = '';
@@ -369,29 +503,411 @@ App.register('explore', (host) => {
     return s;
   }
 
+  /* ---------- 符号变换求解器：输入正确形式，直接查看变换结果 ---------- */
+  function renderSym() {
+    const box = host.querySelector('#ex-sym');
+    box.innerHTML = `
+      <div class="pane" style="margin-bottom:16px">
+        <h3>符号变换求解器</h3>
+        <div class="row" id="sym-modes" style="margin-bottom:12px"></div>
+        <div class="input-bar">
+          <input type="text" id="sym-in" spellcheck="false" autocomplete="off">
+          <input type="number" id="sym-t" value="1" min="0.05" step="0.1" title="采样周期 T（仅 F(s)→X(z) 用）" style="flex:0 0 76px">
+          <button class="btn primary" id="sym-go">求解</button>
+        </div>
+        <div class="row kbd" id="sym-pad" style="margin-top:8px"></div>
+        <div class="hint" id="sym-hint" style="margin-top:8px"></div>
+        <div class="row" id="sym-ex" style="margin-top:10px"></div>
+      </div>
+      <div id="sym-out"><p class="hint">输入表达式后自动给出符号结果与数值验证。</p></div>`;
+
+    const modes = [
+      ['lt', 'f(t) → F(s)'], ['il', 'F(s) → f(t)'], ['ft', 'f(t) → F(jω)'],
+      ['s2z', 'F(s) → X(z)'], ['lz', 'x(n) → X(z)'], ['iz', 'X(z) → x(n)']
+    ];
+    const conf = {
+      lt: {
+        ph: '3*exp(-2*t)*u(t) + sin(5*t)*u(t)',
+        hint: '项（+ - 连接，u(t) 可省略）：<code>c*exp(-a*t)</code> · <code>c*sin(w*t)</code> · <code>c*cos(w*t)</code> · <code>c*t^n</code> · <code>c*t^n*exp(-a*t)</code> · <code>c</code> · <code>u(t)</code>；w 支持 <code>2*pi*3</code> 写法',
+        ex: [['3*exp(-2*t)*u(t)', '指数衰减'], ['sin(2*pi*3*t)', '3Hz正弦'], ['5-2*cos(2*t)*u(t)', '常数+余弦'], ['t^2*exp(-3*t)*u(t)', '幂×指数'], ['exp(-t)*u(t)-exp(-2*t)*u(t)', '两指数之差']]
+      },
+      ft: {
+        ph: 'exp(-2*t)*u(t)',
+        hint: '语法同 f(t)→F(s)；结果为 F(jω)。含 sin/cos/t^n/u 等不衰减项时含<b>冲激谱线 δ(ω)</b>。',
+        ex: [['exp(-2*t)*u(t)', '单边指数'], ['cos(2*pi*4*t)', '4Hz余弦'], ['3*exp(-t)*u(t)', '3倍指数'], ['t*u(t)', '斜坡']]
+      },
+      il: {
+        ph: '1/((s+1)^2)',
+        hint: '输入 s 的<b>真分式</b>，<b>支持重极点</b>：<code>1/((s+1)^2)</code> · <code>1/(s^2+3*s+2)</code> · <code>(s+2)/(s^2+4)</code> · <code>5/(s*(s+5))</code>；自动部分分式（留数/重根阶）给出解析式',
+        ex: [['1/((s+1)^2)', '二重极点'], ['1/((s+1)^2*(s+2))', '二重+单'], ['(s+2)/(s^2+4)', '共轭极点'], ['5/(s*(s+5))', '含积分器']]
+      },
+      s2z: {
+        ph: '1/(s^2+2*s+5)',
+        hint: '输入 s 域<b>真分式</b> F(s)，按极点映射 <b>z = e^{sT}</b>（冲激不变法）给出离散域 X(z)、ROC 与数值验证。右侧数字框为<b>采样周期 T</b>，可改后重算。',
+        ex: [['1/(s+1)', '一阶'], ['1/(s^2+2*s+5)', '欠阻尼二阶'], ['1/(s*(s+1))', '含积分器'], ['(s+3)/(s^2+3*s+2)', '带零点']]
+      },
+      lz: {
+        ph: '0.5^n*u(n) + n*u(n)',
+        hint: '项（+ - 连接，u(n) 可省略；<b>a 需为具体数值</b>）：<code>0.5^n</code> · <code>n*0.5^n</code> · <code>n</code> · <code>n^2*u(n)</code> · <code>cos(w*n)</code> · <code>sin(w*n)</code> · <code>u(n)</code> · <code>delta(n)</code> · 常数；<code>2sin(3n)</code> 等省略乘号也可以',
+        ex: [['0.5^n*u(n)', '几何序列'], ['cos(pi/4*n)*u(n)', '余弦序列'], ['2*n*u(n)', '斜坡序列'], ['n^2*u(n)', '抛物线序列'], ['delta(n)', '单位脉冲'], ['0.5^n*u(n)+n*u(n)', '组合']]
+      },
+      iz: {
+        ph: 'z/(z^2-0.25)',
+        hint: '输入 z 的<b>真分式</b>（正幂）：<code>z/(z^2-0.25)</code> · <code>1/(z-0.5)</code> · <code>z/(z-1)</code>；自动极点展开给出 h(n) 解析式与稳定性结论',
+        ex: [['z/(z^2-0.25)', '共轭实极点'], ['1/(z-0.5)', '一阶'], ['z/(z-1)', '边界'], ['1/(z^2-1.6*z+0.9425)', '谐振器']]
+      }
+    };
+    let mode = 'lt';
+    const modeRow = box.querySelector('#sym-modes');
+    const inp = box.querySelector('#sym-in');
+    modes.forEach(([k, label]) => {
+      const c = U.el('button', { class: 'chip' + (k === mode ? ' active' : ''), 'data-k': k }, label);
+      c.addEventListener('click', () => {
+        mode = k;
+        modeRow.querySelectorAll('.chip').forEach((x) => x.classList.toggle('active', x === c));
+        applyMode();
+      });
+      modeRow.append(c);
+    });
+    function applyMode() {
+      const cf = conf[mode];
+      inp.placeholder = cf.ph;
+      inp.value = cf.ph;   // 切换模式时载入该模式示例，避免跨模式语法残留
+      box.querySelector('#sym-hint').innerHTML = cf.hint;
+      box.querySelector('#sym-t').style.display = mode === 's2z' ? '' : 'none';   // 仅 F(s)→X(z) 显示采样周期
+      // 插入键盘随模式切换
+      const padRow = box.querySelector('#sym-pad');
+      padRow.innerHTML = '';
+      const varTok = (mode === 'lz' || mode === 'iz') ? 'n' : 't';
+      const tokList = (mode === 'il' || mode === 's2z') ? ['s', '^2', '*', '/', '(', ')', '+', '-']
+        : mode === 'iz' ? ['z', '^2', '*', '/', '(', ')', '+', '-']
+        : [varTok, 'u(' + varTok + ')', 'sin(', 'cos(', 'exp(-0.5*' + varTok + ')*', '^2', 'pi', '*', '(', ')', '+', '-'];
+      tokList.forEach((tok) => {
+        const b = U.el('button', { class: 'chip pad-key', title: '插入 ' + tok }, tok === 'pi' ? 'π' : tok);
+        b.addEventListener('click', () => {
+          const s = inp.selectionStart == null ? inp.value.length : inp.selectionStart;
+          const e2 = inp.selectionEnd == null ? s : inp.selectionEnd;
+          inp.value = inp.value.slice(0, s) + tok + inp.value.slice(e2);
+          inp.focus();
+          try { inp.setSelectionRange(s + tok.length, s + tok.length); } catch (err) { }
+          inp.dispatchEvent(new Event('input'));
+        });
+        padRow.append(b);
+      });
+      const exRow = box.querySelector('#sym-ex');
+      exRow.innerHTML = '';
+      cf.ex.forEach(([expr, name]) => {
+        const c = U.el('button', { class: 'chip', title: expr }, name);
+        c.addEventListener('click', () => { inp.value = expr; solve(); });
+        exRow.append(c);
+      });
+      solve();
+    }
+
+    const out = box.querySelector('#sym-out');
+    function showTex(lines) {
+      out.innerHTML = '';
+      const card = U.el('div', { class: 'pane' });
+      lines.forEach(([tex, note]) => {
+        const d = U.el('div', { class: 'formula-center' });
+        FX.katex(tex, d, { displayMode: true });
+        card.append(d);
+        if (note) card.append(U.el('p', { class: 'hint', html: note }));
+      });
+      out.innerHTML = '';
+      out.append(card);
+    }
+    function showErr(msg) {
+      out.innerHTML = `<div class="pane"><p style="color:var(--danger)">✗ ${msg}</p></div>`;
+    }
+    function verifyTable(rows) {
+      const tbl = U.el('table', { class: 'tbl', style: 'margin-top:12px;max-width:560px' });
+      tbl.innerHTML = '<tr><th>验证</th><th>数值</th><th>符号</th><th>误差</th></tr>' +
+        rows.map((r) => `<tr><td>${r[0]}</td><td>${U.fmt(r[1], 6)}</td><td>${U.fmt(r[2], 6)}</td><td style="color:${r[3] < 1e-6 ? 'var(--accent-2)' : 'var(--warn)'}">${U.fmt(r[3], 2)}</td></tr>`).join('');
+      return tbl;
+    }
+
+    function solve() {
+      const str = inp.value.trim();
+      if (!str) return;
+      try {
+        if (mode === 'lt' || mode === 'ft') {
+          const items = TR.parseTimeCombo(str);
+          if (!items) return showErr('无法解析。请按提示的项语法输入，如 3*exp(-2*t)*u(t) + sin(5*t)*u(t)');
+          if (mode === 'lt') {
+            const L = TR.laplaceOfItems(items);
+            // 数值验证：定义积分 vs 符号 F(s)
+            const sTest = Math.max(0.6, L.right + 0.6);
+            const rows = [sTest, sTest + 1].map((sv) => {
+              const NN = 12000, T = 60, h = T / NN;
+              let sum = TR.fNumeric(items, 0) + TR.fNumeric(items, T) * Math.exp(-sv * T);
+              for (let i = 1; i < NN; i++) sum += (i % 2 ? 4 : 2) * TR.fNumeric(items, i * h) * Math.exp(-sv * i * h);
+              const num = sum * h / 3;
+              const sym = TR.FsNumeric(items, sv);
+              return ['s=' + sv, num, sym, Math.abs(num - sym) / (Math.abs(sym) || 1)];
+            });
+            showTex([[L.fLine], [L.fsLine, '因果信号单边拉普拉斯变换。'], [L.rocTex, ''], ['F(j\\omega)', '令 s=jω（ROC 含 jω 轴时）即得傅里叶变换。']]);
+            const card = out.firstChild;
+            card.append(verifyTable(rows));
+            if (L.hasOsc) card.append(U.el('p', { class: 'hint', html: '注：含不衰减项（sin/cos/tⁿ/常数），ROC 右边界为 0，傅里叶变换含冲激谱线。' }));
+          } else {
+            const F = TR.fourierOfItems(items);
+            showTex([[F.tex, F.imp ? '含冲激谱线：不衰减（周期/常值/幂）成分的频谱在频域以 δ(ω) 呈现。' : 'ROC 含 jω 轴，傅里叶变换 = 令 s = jω。']]);
+          }
+        } else if (mode === 's2z') {
+          // F(s) → X(z)：冲激不变法（支持重极点）。
+          // 部分分式（TR 引擎）→ x(n)=f(nT) → D(z)=Π(z−λ)^m，N(z) 由 M 个圆周点的级数值解线性方程组
+          const t = FX_LIB.parseTF(str);
+          if (!t || !t.den || !t.den[0]) return showErr('无法解析 F(s)。示例：1/(s^2+2*s+5)');
+          if (t.num.length > t.den.length) return showErr('需为真分式（分子阶次 ≤ 分母阶次）');
+          const T = Math.max(0.05, +(box.querySelector('#sym-t').value) || 1);
+          const d0 = t.den[0];
+          const nn = t.num.map((c) => c / d0), dd = t.den.map((c) => c / d0);
+          const pf = TR.partialFracGroups(nn, dd);
+          if (!pf.ok) return showErr(pf.note || '部分分式失败');
+          const xOf = (n) => TR.evalLaplaceGroups(pf.groups, n * T);
+          const cmul = (a, b) => ({ re: a.re * b.re - a.im * b.im, im: a.re * b.im + a.im * b.re });
+          const cdiv = (a, b) => { const d = b.re * b.re + b.im * b.im || 1e-300; return { re: (a.re * b.re + a.im * b.im) / d, im: (a.im * b.re - a.re * b.im) / d }; };
+          // z 极点（含重数、共轭成对）
+          const zGroups = [];
+          for (const g of pf.groups) {
+            const lam = { re: Math.exp(g.p.re * T) * Math.cos(g.p.im * T), im: Math.exp(g.p.re * T) * Math.sin(g.p.im * T) };
+            zGroups.push({ z: lam, m: g.m, sPole: g.p });
+            if (g.pair) zGroups.push({ z: { re: lam.re, im: -lam.im }, m: g.m, sPole: { re: g.p.re, im: -g.p.im } });
+          }
+          const M = zGroups.reduce((s, g) => s + g.m, 0);
+          if (M === 0) return showErr('F(s) 没有有限极点（如纯多项式/纯微分结构），无法表示为有理 X(z)');
+          // D(z) = Π (z−λ)^m（自高到低复系数；实系数取实部）
+          const mulZ = (P, lam) => {
+            const o = new Array(P.length + 1).fill(0).map(() => ({ re: 0, im: 0 }));
+            for (let i = 0; i < P.length; i++) {
+              o[i] = { re: o[i].re + P[i].re, im: o[i].im + P[i].im };
+              o[i + 1] = { re: o[i + 1].re - (P[i].re * lam.re - P[i].im * lam.im), im: o[i + 1].im - (P[i].re * lam.im + P[i].im * lam.re) };
+            }
+            return o;
+          };
+          let Dc = [{ re: 1, im: 0 }];
+          for (const g of zGroups) for (let i = 0; i < g.m; i++) Dc = mulZ(Dc, g.z);
+          const zDen = Dc.map((c) => +c.re.toFixed(9));
+          const maxLam = zGroups.reduce((m, g) => Math.max(m, Math.hypot(g.z.re, g.z.im)), 0);
+          // 在 M 个圆周点上求 X(z_i)（级数），解 Σ c_j z_i^{M−1−j} = X_i·D(z_i) 得 N(z) 系数
+          const Rr = 2.2 * maxLam + 0.5;
+          const NMAX = 1500;
+          const rowOf = (zi) => {
+            const row = [];
+            for (let j = 0; j < M; j++) {
+              const pw = M - 1 - j;
+              const pr = Math.pow(Math.hypot(zi.re, zi.im), pw), pa = Math.atan2(zi.im, zi.re) * pw;
+              row.push({ re: pr * Math.cos(pa), im: pr * Math.sin(pa) });
+            }
+            return row;
+          };
+          const evalD = (zi) => {
+            let dv = { re: 0, im: 0 };
+            for (let j = 0; j < Dc.length; j++) {
+              const pw = Dc.length - 1 - j;
+              const pr = Math.pow(Math.hypot(zi.re, zi.im), pw), pa = Math.atan2(zi.im, zi.re) * pw;
+              dv = { re: dv.re + Dc[j].re * pr * Math.cos(pa) - Dc[j].im * pr * Math.sin(pa), im: dv.im + Dc[j].re * pr * Math.sin(pa) + Dc[j].im * pr * Math.cos(pa) };
+            }
+            return dv;
+          };
+          const seriesAt = (zi) => {
+            let sv = { re: 0, im: 0 };
+            for (let n = 0; n <= NMAX; n++) {
+              const xn = xOf(n);
+              if (xn === 0) continue;
+              const pw = Math.pow(Math.hypot(zi.re, zi.im), -n);
+              const an = Math.atan2(zi.im, zi.re) * (-n);
+              sv = { re: sv.re + xn * pw * Math.cos(an), im: sv.im + xn * pw * Math.sin(an) };
+            }
+            return sv;
+          };
+          const Amat = [];
+          for (let i = 0; i < M; i++) {
+            const th = (2 * Math.PI * i) / M + 0.37;
+            const zi = { re: Rr * Math.cos(th), im: Rr * Math.sin(th) };
+            const row = rowOf(zi);
+            const dv = evalD(zi), sv = seriesAt(zi);
+            row.push(cmul(sv, dv));
+            Amat.push(row);
+          }
+          // 复数高斯消元（列主元）
+          for (let col = 0; col < M; col++) {
+            let piv = col;
+            for (let r2 = col + 1; r2 < M; r2++) if (Math.hypot(Amat[r2][col].re, Amat[r2][col].im) > Math.hypot(Amat[piv][col].re, Amat[piv][col].im)) piv = r2;
+            [Amat[col], Amat[piv]] = [Amat[piv], Amat[col]];
+            const pv = Amat[col][col];
+            for (let r2 = col + 1; r2 < M; r2++) {
+              const fct = cdiv(Amat[r2][col], pv);
+              for (let j = col; j <= M; j++) Amat[r2][j] = { re: Amat[r2][j].re - fct.re * Amat[col][j].re + fct.im * Amat[col][j].im, im: Amat[r2][j].im - fct.re * Amat[col][j].im - fct.im * Amat[col][j].re };
+            }
+          }
+          const cSol = new Array(M).fill({ re: 0, im: 0 });
+          for (let i = M - 1; i >= 0; i--) {
+            let acc = { ...Amat[i][M] };
+            for (let j = i + 1; j < M; j++) acc = { re: acc.re - Amat[i][j].re * cSol[j].re + Amat[i][j].im * cSol[j].im, im: acc.im - Amat[i][j].re * cSol[j].im - Amat[i][j].im * cSol[j].re };
+            cSol[i] = cdiv(acc, Amat[i][i]);
+          }
+          const zNum = cSol.map((c) => +c.re.toFixed(9));
+          const texPZ = (c) => {
+            let o = '';
+            for (let i = 0; i < c.length; i++) {
+              const pw = c.length - 1 - i, a = c[i];
+              if (Math.abs(a) < 1e-9) continue;
+              const sgn = o ? (a > 0 ? '+' : '-') : (a < 0 ? '-' : '');
+              const co = (Math.abs(Math.abs(a) - 1) < 1e-9 && pw > 0) ? '' : U.fmt(Math.abs(a), 3);
+              o += sgn + co + (pw === 0 ? '' : pw === 1 ? 'z' : 'z^{' + pw + '}');
+            }
+            return o || '0';
+          };
+          const maxRe = pf.groups.reduce((m, g) => Math.max(m, g.p.re), -Infinity);
+          const zRoc = Math.exp(maxRe * T);
+          const fmt3 = (v) => { const x = Math.abs(v) < 5e-4 ? 0 : v; return x.toFixed(3); };
+          const allSimple = pf.groups.every((g) => g.m === 1);
+          const lines = [];
+          if (allSimple) {
+            // 逐项 e-闭式（共轭对合并）
+            const termTexs = [], mapTexs = [];
+            for (const g of pf.groups) {
+              const p = g.p, R = g.A[0], lam = { re: Math.exp(p.re * T) * Math.cos(p.im * T), im: Math.exp(p.re * T) * Math.sin(p.im * T) };
+              mapTexs.push('p=' + fmt3(p.re) + (Math.abs(p.im) > 1e-9 ? (p.im > 0 ? '+' : '-') + fmt3(Math.abs(p.im)) + 'j' : '')
+                + '\\;\\mapsto\\;z=e^{pT}=' + fmt3(lam.re) + (Math.abs(lam.im) > 1e-9 ? (lam.im > 0 ? '+' : '-') + fmt3(Math.abs(lam.im)) + 'j' : ''));
+              if (Math.abs(p.im) > 1e-9) {
+                const a = (Math.abs(R.re) < 5e-4 ? 0 : R.re), b = R.im, sg = p.re, w = p.im;
+                const denTex = 'z^{2}-2\\,e^{' + fmt3(sg) + 'T}\\cos(' + fmt3(w) + 'T)\\,z+e^{' + fmt3(2 * sg) + 'T}';
+                let numTex;
+                if (a === 0) {
+                  const c1 = -2 * b;
+                  numTex = (c1 < 0 ? '-' : '') + '2\\,' + fmt3(Math.abs(b)) + '\\,e^{' + fmt3(sg) + 'T}\\sin(' + fmt3(w) + 'T)\\,z';
+                } else {
+                  numTex = '2\\,' + fmt3(a) + '\\,z^{2}-2\\,e^{' + fmt3(sg) + 'T}\\left(' + fmt3(a) + '\\cos(' + fmt3(w) + 'T)' + (b < 0 ? '-' : '+') + fmt3(Math.abs(b)) + '\\sin(' + fmt3(w) + 'T)\\right)z';
+                }
+                termTexs.push('\\dfrac{' + numTex + '}{' + denTex + '}');
+              } else {
+                termTexs.push('\\dfrac{' + fmt3(R.re) + '\\,z}{z-e^{' + fmt3(p.re) + 'T}}');
+              }
+            }
+            lines.push(['X(z)=' + termTexs.join('+'), '冲激不变法逐项闭式：X(z)=Σ Rₖz/(z−e^{pₖT})，共轭对已合并为实系数二阶节。采样周期 T = ' + U.fmt(T, 2) + '（右侧数字框可改）。']);
+          } else {
+            const lap = TR.invLaplace(nn, dd);
+            if (lap.tex) lines.push([lap.tex.replace('f(t)=', 'x(n)=f(nT),\\quad f(t)='), '时域闭式（含重极点模态 t^{k−1}e^{pT}），按 nT 采样即得序列。采样周期 T = ' + U.fmt(T, 2) + '（右侧数字框可改）。']);
+          }
+          {
+            let first = true;
+            for (const g of pf.groups) {
+              const lam = { re: Math.exp(g.p.re * T) * Math.cos(g.p.im * T), im: Math.exp(g.p.re * T) * Math.sin(g.p.im * T) };
+              const mTxt = g.m > 1 ? '\\text{（}' + g.m + '\\text{ 重）}' : '';
+              lines.push(['p=' + fmt3(g.p.re) + (Math.abs(g.p.im) > 1e-9 ? (g.p.im > 0 ? '+' : '-') + fmt3(Math.abs(g.p.im)) + 'j' : '') + mTxt
+                + '\\;\\mapsto\\;z=e^{pT}=' + fmt3(lam.re) + (Math.abs(lam.im) > 1e-9 ? (lam.im > 0 ? '+' : '-') + fmt3(Math.abs(lam.im)) + 'j' : ''),
+                first ? '极点映射 z = e^{sT}：s 左半平面（σ<0）↔ 单位圆内（|z|<1）。' : '']);
+              first = false;
+            }
+          }
+          lines.push(['X(z)=\\dfrac{' + texPZ(zNum) + '}{' + texPZ(zDen) + '}', '数值合并形式（冲激不变法：X(z)=Σ x(n)z^{−n} 的有理式，分母 = Π(z−e^{pₖT})^{mₖ}）。']);
+          lines.push(['\\text{ROC: } |z|>' + U.fmt(zRoc, 3) + '=e^{' + fmt3(maxRe) + 'T}', '最右极点 σ=' + U.fmt(maxRe, 3) + ' 映射为 |z| = e^{σT}。']);
+          showTex(lines);
+          // 数值验证：另取一个非插值点的真实点，对比级数和与闭式
+          const zv = 1.9 * maxLam + 0.3;
+          let series = 0;
+          for (let n = 0; n <= NMAX; n++) series += xOf(n) * Math.pow(zv, -n);
+          const closed = DSP.cdiv(DSP.horner(zNum, { re: zv, im: 0 }), DSP.horner(zDen, { re: zv, im: 0 }));
+          const card = out.firstChild;
+          card.append(verifyTable([['z=' + U.fmt(zv, 2) + ' 级数和', series, closed.re, Math.abs(series - closed.re) / (Math.abs(closed.re) || 1)]]));
+          card.append(U.el('p', { class: 'hint', html: '数值验证：x(n)=f(nT) 的 Z 级数截断和与符号闭式 X(z) 在 ROC 外一点对比（该点不参与分子拟合，可检验重极点处理是否正确）。' }));
+        } else if (mode === 'il') {
+          const t = FX_LIB.parseTF(str);
+          if (!t || !t.den || !t.den[0]) return showErr('无法解析 F(s)。示例：1/(s^2+3*s+2)');
+          if (t.num.length > t.den.length) return showErr('需为真分式（分子阶次 ≤ 分母阶次）');
+          const d0 = t.den[0];
+          const r = TR.invLaplace(t.num.map((c) => c / d0), t.den.map((c) => c / d0));
+          if (!r.tex) return showErr(r.note);
+          const poles = DSP.polyRoots(t.den.map((c) => c / d0));
+          const stable = poles.every((q) => q.re < -1e-9);
+          showTex([[r.tex, (r.note || '') + (r.note ? '<br>' : '') + (stable ? '全部极点在左半平面 → f(t) 收敛（稳定）。' : '<span style="color:var(--warn)">存在右半平面极点 → f(t) 发散。</span>')]]);
+        } else if (mode === 'lz') {
+          const items = TR.parseZCombo(str);
+          if (!items) return showErr('无法解析序列。示例：a^n*u(n) + n*u(n)，支持 cos(w*n)、sin(w*n)、delta(n)');
+          const Z = TR.zOfItems(items);
+          // 数值验证：z = 2·roc 处 级数和 vs 符号闭式
+          const zv = 2 * (Z.roc || 0.5) + 0.5;
+          const series = TR.XzNumeric(items, zv, Z.roc, 600);
+          const closed = items.reduce((acc, it) => {
+            const v = it.coef * it.sign, z = zv;
+            switch (it.kind) {
+              case 'an': return acc + (it.a === 0 ? v : v * z / (z - it.a));
+              case 'nan': return acc + v * it.a * z / Math.pow(z - it.a, 2);
+              case 'n': return acc + v * z / Math.pow(z - 1, 2);
+              case 'np2': return acc + v * z * (z + 1) / Math.pow(z - 1, 3);
+              case 'zn': { const cw = Math.cos(it.w); return acc + v * z * (z - cw) / (z * z - 2 * z * cw + 1); }
+              case 'zsn': { const cw = Math.cos(it.w); return acc + v * z * Math.sin(it.w) / (z * z - 2 * z * cw + 1); }
+              case 'un': return acc + v * z / (z - 1);
+              case 'delta': return acc + v;
+              case 'const': return acc + v * z / (z - 1);
+            }
+            return acc;
+          }, 0);
+          showTex([[Z.xLine], [Z.zLine, '因果序列单边 Z 变换（z 正幂有理式）。'], [Z.rocTex, '']]);
+          const card = out.firstChild;
+          card.append(verifyTable([['z=' + U.fmt(zv, 2) + ' 级数和', series, closed, Math.abs(series - closed) / (Math.abs(closed) || 1)]]));
+          card.append(U.el('p', { class: 'hint', html: '数值验证：X(z)=Σ x(n)z<sup>−n</sup> 截断求和与符号闭式对比（z 取 ROC 外）。' }));
+        } else if (mode === 'iz') {
+          const t = FX_LIB.parseTF(str, 'z');
+          if (!t || !t.den || !t.den[0]) return showErr('无法解析 X(z)。示例：z/(z^2-0.25)');
+          if (t.num.length > t.den.length) return showErr('需为真分式（分子阶次 ≤ 分母阶次）');
+          const d0 = t.den[0];
+          const r = TR.invZ(t.num.map((c) => c / d0), t.den.map((c) => c / d0));
+          if (!r.tex) return showErr(r.note);
+          // 数值对照：差分方程递推 vs 解析式（正幂 num 需在高位补零对齐 den 次数）
+          const den = t.den.map((c) => c / d0), num = t.num.map((c) => c / d0);
+          const N = 8, x = new Array(N).fill(0); x[0] = 1;
+          const rec = (function () { const a = den, bb = num.slice(); while (bb.length < a.length) bb.unshift(0); const y = new Array(N).fill(0); for (let i = 0; i < N; i++) { let acc = 0; for (let k = 0; k < bb.length; k++) if (i - k >= 0) acc += bb[k] * x[i - k]; for (let j = 1; j < a.length; j++) if (i - j >= 0) acc -= a[j] * y[i - j]; y[i] = acc; } return y; })();
+          const rows = [1, 2, 3, 5].map((n) => [ 'n=' + n, rec[n], r.evalN(n), Math.abs(rec[n] - r.evalN(n)) ]);
+          showTex([[r.tex, (r.note || '')]]);
+          const card = out.firstChild;
+          card.append(verifyTable(rows));
+        }
+      } catch (e) {
+        showErr('求解出错：' + e.message);
+      }
+    }
+    box.querySelector('#sym-go').addEventListener('click', solve);
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') solve(); });
+    let symTimer = null;
+    inp.addEventListener('input', () => { clearTimeout(symTimer); symTimer = setTimeout(solve, 450); });
+    box.querySelector('#sym-t').addEventListener('input', () => { clearTimeout(symTimer); symTimer = setTimeout(solve, 300); });
+    applyMode();
+  }
+
   function switchTab() {
     host.querySelector('#ex-expr').classList.toggle('hidden', tab !== 'expr');
+    host.querySelector('#ex-sym').classList.toggle('hidden', tab !== 'sym');
     host.querySelector('#ex-draw').classList.toggle('hidden', tab !== 'draw');
     host.querySelector('#ex-voice').classList.toggle('hidden', tab !== 'voice');
     host.querySelectorAll('#ex-tabs .chip').forEach((x) => x.classList.toggle('active', x.dataset.k === tab));
     // 惰性渲染：仅首次进入可见方创建，避免 display:none 导致画布尺寸为 0
     if (tab === 'expr' && !rendered.expr) { renderExpr(); rendered.expr = true; }
+    else if (tab === 'sym' && !rendered.sym) { renderSym(); rendered.sym = true; }
     else if (tab === 'draw' && !rendered.draw) { renderDraw(); rendered.draw = true; }
     else if (tab === 'voice' && !rendered.voice) { renderVoice(); rendered.voice = true; }
+    // 手绘动画：仅在当前页可见时运行，切走即停，避免后台空转
+    if (dloop) {
+      if (tab === 'draw' && epicy) { if (!loopRunning) { loopRunning = true; dloop.start(); } }
+      else if (loopRunning) { loopRunning = false; dloop.stop(); }
+    }
   }
 
   function tabBar() {
     const tb = host.querySelector('#ex-tabs');
     tb.innerHTML = '';
     const mk = (k, l) => { const c = U.el('button', { class: 'chip' + (tab === k ? ' active' : ''), 'data-k': k }, l); c.addEventListener('click', () => { tab = k; switchTab(); }); tb.append(c); return c; };
-    mk('expr', '表达式求解'); mk('draw', '手绘画圈'); mk('voice', '语音输入');
+    mk('expr', '表达式求解'); mk('sym', '符号变换'); mk('draw', '手绘画圈'); mk('voice', '语音输入');
   }
 
-  // 工具：极点图
-  function pzPlot(cv, poles, zeros) {
-    const W = cv.clientWidth || 400, H = cv.clientHeight || 220;
-    const dpr = window.devicePixelRatio || 1; cv.width = W * dpr; cv.height = H * dpr;
-    const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  // 工具：极点图（参数名用 cvEl，避免遮蔽外层 FX.cvCol 调色函数）
+  function pzPlot(cvEl, poles, zeros) {
+    const W = cvEl.clientWidth || 400, H = cvEl.clientHeight || 220;
+    const dpr = window.devicePixelRatio || 1; cvEl.width = W * dpr; cvEl.height = H * dpr;
+    const g = cvEl.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, W, H); g.fillStyle = cv('--cv-bg'); g.fillRect(0, 0, W, H);
     const ml = 40, mr = 14, mt = 14, mb = 24, dw = W - ml - mr, dh = H - mt - mb;
     const cx = ml + dw / 2, cy = mt + dh / 2;
@@ -415,5 +931,8 @@ App.register('explore', (host) => {
   switchTab();
 
   return { title: '交互求解', api: { dispose, onTheme: () => { if (tab === 'expr' && exprRedraw) exprRedraw(); if (tab === 'expr' && tfRedraw) tfRedraw(); if (drawReset) drawReset(); } } };
-  function dispose() { }
+  function dispose() {
+    if (dloop && loopRunning) { loopRunning = false; dloop.stop(); }
+    if (speechRec) { try { speechRec.onend = null; speechRec.stop(); } catch (e) {} speechRec = null; }
+  }
 });
