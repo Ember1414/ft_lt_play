@@ -361,7 +361,22 @@ const DSP = (() => {
     return { ok: true, stable, conds, rows };
   }
 
-  return { horner, polyRoots, polyFromRoots, cdiv, fft, ifft, spectrum, dftPhasors, integrate, conv, ltiResponse, evalH, bode, steadyState, nyquistFull, jury };
+  /* ---------- 误差积分指标（ISE/IAE/ITAE），e(t) 采样序列，梯形积分 ---------- */
+  function errMetrics(t, e) {
+    const n = Math.min(t.length, e.length);
+    let ise = 0, iae = 0, itae = 0;
+    for (let i = 1; i < n; i++) {
+      const dt = t[i] - t[i - 1];
+      const e0 = Math.abs(e[i - 1]), e1 = Math.abs(e[i]);
+      const p0 = Math.abs(t[i - 1] * e[i - 1]), p1 = Math.abs(t[i] * e[i]);
+      iae += (e0 + e1) / 2 * dt;
+      ise += (e[i - 1] * e[i - 1] + e[i] * e[i]) / 2 * dt;
+      itae += (p0 + p1) / 2 * dt;
+    }
+    return { ise, iae, itae };
+  }
+
+  return { horner, polyRoots, polyFromRoots, cdiv, fft, ifft, spectrum, dftPhasors, integrate, conv, ltiResponse, evalH, bode, steadyState, nyquistFull, jury, errMetrics };
 })();
 
 window.DSP = DSP;

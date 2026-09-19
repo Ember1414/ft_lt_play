@@ -2,6 +2,13 @@
 
 格式参考 Keep a Changelog；版本号 = `package.json` version（页面资源 `?v=` 与侧栏版本同步更新）。
 
+## [7.4.0] — 2026-09-19 · PID 任意对象 + 误差积分指标
+
+### 新增
+- PID 模块支持**任意 G(s) 对象输入**（MI 分数线解析，挂入对象 chips，纳入实验状态）
+- 阶跃响应指标新增 **ISE / IAE / ITAE**（DSP.errMetrics 梯形积分，ctrl.test 44 项）
+- 版本 7.4.0 / ?v=7.4
+
 ## [7.3.0] — 2026-09-19 · Z 变换：Jury 判据
 
 ### 新增

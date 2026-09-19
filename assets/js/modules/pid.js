@@ -24,6 +24,10 @@ App.register('pid', (host) => {
       <div class="pane">
         <h3>被控对象 G(s)</h3>
         <div class="row" id="pid-plants" style="margin-bottom:10px"></div>
+        <div class="row" style="margin-bottom:10px">
+          <input type="text" id="pid-g-in" placeholder="自定义 G(s)，如 (s+3)/(s^2+2*s+5)" spellcheck="false" style="flex:1">
+          <button class="btn" id="pid-g-apply" title="把表达式设为被控对象">应用</button>
+        </div>
         <div class="formula-center" id="pid-gtex"></div>
         <h3 style="margin-top:14px">PID 控制器</h3>
         <div class="formula-center" style="margin-bottom:10px" id="pid-ctex"></div>
@@ -70,17 +74,35 @@ App.register('pid', (host) => {
   const fmtC = (z) => U.fmt(z.re, 2) + (Math.abs(z.im) > 1e-9 ? (z.im >= 0 ? '+' : '') + U.fmt(z.im, 2) + 'j' : '');
 
   /* ---------- 对象选择 ---------- */
+  let customG = null;   // { numStr, denStr } — 任意 G(s) 对象（解析成功后挂入 plants.custom）
   const prow = $('#pid-plants');
-  Object.entries(plants).forEach(([k, p]) => {
-    const c = U.el('button', { class: 'chip' + (k === plantKey ? ' active' : ''), 'data-k': k }, p.name);
-    c.addEventListener('click', () => {
-      plantKey = k;
-      prow.querySelectorAll('.chip').forEach((x) => x.classList.toggle('active', x === c));
-      renderG();
-      solve();
+  function rebuildPlants() {
+    prow.innerHTML = '';
+    Object.entries(plants).forEach(([k, p]) => {
+      const c = U.el('button', { class: 'chip' + (k === plantKey ? ' active' : ''), 'data-k': k }, p.name);
+      c.addEventListener('click', () => {
+        plantKey = k;
+        prow.querySelectorAll('.chip').forEach((x) => x.classList.toggle('active', x === c));
+        renderG();
+        solve();
+      });
+      prow.append(c);
     });
-    prow.append(c);
+  }
+  rebuildPlants();
+  $('#pid-g-apply').addEventListener('click', () => {
+    const str = $('#pid-g-in').value.trim();
+    if (!str) return;
+    const tf = FX_LIB.parseTF(str, 's');
+    if (!tf || !tf.den || !tf.den[0]) { App.toast('G(s) 解析失败，示例：(s+3)/(s^2+2*s+5)', 'danger'); return; }
+    customG = { numStr: str, denStr: str, num: tf.num, den: tf.den };
+    plants.custom = { name: '自定义', num: tf.num, den: tf.den, tex: '\\dfrac{' + texPoly(tf.num) + '}{' + texPoly(tf.den) + '}' };
+    plantKey = 'custom';
+    rebuildPlants();
+    renderG();
+    solve();
   });
+  $('#pid-g-in').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#pid-g-apply').click(); });
   function renderG() {
     const box = $('#pid-gtex');
     box.innerHTML = '';
@@ -200,12 +222,16 @@ App.register('pid', (host) => {
       }
     }
     const ess = 1 - yf;
+    // 误差积分指标：e(t) = r − y（r=1），梯形积分
+    const em = DSP.errMetrics(t, t.map((tv, i) => 1 - y[i]));
     $('#pid-metrics').innerHTML = `
       <div class="stat"><span class="k">超调量 σ%</span><span class="v">${isFinite(sigma) && sigma > 0.5 ? U.fmt(sigma, 1) + '%' : '≈0'}</span></div>
       <div class="stat"><span class="k">上升时间 tr</span><span class="v">${isFinite(tr) && tr > 0 ? U.fmt(tr, 3) + 's' : '—'}</span></div>
       <div class="stat"><span class="k">调节时间 ts(±2%)</span><span class="v">${isFinite(ts) && !unstable ? U.fmt(ts, 3) + 's' : '—'}</span></div>
       <div class="stat"><span class="k">稳态误差 ess</span><span class="v" style="color:${Math.abs(ess) < 0.01 ? cv('--cv-line2') : cv('--cv-warn')}">${U.fmt(ess, 3)}</span></div>
-      <div class="stat"><span class="k">稳态值 y∞</span><span class="v">${U.fmt(yf, 3)}</span></div>`;
+      <div class="stat"><span class="k">稳态值 y∞</span><span class="v">${U.fmt(yf, 3)}</span></div>
+      <div class="stat"><span class="k">ISE / IAE</span><span class="v">${U.fmt(em.ise, 3)} / ${U.fmt(em.iae, 3)}</span></div>
+      <div class="stat"><span class="k">ITAE</span><span class="v">${U.fmt(em.itae, 3)}</span></div>`;
     $('#pid-stability').innerHTML = unstable
       ? `<span style="color:var(--danger)">✗ 闭环不稳定：${rhp} 个极点在右半平面，输出发散</span>`
       : `<span style="color:var(--accent-2)">✓ 闭环稳定：所有极点在左半平面</span>`;
@@ -225,10 +251,19 @@ App.register('pid', (host) => {
     prow.querySelectorAll('.chip').forEach((x) => x.classList.toggle('active', x.dataset.k === k));
     renderG();
   }
-  function getState() { return { plant: plantKey, kp: Kp, ki: Ki, kd: Kd }; }
+  function getState() {
+    const s = { plant: plantKey, kp: Kp, ki: Ki, kd: Kd };
+    if (customG) s.g = { expr: customG.numStr };
+    return s;
+  }
   function applyState(s) {
     if (!s || typeof s !== 'object') return;
-    if (s.plant) setPlant(s.plant);
+    if (s.plant === 'custom' && s.g && s.g.expr) {
+      $('#pid-g-in').value = String(s.g.expr);
+      $('#pid-g-apply').click();   // 解析 + 挂 custom + rebuildPlants + renderG + solve
+    } else if (s.plant) {
+      setPlant(s.plant);
+    }
     Kp = +s.kp || 0; Ki = +s.ki || 0; Kd = +s.kd || 0;
     syncSliders();
     solve();

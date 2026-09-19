@@ -88,6 +88,21 @@ function caseTF(name, num, den, expectStable) {
   ok('1/(s-1)² 的 N=Z−P=0', r2.N === 0, String(r2.N));
 }
 
+/* ---------- errMetrics（ISE/IAE/ITAE） ---------- */
+{
+  // e(t)=1（阶跃误差，积分对象 Ki 作用前）：ISE=t, IAE=t, ITAE=t²/2
+  const t = [], e = [];
+  for (let i = 0; i <= 100; i++) { t.push(i / 10); e.push(1); }
+  const r = DSP.errMetrics(t, e);
+  ok('errMetrics 常值误差 ISE=IAE=T', near(r.ise, 10, 1e-6) && near(r.iae, 10, 1e-6), `ise=${r.ise} iae=${r.iae}`);
+  ok('errMetrics ITAE=T²/2', near(r.itae, 50, 1e-3), `itae=${r.itae}`);
+  // e(t)=e^{-t}u(t)（t∈[0,10]）：IAE=1−e^{−10}
+  const t2 = [], e2 = [];
+  for (let i = 0; i <= 1000; i++) { const tv = i / 100; t2.push(tv); e2.push(Math.exp(-tv)); }
+  const r2 = DSP.errMetrics(t2, e2);
+  ok('errMetrics 指数衰减 IAE≈1', near(r2.iae, 1 - Math.exp(-10), 1e-3), `iae=${r2.iae}`);
+}
+
 console.log(fails.length
   ? `✗ ctrl ${pass} 通过，${fails.length} 失败:\n  ` + fails.join('\n  ')
   : `✓ ctrl ${pass} 项全部通过`);
