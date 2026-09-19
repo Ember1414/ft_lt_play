@@ -330,7 +330,38 @@ const DSP = (() => {
     return { P, N, Z, stable: Z === 0 && minDist > 1e-6 * scale, onCritical: minDist < 1e-6 * scale };
   }
 
-  return { horner, polyRoots, polyFromRoots, cdiv, fft, ifft, spectrum, dftPhasors, integrate, conv, ltiResponse, evalH, bode, steadyState, nyquistFull };
+  /* ---------- Jury 稳定判据（离散特征表，实系数自高到低 a0…an，n≥2） ----------
+   * 条件：a0>0、P(1)>0、(−1)ⁿP(−1)>0、|a_n|<a0，以及每行 r₀>|r_last|。
+   * 返回 { ok, stable, conds:[{text,ok}], rows }；用于 z 域稳定性判定的表格化展示。 */
+  function jury(a) {
+    const n = a.length - 1;
+    if (n < 2) return { ok: false, note: '阶数需 ≥ 2' };
+    if (!(a[0] > 0)) return { ok: false, note: '首项系数需为正（可先乘 −1 归一化）' };
+    if (a.some((v) => !isFinite(v))) return { ok: false, note: '系数含非有限数值' };
+    const fmt = (v) => U.fmt(v, 4);
+    const Pv = (z) => horner(a, { re: z, im: 0 }).re;
+    const conds = [];
+    const add = (text, okv) => { conds.push({ text, ok: !!okv }); return okv; };
+    add(`a₀ = ${fmt(a[0])} > 0`, a[0] > 0);
+    add(`P(1) = ${fmt(Pv(1))} > 0`, Pv(1) > 1e-9);
+    add(`(−1)ⁿ·P(−1) = ${fmt(Pv(-1) * Math.pow(-1, n))} > 0`, Pv(-1) * Math.pow(-1, n) > 1e-9);
+    add(`|aₙ| = ${fmt(Math.abs(a[n]))} < a₀ = ${fmt(a[0])}`, Math.abs(a[n]) < a[0]);
+    let stable = conds.every((c) => c.ok);
+    const rows = [[a.slice()], [a.slice().reverse()]];
+    let cur = a.slice();
+    while (cur.length >= 3) {
+      const m = cur.length, last = cur[m - 1];
+      const nxt = [];
+      for (let k = 0; k < m - 1; k++) nxt.push(cur[0] * cur[k] - last * cur[m - 1 - k]);
+      rows.push([nxt.slice(), nxt.slice().reverse()]);
+      const okv = add(`r₀ = ${fmt(nxt[0])} > |r_last| = |${fmt(nxt[nxt.length - 1])}|`, nxt[0] > Math.abs(nxt[nxt.length - 1]));
+      if (!okv) stable = false;
+      cur = nxt;
+    }
+    return { ok: true, stable, conds, rows };
+  }
+
+  return { horner, polyRoots, polyFromRoots, cdiv, fft, ifft, spectrum, dftPhasors, integrate, conv, ltiResponse, evalH, bode, steadyState, nyquistFull, jury };
 })();
 
 window.DSP = DSP;

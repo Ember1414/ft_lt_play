@@ -28,6 +28,16 @@ App.register('zt', (host) => {
         <div class="hint">多项式用<b>正幂 z</b> 书写（如 <code>z^2-0.25</code>），支持因式 <code>(z-0.5)*(z+0.5)</code>。
           稳定性：全部极点位于<b>单位圆内</b> ⇔ 因果系统稳定；因果 ROC：|z| &gt; 最大极点模。
           与连续域联系：<b>z = e<sup>sT</sup></b>，左半 s 平面 ↔ 单位圆内。</div>
+        <details class="plot-fold" id="zt-jury-fold">
+          <summary>Jury 稳定判据（特征表，不依赖求根）</summary>
+          <div class="ctrl row" style="margin-top:6px">
+            <input type="text" id="zt-jury-in" placeholder="特征多项式 D(z)，如 z^3-0.5*z^2+0.25*z-0.125" spellcheck="false" style="flex:1">
+            <button class="btn" id="zt-jury-cur" title="填入当前分母 D(z)">用当前 D(z)</button>
+            <button class="btn primary" id="zt-jury-go">生成 Jury 表</button>
+          </div>
+          <div id="zt-jury-out"></div>
+          <div class="hint">D(z) 的根全部在单位圆内 ⇔ 满足：a₀&gt;0、D(1)&gt;0、(−1)ⁿD(−1)&gt;0、|aₙ|&lt;a₀，且逐行 r₀&gt;|r_last|。与劳斯表（连续域）对应，可交叉验证上方的「最大极点模」。</div>
+        </details>
       </div>
       <div class="pane">
         <h3>z 平面 · 零极点（可编辑）</h3>
@@ -298,6 +308,37 @@ App.register('zt', (host) => {
 
   tfIn.set('1', 'z-0.5');
   fromTF(FX_LIB.parseTFFields('1', 'z-0.5', 'z'));
+
+  /* ---------- Jury 稳定判据面板 ---------- */
+  function renderJury(str) {
+    const out = $('#zt-jury-out');
+    const c = FX_LIB.parsePoly(str, 'z');
+    if (!c || !c.length || c.length < 3 || !(c[0] > 0)) {
+      out.innerHTML = '<p style="color:var(--danger)">无法解析（需阶数 ≥ 2 且首项系数为正），示例：z^3-0.5*z^2+0.25*z-0.125</p>';
+      return;
+    }
+    const j = DSP.jury(c);
+    if (!j.ok) { out.innerHTML = '<p style="color:var(--danger)">' + j.note + '</p>'; return; }
+    const deg = c.length - 1;
+    let html = '<table class="tbl" style="margin-top:8px;max-width:480px"><tr>';
+    for (let k = 0; k <= deg; k++) html += `<th>c${k + 1}</th>`;
+    html += '</tr>';
+    j.rows.forEach((pair, i) => {
+      html += '<tr>' + pair.map((v) => `<td style="font-family:var(--mono)">${U.fmt(v, 4)}</td>`).join('') +
+        (pair.length < deg + 1 ? '<td></td>'.repeat(deg + 1 - pair.length) : '') + '</tr>';
+    });
+    html += '</table>';
+    html += j.conds.map((cd) => `<p class="hint" style="margin:2px 0;color:${cd.ok ? 'var(--accent-2)' : 'var(--danger)'}">${cd.ok ? '✓' : '✗'} ${cd.text}</p>`).join('');
+    html += `<p style="font-weight:600;color:${j.stable ? 'var(--accent-2)' : 'var(--danger)'}">${j.stable ? '✓ 全部满足 → 特征根都在单位圆内 → 系统稳定' : '✗ 存在不满足项 → 存在单位圆上或圆外特征根 → 系统不稳定'}</p>`;
+    html += `<p class="hint">求根交叉验证：最大极点模 = ${U.fmt(Math.max(...DSP.polyRoots(c).map((q) => Math.hypot(q.re, q.im))), 4)}${j.stable ? '（&lt; 1，一致）' : '（≥ 1，一致）'}</p>`;
+    out.innerHTML = html;
+  }
+  $('#zt-jury-go').addEventListener('click', () => renderJury($('#zt-jury-in').value));
+  $('#zt-jury-cur').addEventListener('click', () => { $('#zt-jury-in').value = plainZ(den); renderJury($('#zt-jury-in').value); });
+  $('#zt-jury-in').addEventListener('keydown', (e) => { if (e.key === 'Enter') renderJury($('#zt-jury-in').value); });
+  $('#zt-jury-fold').addEventListener('toggle', () => {
+    if ($('#zt-jury-fold').open && !$('#zt-jury-in').value.trim()) { $('#zt-jury-in').value = plainZ(den); renderJury($('#zt-jury-in').value); }
+  });
 
   /* ---------- 实验接入：状态捕获 / 回放 / 统一结果工具栏 ---------- */
   function getState() {
