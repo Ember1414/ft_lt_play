@@ -15,7 +15,10 @@ window.WP = (() => {
 
   function boot() {
     if (workerUrl) return workerUrl;
-    const src = 'importScripts(' + LIBS.map((l) => JSON.stringify(new URL(l, self.location.href).href)).join(',') + ');\n' +
+    // 内核 URL 必须在主线程解析（worker 内 self.location 是 blob: URL，相对路径无法解析）
+    const base = (typeof location !== 'undefined' && location.href) || '/';
+    const src = 'self.window = self;\n' +
+      'importScripts(' + LIBS.map((l) => JSON.stringify(new URL(l, base).href)).join(',') + ');\n' +
       'self.onmessage = function (e) {\n' +
       '  var d = e.data;\n' +
       '  try {\n' +

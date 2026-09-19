@@ -434,12 +434,13 @@ App.register('pid', (host) => {
         uMax, aw, Tt, Ts
       }], { timeout: 60000 }).then((r) => {
         restore();
-        if (!r.ok) { $('#pid-tune-out').innerHTML = `<p class="hint" style="color:var(--danger)">✗ ${r.error || r.note || '计算失败'}</p>`; return; }
+        if (!r.ok) { $('#pid-tune-out').innerHTML = `<p class="hint" style="color:var(--danger)">✗ ${r.error || '计算失败'}</p>`; return; }
+      const res = r.value;   // 解开信封 {ok, value}
       const rows = [
-        ['寻优前（当前）', r.start.kp, r.start.ki, r.start.kd],
-        ['寻优后', r.gains.kp, r.gains.ki, r.gains.kd]
+        ['寻优前（当前）', res.start.kp, res.start.ki, res.start.kd],
+        ['寻优后', res.gains.kp, res.gains.ki, res.gains.kd]
       ];
-        renderRows(`${optMetric.toUpperCase()} 寻优：${U.fmt(r.startValue, 3)} → ${U.fmt(r.value, 3)}（降幅 ${(100 * (1 - r.value / r.startValue)).toFixed(1)}%，共 ${r.sims} 次仿真；约束随当前限幅/抗饱和/采样设置）`, rows, '<p class="hint" style="margin-top:4px">坐标下降为确定性局部寻优——结果依赖起点，可先套 ZN/CHR 参数再寻优。</p>');
+        renderRows(`${optMetric.toUpperCase()} 寻优：${U.fmt(res.startValue, 3)} → ${U.fmt(res.value, 3)}（降幅 ${(100 * (1 - res.value / res.startValue)).toFixed(1)}%，共 ${res.sims} 次仿真；约束随当前限幅/抗饱和/采样设置）`, rows, '<p class="hint" style="margin-top:4px">坐标下降为确定性局部寻优——结果依赖起点，可先套 ZN/CHR 参数再寻优。</p>');
       });
     });
   }

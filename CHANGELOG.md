@@ -12,6 +12,16 @@
 - `tests/workerpool.test.mjs` 7 项（回退路径/错误回传/协议检查）
 - 版本 8.6.0 / ?v=8.6；sw.js 同步 workerpool 资产
 
+## [8.6.0] — 2026-09-19 · Worker 化重计算
+
+### 新增
+- `lib/workerpool.js`（window.WP）：Blob Worker + importScripts 数学内核
+  （worker 内 self.window=self 垫片 + 主线程解析内核绝对 URL），任务按点路径
+  分发（如 DSP.pidOptimize）；超时终止（60s）/错误回传/环境不支持自动回退主线程
+- PID 指标寻优迁移至 Worker 池（计算中按钮状态、结果信封解包）；浏览器实测
+  ITAE 170.6→0.47（降幅 99.7%、251 次仿真）在 Worker 内完成，主线程不阻塞
+- `tests/workerpool.test.mjs` 7 项；版本 8.6.0 / ?v=8.6；sw.js 同步
+
 ## [8.5.0] — 2026-09-19 · PWA 离线支持
 
 ### 新增
