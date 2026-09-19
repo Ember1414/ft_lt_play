@@ -575,6 +575,19 @@ App.register('ft', (host) => {
   else { renderMap(); rendered.map = true; }
   ftWriteHash();
 
-  return { title: '傅立叶变换', api: { dispose, onTheme: () => { if (mapCtx && mapCtx.draw) mapCtx.draw(); if (convCtx && convCtx.data && convCtx.drawAll) convCtx.drawAll(); if (sampCtx && sampCtx.drawAll) sampCtx.drawAll(); } } };
+  /* ---------- 实验接入：状态捕获 / 回放（页签 + 信号与参数，重置惰性渲染后回放） ---------- */
+  function getState() { return { tab, sig: ftShare.sig, pvals: { ...ftShare.pvals } }; }
+  function applyState(sv) {
+    if (!sv || typeof sv !== 'object') return;
+    if (sv.sig) ftShare.sig = String(sv.sig);
+    if (sv.pvals && typeof sv.pvals === 'object') ftShare.pvals = { ...sv.pvals };
+    if (sv.tab && ['map', 'conv', 'samp'].includes(sv.tab) && sv.tab !== tab) {
+      tab = sv.tab;
+      rendered[tab] = false;   // 强制重建：renderMap 等在创建时读取 ftShare
+      const chip = host.querySelector('[data-tab="' + tab + '"]');
+      if (chip) chip.click(); else switchTabFt();
+    }
+  }
+  return { title: '傅立叶变换', api: { dispose, onTheme: () => { if (mapCtx && mapCtx.draw) mapCtx.draw(); if (convCtx && convCtx.data && convCtx.drawAll) convCtx.drawAll(); if (sampCtx && sampCtx.drawAll) sampCtx.drawAll(); }, getState, applyState } };
   function dispose() { stopConvAnim(); clearTimeout(ftHashTimer); }
 });

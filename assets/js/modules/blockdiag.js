@@ -1508,6 +1508,15 @@ App.register('blk', (host) => {
     title: '系统框图',
     subtitle: '方框 · 求和点 Σ · 分支点 · 采样开关 · 零阶保持器',
     api: {
+      /* ---------- 实验接入：状态捕获 / 回放（复用 blk1 编码与 readHash 重建） ---------- */
+      getState() { return { state: encodeState() }; },
+      applyState(sv) {
+        if (!sv || typeof sv !== 'object' || typeof sv.state !== 'string' || !sv.state.startsWith('blk1.')) return;
+        try {
+          history.replaceState(null, '', '#' + sv.state);
+          if (!readHash()) App.toast('框图状态还原失败', 'danger');
+        } catch (e) { App.toast('框图状态还原失败', 'danger'); }
+      },
       dispose,
       onTheme: () => {
         renderAll();

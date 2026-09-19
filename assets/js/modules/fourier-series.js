@@ -688,7 +688,20 @@ App.register('fs', (host) => {
   const onResize = () => { fitDraw(); draw(); drawHarmonics(); drawSpec(); if (wf.canvas && !$('#fs-harm-3d').classList.contains('hidden')) wfResize(); };
   window.addEventListener('resize', onResize);
 
-  return { title: '傅立叶级数', api: { togglePlay, frame, reset, dispose, onTheme: () => { repaintDraw(); draw(); drawHarmonics(); drawSpec(); } } };
+  /* ---------- 实验接入：状态捕获 / 回放 ---------- */
+  function getState() { return { shape: state.shape, terms: state.terms, speed: state.speed, circles: state.showCircles }; }
+  function applyState(sv) {
+    if (!sv || typeof sv !== 'object') return;
+    if (sv.shape && sv.shape !== state.shape) {
+      const chip = shapeRow.querySelector('[data-shape="' + sv.shape + '"]');
+      if (chip) chip.click(); else { state.shape = sv.shape; recompute(); }
+    }
+    if (sv.terms != null && +sv.terms !== state.terms) { termsEl.value = +sv.terms; termsEl.dispatchEvent(new Event('input')); }
+    if (sv.speed != null && +sv.speed !== state.speed) { speedEl.value = +sv.speed; speedEl.dispatchEvent(new Event('input')); }
+    const cb = $('#fs-circles-toggle');
+    if (sv.circles != null && cb.checked !== (sv.circles === true)) { cb.checked = sv.circles === true; cb.dispatchEvent(new Event('change')); }
+  }
+  return { title: '傅立叶级数', api: { togglePlay, frame, reset, dispose, onTheme: () => { repaintDraw(); draw(); drawHarmonics(); drawSpec(); }, getState, applyState } };
   function dispose() {
     loop.stop();
     clearTimeout(fsHashTimer);   // 否则 300ms 后仍会改写 hash，覆盖刚打开模块的地址

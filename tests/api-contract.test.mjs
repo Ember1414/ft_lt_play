@@ -42,9 +42,10 @@ class El {
   remove() { }
   _matches(sel) { return matchesSel(this, sel); }
   _search(sel, out) { for (const c of this.children) { if (c._matches && matchesSel(c, sel)) out.push(c); if (c._search) c._search(sel, out); } return out; }
-  querySelector(sel) { const r = this._search(sel, [])[0]; if (r) return r; return sel.startsWith('#') ? reg(sel) : null; }
+  querySelector(sel) { const r = this._search(sel, [])[0]; if (r) return r; return reg(sel); }
   querySelectorAll(sel) { return this._search(sel, []); }
   focus() { } select() { } fire(type, evt) { (this._l[type] || []).forEach((f) => f(evt)); return true; }
+  dispatchEvent(evt) { if (evt && evt.target === undefined) evt.target = this; return this.fire(evt.type, evt); }
   getBoundingClientRect() { return { left: 0, top: 0, width: this.clientWidth, height: this.clientHeight }; }
   getContext() { return this._ctx || (this._ctx = new Proxy({}, { get: (t, k) => (k === 'measureText' ? () => ({ width: 10 }) : typeof t[k] === 'function' ? t[k] : () => { }), set: (t, k, v) => (t[k] = v, true) })); }
 }
@@ -66,6 +67,8 @@ const sandbox = {
   setTimeout: () => 0, clearTimeout: () => { },
   location: { hash: '', origin: 'http://x', pathname: '/index.html' },
   navigator: {}, history: { replaceState: () => { } },
+  addEventListener: () => { }, removeEventListener: () => { }, dispatchEvent: () => true,
+  CustomEvent2: null, FltPlay: null,
   innerWidth: 1280, innerHeight: 800, devicePixelRatio: 1,
   getComputedStyle: () => ({ getPropertyValue: () => '' }),
   matchMedia: () => ({ matches: false }),
@@ -79,7 +82,8 @@ for (const f of ['assets/js/lib/util.js', 'assets/js/lib/mathdsp.js', 'assets/js
   'assets/js/lib/mathinput.js', 'assets/js/lib/blocksolve.js', 'assets/js/lib/transforms.js', 'assets/js/lib/odesolve.js',
   'assets/js/lib/project.js', 'assets/js/lib/toolbar.js', 'assets/js/app.js', 'assets/js/modules/workbench.js',
   'assets/js/modules/zt.js', 'assets/js/modules/system.js', 'assets/js/modules/laplace.js',
-  'assets/js/modules/explore.js', 'assets/js/modules/pid.js']) {
+  'assets/js/modules/explore.js', 'assets/js/modules/pid.js',
+  'assets/js/modules/fourier-series.js', 'assets/js/modules/fourier-transform.js', 'assets/js/modules/blockdiag.js']) {
   vm.runInContext(read(f), sandbox, { filename: f });
 }
 const { App, PX } = sandbox.window;
@@ -91,7 +95,7 @@ App.open = () => { };
 App.toast = () => { };
 App.hashFree = () => !App.exps.cur();
 
-for (const key of ['sys', 'zt', 'la', 'pid', 'explore']) {
+for (const key of ['sys', 'zt', 'la', 'pid', 'explore', 'fs', 'ft', 'blk']) {
   const host = new El('div');
   const mod = App.modules[key](host);
   const api = mod.api || mod;
