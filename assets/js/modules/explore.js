@@ -488,12 +488,24 @@ App.register('explore', (host) => {
         row.append(c);
       });
     }
+    let dataOp = 'seq';   // seq 序列分析 | conv 卷积 | corr 互相关
     function buildDataArea() {
       const ta = U.el('textarea', { id: 'eq-data', rows: '4', spellcheck: 'false', 'aria-label': '数据序列', style: 'width:100%;font-family:var(--mono);font-size:13px' });
       ta.value = '1, 0.5, 0.25, 0.125, 0.0625';
-      const found = box.querySelector('#eq-data');
       ta.addEventListener('input', () => solveEq());
+      const opRow = U.el('div', { class: 'row', style: 'margin:6px 0;flex-wrap:wrap;align-items:center' });
+      [['seq', '序列分析'], ['conv', '卷积 x*h'], ['corr', '互相关 x⋆h']].forEach(([k, label]) => {
+        const c = U.el('button', { class: 'chip' + (k === dataOp ? ' active' : ''), 'data-op': k }, label);
+        c.addEventListener('click', () => { dataOp = k; opRow.querySelectorAll('.chip').forEach((x) => x.classList.toggle('active', x.dataset.op === k)); solveEq(); });
+        opRow.append(c);
+      });
+      opRow.append(U.el('span', { class: 'hint', style: 'margin:0' }, 'x(n)：'));
+      icsBox.append(opRow);
       icsBox.appendChild(ta);
+      const ta2 = U.el('textarea', { id: 'eq-data2', rows: '3', spellcheck: 'false', 'aria-label': '第二序列 h(n)', style: 'width:100%;font-family:var(--mono);font-size:13px;margin-top:6px' });
+      ta2.value = '1, 1, 1';
+      ta2.addEventListener('input', () => solveEq());
+      icsBox.append(U.el('div', { class: 'hint', style: 'margin:6px 0 2px' }, 'h(n)（卷积/互相关的第二序列）：'), ta2);
       solveEq();
     }
 
@@ -502,7 +514,19 @@ App.register('explore', (host) => {
         const ta = box.querySelector('#eq-data');
         const d = ODE.parseDataSeq(ta ? ta.value : '');
         if (!d.ok) { out.innerHTML = '<p class="hint" style="color:var(--danger)">✗ ' + (d.note || '解析失败') + '</p>'; return; }
-        drawData(d.values);
+        if (dataOp === 'seq') { drawData(d.values); return; }
+        const ta2 = box.querySelector('#eq-data2');
+        const d2 = ta2 ? ODE.parseDataSeq(ta2.value) : null;
+        if (!d2 || !d2.ok) { out.innerHTML = '<p class="hint" style="color:var(--danger)">✗ 第二序列 h(n)：' + ((d2 && d2.note) || '缺失') + '</p>'; return; }
+        const hv = dataOp === 'corr' ? d2.values.slice().reverse() : d2.values;
+        const yv = DSP.conv(d.values, hv);
+        drawData(yv);
+        const stats = U.el('div', { class: 'statbar', style: 'margin:0 0 8px' });
+        const energy = yv.reduce((a, v) => a + v * v, 0);
+        stats.innerHTML = `<div class="stat"><span class="k">运算</span><span class="v">${dataOp === 'conv' ? '卷积 y=x*h' : '互相关 y=x⋆h'}</span></div>
+          <div class="stat"><span class="k">长度</span><span class="v">${d.values.length} ⋆ ${d2.values.length} → ${yv.length}</span></div>
+          <div class="stat"><span class="k">能量 Σy²</span><span class="v">${U.fmt(energy, 4)}</span></div>`;
+        out.prepend(stats);
         return;
       }
       const str = eqIn.get();
