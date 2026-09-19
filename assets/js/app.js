@@ -89,6 +89,11 @@
         const t = e.target;
         const tag = (t && t.tagName || '').toLowerCase();
         if (tag === 'input' || tag === 'textarea' || tag === 'select' || (t && t.isContentEditable)) return;
+        if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+          e.preventDefault();
+          if (window.CP) CP.toggle();
+          return;
+        }
         if (e.ctrlKey || e.metaKey || e.altKey) return;
         if (e.key === ' ') {
           e.preventDefault();

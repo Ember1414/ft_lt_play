@@ -2,6 +2,15 @@
 
 格式参考 Keep a Changelog；版本号 = `package.json` version（页面资源 `?v=` 与侧栏版本同步更新）。
 
+## [8.2.0] — 2026-09-19 · 命令面板（Ctrl+K）
+
+### 新增
+- `lib/palette.js`（window.CP）：Ctrl+K/Cmd+K 唤起统一搜索——模块 / 实验 /
+  快速开始模板，键盘 ↑↓ 选择、回车执行、Esc 关闭；动作经回调注入可测
+- 帮助文本更新；样式新增 cp-item 列表项
+- `tests/palette.test.mjs` 9 项（collect/match 纯逻辑 + DOM 交互全流程）
+- 版本 8.2.0 / ?v=8.2 / 侧栏 v4.1
+
 ## [8.1.0] — 2026-09-19 · 实验闭环覆盖 10/10 模块
 
 ### 新增

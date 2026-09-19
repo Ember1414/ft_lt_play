@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.css" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/inter@5.0.19/index.css" />
-  <link rel="stylesheet" href="assets/css/style.css?v=8.1" />
+  <link rel="stylesheet" href="assets/css/style.css?v=8.2" />
 </head>
 <body>
   <div id="app">
@@ -66,7 +66,7 @@
       </nav>
       <div class="sidebar-foot">
         <a href="#" id="about-trigger">帮助 / 使用说明</a>
-        <span class="version">v4.0 · 纯前端</span>
+        <span class="version">v4.1 · 纯前端</span>
       </div>
     </aside>
 
@@ -102,7 +102,7 @@
         <li><b>工作台</b>：平台入口。「快速开始」任一模板即创建<b>实验</b>并打开对应模块；实验自动保存在浏览器本地（不上传），支持搜索 / 收藏 / 重命名 / 复制 / 快照恢复 / JSON 导出导入 / 版本化分享码（PX1.…，含数据校验）。</li>
         <li><b>结果工具栏</b>：系统分析与 Z 变换模块顶部一排共用操作——<b>💾 保存实验</b>（打快照）· ⧉ 复制 · ↺ 重置到上次保存 · 🔗 分享（版本化链接）· 🖼 PNG · 📊 CSV · 📄 JSON 导出。</li>
         <li><b>导航分组</b>：工作台 → 学习（信号与变换：傅立叶级数/傅立叶变换/拉普拉斯/Z 变换）→ 分析（控制系统：系统分析/PID 整定/系统框图）→ 工具（交互求解/公式推导）。顶栏显示当前分组。</li>
-        <li><b>通用图表操作</b>：所有图表随窗口自动适配尺寸，滚轮缩放、拖拽平移、双击复位、悬停读数（手机：双指捏合缩放、单指平移）。折叠面板点标题展开。手机端 ☰ 打开侧边栏；快捷键：<code>空格</code> 播放/暂停 · <code>R</code> 重置 · <code>F</code> 逐帧 · <code>T</code> 切主题 · <code>1–9</code> 切模块 · <code>Esc</code> 关闭弹层（仅对含动画的模块生效）。</li>
+        <li><b>通用图表操作</b>：所有图表随窗口自动适配尺寸，滚轮缩放、拖拽平移、双击复位、悬停读数（手机：双指捏合缩放、单指平移）。折叠面板点标题展开。手机端 ☰ 打开侧边栏；快捷键：<code>空格</code> 播放/暂停 · <code>R</code> 重置 · <code>F</code> 逐帧 · <code>T</code> 切主题 · <code>1–9</code> 切模块 · <code>Esc</code> 关闭弹层；<code>Ctrl+K</code> 命令面板（搜索模块/实验/模板）。</li>
         <li><b>傅立叶级数</b>：圆套圈动画（预设/手绘形状）；谐波叠加支持 <b>2D/3D 瀑布</b>切换——3D 视图拖动仅旋转、滚轮/捏合缩放、双击复位，向下滑动不会误移动坐标。<b>🔗 分享</b> / <b>📷 PNG</b>。</li>
         <li><b>傅立叶变换</b>：常见函数时域↔频域联动；卷积定理动画（播放速度可调）；<b>采样与重建</b>页签演示奈奎斯特判据、混叠与零阶保持/线性/sinc 重建（重建波形与采样点严格对齐）。</li>
         <li><b>拉普拉斯变换</b>：预设/手动 H(s)（符号键盘 + 输入即自动应用 + 实时阶跃预览）/零极点/s 平面点选，ROC 与稳定性联动，留数法解析解对照。s 平面为等比例坐标，支持触屏（单指平移、双指捏合缩放、长按菜单）。</li>
@@ -121,27 +121,28 @@
 
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/mathjs@12.4.3/lib/browser/math.js"></script>
-  <script src="assets/js/lib/util.js?v=8.1"></script>
-  <script src="assets/js/lib/mathdsp.js?v=8.1"></script>
-  <script src="assets/js/lib/plots.js?v=8.1"></script>
-  <script src="assets/js/lib/fx.js?v=8.1"></script>
-  <script src="assets/js/lib/mathinput.js?v=8.1"></script>
-  <script src="assets/js/lib/blocksolve.js?v=8.1"></script>
-  <script src="assets/js/lib/transforms.js?v=8.1"></script>
-  <script src="assets/js/lib/odesolve.js?v=8.1"></script>
-  <script src="assets/js/lib/statespace.js?v=8.1"></script>
-  <script src="assets/js/lib/project.js?v=8.1"></script>
-  <script src="assets/js/lib/toolbar.js?v=8.1"></script>
-  <script src="assets/js/app.js?v=8.1"></script>
-  <script src="assets/js/modules/workbench.js?v=8.1"></script>
-  <script src="assets/js/modules/fourier-series.js?v=8.1"></script>
-  <script src="assets/js/modules/fourier-transform.js?v=8.1"></script>
-  <script src="assets/js/modules/laplace.js?v=8.1"></script>
-  <script src="assets/js/modules/system.js?v=8.1"></script>
-  <script src="assets/js/modules/pid.js?v=8.1"></script>
-  <script src="assets/js/modules/zt.js?v=8.1"></script>
-  <script src="assets/js/modules/blockdiag.js?v=8.1"></script>
-  <script src="assets/js/modules/derive.js?v=8.1"></script>
-  <script src="assets/js/modules/explore.js?v=8.1"></script>
+  <script src="assets/js/lib/util.js?v=8.2"></script>
+  <script src="assets/js/lib/mathdsp.js?v=8.2"></script>
+  <script src="assets/js/lib/plots.js?v=8.2"></script>
+  <script src="assets/js/lib/fx.js?v=8.2"></script>
+  <script src="assets/js/lib/mathinput.js?v=8.2"></script>
+  <script src="assets/js/lib/blocksolve.js?v=8.2"></script>
+  <script src="assets/js/lib/transforms.js?v=8.2"></script>
+  <script src="assets/js/lib/odesolve.js?v=8.2"></script>
+  <script src="assets/js/lib/statespace.js?v=8.2"></script>
+  <script src="assets/js/lib/project.js?v=8.2"></script>
+  <script src="assets/js/lib/toolbar.js?v=8.2"></script>
+  <script src="assets/js/lib/palette.js?v=8.2"></script>
+  <script src="assets/js/app.js?v=8.2"></script>
+  <script src="assets/js/modules/workbench.js?v=8.2"></script>
+  <script src="assets/js/modules/fourier-series.js?v=8.2"></script>
+  <script src="assets/js/modules/fourier-transform.js?v=8.2"></script>
+  <script src="assets/js/modules/laplace.js?v=8.2"></script>
+  <script src="assets/js/modules/system.js?v=8.2"></script>
+  <script src="assets/js/modules/pid.js?v=8.2"></script>
+  <script src="assets/js/modules/zt.js?v=8.2"></script>
+  <script src="assets/js/modules/blockdiag.js?v=8.2"></script>
+  <script src="assets/js/modules/derive.js?v=8.2"></script>
+  <script src="assets/js/modules/explore.js?v=8.2"></script>
 </body>
 </html>
