@@ -1,8 +1,16 @@
-# 傅立叶 & 拉普拉斯 · 交互可视化学习工具
+# 信号与控制实验平台 · 傅立叶 / 拉普拉斯 / Z / 系统分析
 
-一个纯前端的信号与系统交互式学习工具，帮助直观理解傅立叶级数、傅立叶变换、拉普拉斯变换与系统分析。无服务端、无数据上传，全部计算在浏览器本地完成。
+面向学生、教师和工程师的信号与控制实验平台：以「实验」为单位组织学习与分析——输入信号/传函/方程 → 仿真可视化 → 保存快照 → 分享导出。纯前端、无服务端、无数据上传，全部计算与存储都在浏览器本地完成（local-first）。
 
 **在线使用：[ft-lt-play.pages.dev](https://ft-lt-play.pages.dev/)**
+
+## 实验工作台（平台入口）
+
+- **快速开始**：6 个示例模板一键创建实验（二阶系统 / 不稳定系统 / 超前校正 / 离散低通 / 数字谐振器 / 双极点滤波器）
+- **实验管理**：最近使用、收藏、搜索、重命名、复制、删除；JSON 导入导出；版本化分享码（`PX1.…`，带数据校验和，改坏即拒绝）
+- **自动保存**：切换模块/刷新页面自动捕获模块状态；💾 保存额外打可恢复快照（最多 10 个）
+- **统一结果工具栏**（系统分析 / Z 变换）：保存实验 · 复制 · 重置 · 分享 · 导出 PNG / CSV / JSON
+- 模块接入实验只需实现 `api.getState() / api.applyState(s)`（见 `docs/platform.md`）
 
 ## 功能
 
@@ -52,8 +60,23 @@
 ## 技术栈
 
 - 纯 vanilla JavaScript + Canvas 2D，无框架、无构建步骤
-- [KaTeX](https://katex.org/)（CDN）公式渲染、[mathjs](https://mathjs.org/)（CDN）表达式求值
-- 自实现：FFT（Cooley–Tukey）、Durand–Kerner 多项式求根（根轨迹含暖启动）、留数法部分分式、RK4 状态空间仿真
+- [KaTeX](https://katex.org/)（CDN，备用源自动回退）公式渲染、[mathjs](https://mathjs.org/)（CDN）表达式求值（AST 白名单 + 长度限制，拒绝动态执行）
+- 自实现：FFT（Cooley–Tukey）、Durand–Kerner 多项式求根（根轨迹含暖启动）、留数法部分分式、RK4 状态空间仿真、白名单算术求值器（`U.safeCalc`）
+- 实验数据：版本化 schema + localStorage（`fltp:v1:*`），拒绝式校验与 FNV-1a 分享校验（`lib/project.js`）
+
+## 开发
+
+```bash
+npm test          # 全部测试（13 个脚本，无浏览器 Node 断言）
+npm run check     # 语法门（node --check）
+npm run lint      # 静态安全审计 + 引用/版本一致性
+npm run format    # 保守格式化
+npm run build     # 部署产物校验（引用存在 / _headers / CSP）
+npm run preview   # 本地静态服务器 http://localhost:8080
+npm run verify    # check + lint + test + build（CI 同款）
+```
+
+架构、实验 schema v1 契约与安全基线详见 **[docs/platform.md](docs/platform.md)**；变更记录见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 本地运行
 
@@ -66,7 +89,7 @@ npx http-server -p 8321
 
 ## 部署
 
-Cloudflare Pages（静态直传）：
+Cloudflare Pages（静态直传，`_headers` 提供 CSP 等安全响应头）：
 
 ```bash
 npx wrangler pages deploy . --project-name=ft-lt-play --branch=main
@@ -75,14 +98,23 @@ npx wrangler pages deploy . --project-name=ft-lt-play --branch=main
 ## 目录结构
 
 ```
-index.html                    入口
+index.html                    入口（无内联脚本）
 assets/css/style.css          样式（深/浅主题变量）
-assets/js/app.js              应用骨架 / 导航 / 主题切换
-assets/js/lib/util.js         通用工具
+assets/js/app.js              应用骨架 / 导航 / 模型库 / 实验控制器
+assets/js/lib/util.js         通用工具 + safeCalc 白名单求值器
+assets/js/lib/project.js      ★ 实验数据模型 / 版本化存储 / 分享 v2
+assets/js/lib/toolbar.js      ★ 统一结果工具栏
 assets/js/lib/plots.js        Canvas 图表基类（缩放/平移/悬停读数/主题色）
 assets/js/lib/mathdsp.js      数值计算（FFT/求根/频响/仿真）
 assets/js/lib/fx.js           信号库 / 形状 / 解析器
-assets/js/modules/*.js        六大功能模块
+assets/js/lib/mathinput.js    统一数学输入组件
+assets/js/lib/transforms.js   符号变换引擎（拉普拉斯/傅立叶/Z）
+assets/js/lib/odesolve.js     微分/差分方程求解内核
+assets/js/lib/blocksolve.js   框图求解 / 采样 / s↔z
+assets/js/modules/*.js        工作台 + 九大功能模块
+scripts/                      test/check/lint/format/build/serve（零依赖）
+tests/*.test.mjs              13 个测试脚本（Node，无浏览器）
+_headers                      Cloudflare Pages 安全响应头（CSP 等）
 ```
 
 ## License

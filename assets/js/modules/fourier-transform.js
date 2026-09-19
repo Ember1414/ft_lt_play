@@ -25,7 +25,7 @@ App.register('ft', (host) => {
       const p = new URLSearchParams();
       p.set('ft', tab);
       if (tab === 'map' && ftShare.sig) { p.set('sig', ftShare.sig); p.set('p', Object.entries(ftShare.pvals).map(([k, v]) => k + ':' + v).join(',')); }
-      history.replaceState(null, '', '#' + p.toString());
+      if (App.hashFree()) history.replaceState(null, '', '#' + p.toString());
     } catch (e) { }
   }
   function ftSyncHash() { clearTimeout(ftHashTimer); ftHashTimer = setTimeout(ftWriteHash, 300); }
@@ -59,6 +59,7 @@ App.register('ft', (host) => {
     tabs.append(sh);
     tabs.addEventListener('click', (e) => {
       const t = e.target.closest('.chip'); if (!t) return;
+      stopConvAnim();   // 离开卷积页签时停表，避免隐藏画布上的空转循环
       tab = t.dataset.tab;
       applyTabVisibility();
       tabs.querySelectorAll('.chip').forEach((x) => x.classList.toggle('active', x.dataset.tab === tab));
@@ -396,12 +397,14 @@ App.register('ft', (host) => {
     ct.addEventListener('input', () => { convCtx.animT = +ct.value; convCtx.playing = false; host.querySelector('#cv-play').textContent = '▶ 播放卷积'; if (convRaf) cancelAnimationFrame(convRaf); drawConv(); });
     host.querySelector('#cv-play').addEventListener('click', () => {
       const p = convCtx;
+      if (convRaf) { cancelAnimationFrame(convRaf); convRaf = null; }   // 先清掉可能残留的循环，防止叠加成倍速
       p.playing = !p.playing;
       host.querySelector('#cv-play').textContent = p.playing ? '⏸ 暂停' : '▶ 播放卷积';
       if (p.playing) {
         let last = performance.now();
         const tick = (now) => {
-          if (!p.playing || !document.body.contains(host)) return;
+          // 用 convCtx 身份 + 画布连通性判活：host 就是常驻的 #content，contains(host) 恒为 true
+          if (convCtx !== p || !p.playing || !ct.isConnected) return;
           p.animT = (p.animT + (now - last) * 0.022 * (convCtx.speed || 1)) % 100;
           last = now;
           ct.value = p.animT;
@@ -417,6 +420,13 @@ App.register('ft', (host) => {
     if (FX.enablePlotChrome) FX.enablePlotChrome(box);
   }
   function redrawConv() { if (convCtx) { convCtx.plots = {}; renderConv(); } }
+  // 统一的停表入口：取消 rAF、复位播放状态与按钮文字
+  function stopConvAnim() {
+    if (convRaf) { cancelAnimationFrame(convRaf); convRaf = null; }
+    if (convCtx) convCtx.playing = false;
+    const b = host.querySelector('#cv-play');
+    if (b) b.textContent = '▶ 播放卷积';
+  }
 
   /* ================= 子模块 C：采样与重建（奈奎斯特–香农） ================= */
   let sampCtx = null;
@@ -540,7 +550,8 @@ App.register('ft', (host) => {
       fp.clear(); fp.grid(); fp.axis(true);
       fp.clip();
       fp.line(sp.f, sp.mag, { color: cv('--cv-line3'), width: 2, fill: cv('--cv-fill-purple') });
-      fp.line([2 * d.fs - sig.B, 2 * d.fs - sig.B], [0, mm], { color: cv('--cv-danger'), width: 1 });
+      // 竖线标在奈奎斯特频率 fs/2 处（原来用 2fs−B，恒落在 0…fs/2 的可视区间之外，永远看不见）
+      fp.line([d.fs / 2, d.fs / 2], [0, mm], { color: cv('--cv-danger'), width: 1 });
       fp.unclip();
       fp.label('fs/2=' + U.fmt(d.fs / 2, 1) + 'Hz · 信号带宽 B≈' + sig.B + 'Hz', fp.margin.l + 8, fp.margin.t + 12, { color: cv('--cv-label'), size: 11 });
 
@@ -565,5 +576,5 @@ App.register('ft', (host) => {
   ftWriteHash();
 
   return { title: '傅立叶变换', api: { dispose, onTheme: () => { if (mapCtx && mapCtx.draw) mapCtx.draw(); if (convCtx && convCtx.data && convCtx.drawAll) convCtx.drawAll(); if (sampCtx && sampCtx.drawAll) sampCtx.drawAll(); } } };
-  function dispose() { if (convRaf) cancelAnimationFrame(convRaf); }
+  function dispose() { stopConvAnim(); clearTimeout(ftHashTimer); }
 });

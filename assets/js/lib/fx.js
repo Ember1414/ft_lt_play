@@ -223,7 +223,8 @@ const FX_LIB = (() => {
   }
   function parsePoly(str, v = 's') {
     if (str == null) return null;
-    let s = String(str).replace(/\s+/g, '').replace(/\*\*/g, '^').replace(/\^\((\d+)\)/g, '^$1');
+    // 入口归一化：全角字符/负号变体/** 统一转半角（全站解析器共享，见 U.normChars）
+    let s = U.normChars(str).replace(/\s+/g, '').replace(/\^\((\d+)\)/g, '^$1');
     if (!s) return [0];
     // 括号不平衡直接判非法：否则 parseFactor↔parsePoly 会无限互递归导致栈溢出
     let bal = 0;
@@ -256,6 +257,37 @@ const FX_LIB = (() => {
     return acc || [0];
   }
 
+  // 提取表达式中的自由参数名（符号参数功能）：排除变量/函数名（标识符后跟「(」）
+  function extractParams(str, exclude) {
+    const s = U.normChars(str);
+    const ex = new Set(['e', 'j', 'pi', 'PI', ...(exclude || ['s'])]);
+    const out = [];
+    const re = /[a-zA-Z_][a-zA-Z0-9_]*/g;
+    let m;
+    while ((m = re.exec(s))) {
+      const name = m[0];
+      let j = re.lastIndex;
+      while (j < s.length && /\s/.test(s[j])) j++;
+      if (s[j] === '(') continue;          // 函数名（sin/exp…）
+      if (ex.has(name) || (name.length === 1 && ex.has(name.toLowerCase()))) continue;
+      if (!out.includes(name)) out.push(name);
+    }
+    return out;
+  }
+
+  // 参数代入：把 scope 中的标识符替换为数值字面量（供 parseTF 解析）
+  // scope 未覆盖的标识符原样保留；数值用足够精度避免解析误差
+  function substituteParams(str, scope) {
+    const s = U.normChars(str);
+    if (!scope || !Object.keys(scope).length) return s;
+    return s.replace(/[a-zA-Z_][a-zA-Z0-9_]*/g, (name) => {
+      if (!(name in scope)) return name;
+      const v = scope[name];
+      if (!isFinite(v)) return name;
+      return '(' + Number(v.toPrecision(12)) + ')';
+    });
+  }
+
   function parseTF(str, v = 's') {
     if (!str) return null;
     const s = String(str).replace(/\s+/g, '').replace(/\*\*/g, '^');
@@ -283,10 +315,39 @@ const FX_LIB = (() => {
 
   // 解析以 t 为变量的时域表达式，返回 f(t) 函数 + 校验
   // 内置信号函数：u 阶跃 / heaviside / sinc / rect / tri
+  // 安全：mathjs 是求值 DSL 而非沙箱，先过 AST 白名单（节点类型/符号/函数/运算符）
+  //      + 长度与节点数上限，杜绝 AssignmentNode/AccessorNode/矩阵等能力的滥用面。
+  const MATH_OK_NODES = new Set(['OperatorNode', 'ConstantNode', 'SymbolNode', 'FunctionNode', 'ParenthesisNode']);
+  const MATH_OK_OPS = new Set(['+', '-', '*', '/', '^', '%']);
+  const MATH_OK_FUNCS = new Set(['sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'sinh', 'cosh', 'tanh', 'exp', 'log', 'log2', 'log10', 'sqrt', 'cbrt', 'abs', 'sign', 'floor', 'ceil', 'round', 'min', 'max', 'pow', 'atan2', 'u', 'heaviside', 'sinc', 'rect', 'tri']);
+  const MATH_OK_SYMBOLS = new Set(['t', 'pi', 'e', 'u', 'heaviside', 'sinc', 'rect', 'tri']);
+  function mathExprSafe(node) {
+    let count = 0, bad = null;
+    node.traverse((n) => {
+      if (bad) return;
+      if (++count > 2000) { bad = '表达式过大'; return; }
+      if (!MATH_OK_NODES.has(n.type)) { bad = '不允许的语法「' + n.type + '」'; return; }
+      if (n.type === 'FunctionNode') {
+        const fn = n.fn && n.fn.name;
+        if (!fn || !MATH_OK_FUNCS.has(fn)) bad = '不允许的函数「' + (fn || '?') + '」';
+      } else if (n.type === 'SymbolNode') {
+        if (!MATH_OK_SYMBOLS.has(n.name)) bad = '未知符号「' + n.name + '」';
+      } else if (n.type === 'OperatorNode') {
+        if (!MATH_OK_OPS.has(n.op)) bad = '不允许的运算「' + n.op + '」';
+      } else if (n.type === 'ConstantNode') {
+        if (typeof n.value !== 'number' || !isFinite(n.value)) bad = '存在非有限常量';
+      }
+    });
+    return bad;
+  }
   function parseTimeExpr(str) {
     if (!window.math) return null;
+    const s0 = String(str || '');
+    if (!s0.trim() || s0.length > 300) return null;
     try {
-      const node = window.math.parse(str);
+      const node = window.math.parse(s0);
+      const bad = mathExprSafe(node);
+      if (bad) { console.warn('表达式被拒绝：' + bad); return null; }
       const helpers = {
         u: (x) => (x >= 0 ? 1 : 0),
         heaviside: (x) => (x > 0 ? 1 : x < 0 ? 0 : 0.5),
@@ -309,7 +370,7 @@ const FX_LIB = (() => {
     } catch (e) { return null; }
   }
 
-  return { shapePoints, customShapePoints, ftSignals, laplacePresets, parseTF, parseTFFields, tfToFields, parsePoly, parseTimeExpr };
+  return { shapePoints, customShapePoints, ftSignals, laplacePresets, parseTF, parseTFFields, tfToFields, parsePoly, parseTimeExpr, extractParams, substituteParams };
 })();
 
 window.FX_LIB = FX_LIB;

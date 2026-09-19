@@ -1,0 +1,11 @@
+# Cloudflare Pages 安全响应头（部署到根路径，所有资产生效）
+# 注意：
+# - script-src 不含 'unsafe-inline'：页面无内联脚本，CDN 回退走 app.js 动态加载（unpkg.com 已列入）
+# - style-src 需要 'unsafe-inline'：KaTeX 渲染会写内联 style 属性
+# - 本站 local-first：无任何后端请求，connect-src 收紧为 'self'
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: microphone=(self), camera=(), geolocation=(), payment=(), usb=()
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net data:; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'

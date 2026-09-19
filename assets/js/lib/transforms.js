@@ -36,9 +36,10 @@ window.TR = (() => {
       let mt;
       if ((mt = rest.match(/^t\^(\d+)\*?exp\(-(?:(\d+(?:\.\d+)?)\*?)?t\)/))) items.push({ sign, coef, kind: 'texp', n: +mt[1], a: mt[2] ? +mt[2] : 1 }), i += mt[0].length;
       else if ((mt = rest.match(/^exp\(-(?:(\d+(?:\.\d+)?)\*?)?t\)/))) items.push({ sign, coef, kind: 'exp', a: mt[1] ? +mt[1] : 1 }), i += mt[0].length;
-      else if ((mt = rest.match(/^sin\(([0-9pi+\-*/.()]+)\*?t\)/))) items.push({ sign, coef, kind: 'sin', w: evalW(mt[1]) }), i += mt[0].length;
-      else if ((mt = rest.match(/^cos\(([0-9pi+\-*/.()]+)\*?t\)/))) items.push({ sign, coef, kind: 'cos', w: evalW(mt[1]) }), i += mt[0].length;
+      else if ((mt = rest.match(/^sin\(([0-9pi+\-*/.()]+)\*?t\)/))) { const w = evalW(mt[1]); if (!isFinite(w)) return null; items.push({ sign, coef, kind: 'sin', w }); i += mt[0].length; }
+      else if ((mt = rest.match(/^cos\(([0-9pi+\-*/.()]+)\*?t\)/))) { const w = evalW(mt[1]); if (!isFinite(w)) return null; items.push({ sign, coef, kind: 'cos', w }); i += mt[0].length; }
       else if ((mt = rest.match(/^t\^(\d+)/))) items.push({ sign, coef, kind: 'tpow', n: +mt[1] }), i += mt[0].length;
+      else if ((mt = rest.match(/^t(?![a-z(])/))) items.push({ sign, coef, kind: 'tpow', n: 1 }), i += 1;   // 裸 t = t¹
       else if ((mt = rest.match(/^u\(t\)/))) items.push({ sign, coef, kind: 'u' }), i += mt[0].length;
       else return null;
       if (s.slice(i).startsWith('*u(t)')) i += 5;
@@ -48,11 +49,12 @@ window.TR = (() => {
   }
   function evalW(txt) {
     txt = txt.replace(/\*+$/, '');   // 去掉正则贪婪吞下的尾部孤儿 '*'
-    return Function('"use strict";const pi=Math.PI;return (' + txt + ')')();
+    try { return U.safeCalc(txt); } catch (e) { return NaN; }   // 白名单求值（曾用 Function 动态执行）
   }
   // 宽松预处理：全角符号、unicode 上标、^{...}、数字与字母/括号间隐式乘号（0.5^n 不受影响）
   function lenient(s) {
-    return s.replace(/\s+/g, '')
+    // 入口归一化：全角字符/负号变体 → 半角（U.normChars，含 ** → ^），先于其余宽松改写
+    return U.normChars(s).replace(/\s+/g, '')
       .replace(/e\^\{([^}]*)\}/g, 'exp($1)')   // e^{-2t} → exp(-2t)（须先于 ^{...} 归一化）
       .replace(/e\^\(/g, 'exp(')
       .replace(/−/g, '-').replace(/×/g, '*').replace(/·/g, '*').replace(/÷/g, '/')

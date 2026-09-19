@@ -3,8 +3,6 @@
  *   性质表 + 逐步推导 + 小例子
  * ============================================================ */
 App.register('derive', (host) => {
-  const K = (tex, dis) => { const s = document.createElement('span'); FX.katex(tex, s, { displayMode: dis }); return s; };
-
   /* ---------- 性质表数据 ---------- */
   const tables = {
     ft: {
@@ -74,8 +72,6 @@ App.register('derive', (host) => {
       ]
     }
   };
-  function g(tex) { return { t: tex }; }
-
   /* ---------- 逐步推导数据 ---------- */
   const derivations = {
     square: {
@@ -172,16 +168,15 @@ App.register('derive', (host) => {
   }
   const fact = (n) => { let r = 1; for (let k = 2; k <= n; k++) r *= k; return r; };
   const num2tex = (v) => (Number.isInteger(v) ? String(v) : String(+v.toFixed(4)));
-  // 单项的 F(s)（符号）
+  // 单项的 F(s)（不含符号，符号统一由线性合并行负责，写法对齐 TR.itemLapTex）
   function itemFsTex(it) {
-    const c = (it.sign < 0 ? '-' : '') + (it.coef === 1 ? '' : num2tex(it.coef));
     switch (it.kind) {
-      case 'exp': return `\\dfrac{${it.sign < 0 ? '-' : ''}${it.coef === 1 ? '' : num2tex(it.coef)}}{s+${num2tex(it.a)}}`;
-      case 'texp': return `\\dfrac{${it.sign < 0 ? '-' : ''}${it.coef === 1 ? '' : num2tex(it.coef)}\\,${fact(it.n)}}{(s+${num2tex(it.a)})^{${it.n + 1}}}`;
-      case 'sin': return `\\dfrac{${it.sign < 0 ? '-' : ''}${it.coef === 1 ? '' : num2tex(it.coef) + '\\cdot'}${num2tex(it.w)}}{s^{2}+${num2tex(it.w * it.w)}}`;
-      case 'cos': return `\\dfrac{${it.sign < 0 ? '-' : ''}${it.coef === 1 ? '' : num2tex(it.coef) + '\\cdot'}s}{s^{2}+${num2tex(it.w * it.w)}}`;
-      case 'tpow': return `\\dfrac{${it.sign < 0 ? '-' : ''}${it.coef === 1 ? '' : num2tex(it.coef) + '\\cdot'}${fact(it.n)}}{s^{${it.n + 1}}}`;
-      case 'const': return `\\dfrac{${it.sign < 0 ? '-' : ''}${num2tex(it.coef)}}{s}`;
+      case 'exp': return `\\dfrac{${it.coef === 1 ? '' : num2tex(it.coef)}}{s+${num2tex(it.a)}}`;
+      case 'texp': return `\\dfrac{${it.coef === 1 ? '' : num2tex(it.coef) + '\\,'}${fact(it.n)}}{(s+${num2tex(it.a)})^{${it.n + 1}}}`;
+      case 'sin': return `\\dfrac{${it.coef === 1 ? '' : num2tex(it.coef) + '\\cdot'}${num2tex(it.w)}}{s^{2}+${num2tex(it.w * it.w)}}`;
+      case 'cos': return `\\dfrac{${it.coef === 1 ? '' : num2tex(it.coef) + '\\cdot'}s}{s^{2}+${num2tex(it.w * it.w)}}`;
+      case 'tpow': return `\\dfrac{${it.coef === 1 ? '' : num2tex(it.coef) + '\\cdot'}${fact(it.n)}}{s^{${it.n + 1}}}`;
+      case 'const': return `\\dfrac{${num2tex(it.coef)}}{s}`;
     }
     return '';
   }
@@ -256,10 +251,16 @@ App.register('derive', (host) => {
           { tm: `t^{${N}}u(t)`, t: '：分部积分归纳', desc: 'L{t·u(t)}=1/s²；反复用频域微分性质 L{tⁿf}=(-1)ⁿF⁽ⁿ⁾(s)。', body: `\\mathcal{L}\\{t^{${N}}u(t)\\}=\\frac{${fact(N)}}{s^{${N + 1}}}` },
           { t: '傅里叶（分布意义）', desc: '幂信号频谱含 ω=0 处的 δ 导数项与主值项。', body: `F(j\\omega)=\\frac{${fact(N)}}{(j\\omega)^{${N + 1}}}+\\pi j^{${N}}\\delta^{(${N})}(\\omega)` }
         ];
-        case 'const': return [
-          { t: '常数（即 c·u(t)）', desc: 'L{u(t)}=1/s。', body: `\\mathcal{L}\\{u(t)\\}=\\frac{1}{s}` },
-          { t: '傅里叶', desc: '直流信号的频谱是 ω=0 处的冲激。', body: `F(j\\omega)=2\\pi\\,\\delta(\\omega)` }
-        ];
+        case 'const': {
+          // 符号提到分式外，避免出现 \dfrac{-1}{j\omega} 这种写法
+          const cc = it.coef * it.sign;
+          const ca = Math.abs(cc) === 1 ? '' : num2tex(Math.abs(cc));
+          const sg = cc < 0 ? '-' : '';
+          return [
+            { t: '常数（即 c·u(t)）', desc: `L{u(t)}=1/s；本项幅度 c=${num2tex(cc)}。`, body: `\\mathcal{L}\\{u(t)\\}=\\frac{1}{s}` },
+            { t: '傅里叶', desc: '直流分量的频谱在 ω=0 处有冲激，同时保留 1/(jω) 主值项（分布意义）。', body: `F(j\\omega)=${sg}${ca}\\pi\\delta(\\omega)${sg || '+'}\\dfrac{${ca || '1'}}{j\\omega}` }
+          ];
+        }
       }
       return [];
     };
@@ -288,12 +289,7 @@ App.register('derive', (host) => {
       <div class="pane" style="margin-bottom:14px;background:var(--panel-2)">
         <h3>输入函数 → 逐步变换推导</h3>
         <p class="hint" style="margin-top:-6px">输入一个因果信号 f(t)，这里会像教科书一样<b>逐项写出拉普拉斯变换的推导步骤</b>（定义积分 / 欧拉展开 / s 域性质），给出 ROC 与傅里叶变换，最后用数值积分验证每一步得到的 F(s)。</p>
-        <div class="input-bar" style="margin-top:10px">
-          <input type="text" id="dv-cin" placeholder="3*exp(-2*t)*u(t) + sin(5*t)*u(t) - t^2*exp(-1*t)*u(t)" spellcheck="false" autocomplete="off">
-          <button class="btn primary" id="dv-cgo">推导</button>
-        </div>
-        <div class="hint" id="dv-cstatus" style="margin-top:8px"></div>
-        <div class="row" id="dv-cex" style="margin-top:10px"></div>
+        <div id="dv-mi" style="margin-top:10px"></div>
         <div class="hint">支持的项：<code>c*exp(-a*t)*u(t)</code>、<code>c*sin(w*t)*u(t)</code>、<code>c*cos(w*t)*u(t)</code>、<code>c*t^n*u(t)</code>、<code>c*t^n*exp(-a*t)*u(t)</code>、<code>u(t)</code>、常数 c。写法宽松：<code>2sin(3t)</code>、<code>e^(-2t)</code>、<code>t²e^{-t}</code>、<code>sin(2πt)</code> 都可以；用 + - 连接多项。</div>
       </div>
       <div id="dv-cout"><p class="hint">输入表达式后点击“推导”。</p></div>`;
@@ -304,15 +300,29 @@ App.register('derive', (host) => {
       ['5-2*cos(2*t)*u(t)', '常数+余弦'],
       ['exp(-0.5*t)*u(t)-exp(-1*t)*u(t)', '两个指数']
     ];
-    const exRow = content.querySelector('#dv-cex');
-    examples.forEach(([expr, name]) => {
-      const c = U.el('button', { class: 'chip', title: expr }, name);
-      c.addEventListener('click', () => { content.querySelector('#dv-cin').value = expr; runCustom(); });
-      exRow.append(c);
+    /* ---------- 输入（统一输入组件 MI：徽标/示例/历史） ---------- */
+    const kindName = { exp: '指数', texp: '幂×指数', sin: '正弦', cos: '余弦', tpow: '幂', const: '常数' };
+    const dv = MI.exprInput(content.querySelector('#dv-mi'), {
+      id: 'dv-cin',
+      placeholder: '3*exp(-2*t)*u(t) + sin(5*t)*u(t) - t^2*exp(-1*t)*u(t)',
+      parse: (str) => {
+        const items = parseCombo(str);
+        if (!items) return { verdict: 'err', message: '暂无法解析：每项需为 c*exp(-a*t)*u(t)、c*sin(w*t)*u(t)、c*cos(w*t)*u(t)、c*t^n*u(t)、c*t^n*exp(-a*t)*u(t) 或常数，用 + - 连接。' };
+        const summary = items.map((it) => (it.sign < 0 ? '−' : '') + (it.coef === 1 ? '' : num2tex(it.coef)) + (kindName[it.kind] || it.kind)).join('、');
+        return { verdict: 'ok', message: `已识别 ${items.length} 项：${summary}` };
+      },
+      examples,
+      historyKey: 'flt-derive-custom',
+      debounce: 250,
+      autoApply: false,
+      onApply: () => runCustom()
     });
+    const goBtn = U.el('button', { class: 'btn primary', id: 'dv-cgo' }, '推导');
+    goBtn.addEventListener('click', () => dv.apply());
+    dv.bar.append(goBtn);
     const runCustom = () => {
       const out = content.querySelector('#dv-cout');
-      const items = parseCombo(content.querySelector('#dv-cin').value);
+      const items = parseCombo(dv.get());
       if (!items) { out.innerHTML = '<p style="color:var(--danger)">无法解析。请按提示格式输入，例如 3*exp(-2*t)*u(t) + sin(5*t)*u(t)。</p>'; return; }
       const { steps, minA, hasNondecay } = comboDerivation(items);
       out.innerHTML = '';
@@ -348,27 +358,8 @@ App.register('derive', (host) => {
       out.append(U.el('p', { class: 'hint', html: '数值验证：把每一步得到的符号 F(s) 与直接数值积分对比，误差应接近机器精度——推导无误的硬证据。' }), tbl);
       if (hasNondecay) out.append(U.el('p', { class: 'hint', html: '注：含 sin/cos/tⁿ/常数项时 ROC 为 Re(s)>0，数值验证取 s>0 仍然收敛；其傅里叶变换含冲激谱线，见对应步骤。' }));
     };
-    content.querySelector('#dv-cgo').addEventListener('click', runCustom);
-    content.querySelector('#dv-cin').addEventListener('keydown', (e) => { if (e.key === 'Enter') runCustom(); });
-
-    // 输入实时校验：显示识别结果或具体错误提示
-    const cin = content.querySelector('#dv-cin');
-    const statusEl = content.querySelector('#dv-cstatus');
-    let stTimer = null;
-    const kindName = { exp: '指数', texp: '幂×指数', sin: '正弦', cos: '余弦', tpow: '幂', const: '常数' };
-    function checkInput() {
-      const items = parseCombo(cin.value);
-      if (!cin.value.trim()) { statusEl.innerHTML = ''; return; }
-      if (!items) {
-        statusEl.innerHTML = '<span style="color:var(--danger)">✗ 暂无法解析：每项需为 c*exp(-a*t)*u(t)、c*sin(w*t)*u(t)、c*cos(w*t)*u(t)、c*t^n*u(t)、c*t^n*exp(-a*t)*u(t) 或常数，用 + - 连接。</span>';
-        return;
-      }
-      const summary = items.map((it) => (it.sign < 0 ? '−' : '') + (it.coef === 1 ? '' : num2tex(it.coef)) + (kindName[it.kind] || it.kind)).join('、');
-      statusEl.innerHTML = `<span style="color:var(--accent-2)">✓ 已识别 ${items.length} 项：${summary}</span>`;
-    }
-    cin.addEventListener('input', () => { clearTimeout(stTimer); stTimer = setTimeout(checkInput, 250); });
-    checkInput();
-    content.querySelector('#dv-cin').value = '2*exp(-1*t)*u(t)+sin(5*t)*u(t)';
+    // 初始值 + 首次推导
+    dv.set('2*exp(-1*t)*u(t)+sin(5*t)*u(t)');
     runCustom();
   }
 
@@ -435,8 +426,7 @@ App.register('derive', (host) => {
     for (const r of t.rows) {
       const tr = document.createElement('tr');
       if (key === 'ztp') {
-        tr.append(tdTex(r[0]), tdTex(r[1]));
-        const roc = document.createElement('td'); roc.textContent = r[2]; tr.append(roc);
+        tr.append(tdTex(r[0]), tdTex(r[1]), tdTex(r[2]));
       } else if (r.length === 3) {
         const td1 = document.createElement('td'); td1.textContent = r[0]; tr.append(td1);
         tr.append(tdTex(r[1]), tdTex(r[2]));

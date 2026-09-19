@@ -198,7 +198,7 @@ App.register('fs', (host) => {
       const p = new URLSearchParams();
       p.set('fs', state.shape === 'custom' ? 'square' : state.shape);
       p.set('n', state.terms); p.set('v', state.speed); p.set('c', state.showCircles ? '1' : '0');
-      history.replaceState(null, '', '#' + p.toString());
+      if (App.hashFree()) history.replaceState(null, '', '#' + p.toString());
     } catch (e) { }
   }
   function fsSyncHash() { clearTimeout(fsHashTimer); fsHashTimer = setTimeout(fsWriteHash, 300); }
@@ -462,8 +462,9 @@ App.register('fs', (host) => {
     }
     const p = specPlot;
     const top = phasors.filter((q) => q.amp > 1e-6).slice(0, 80).sort((a, b) => a.k - b.k);
-    let maxA = 1e-9, k0 = 0, k1 = 8;
+    let maxA = 1e-9, k0 = Infinity, k1 = -Infinity;
     for (const q of top) { maxA = Math.max(maxA, q.amp); k0 = Math.min(k0, q.k); k1 = Math.max(k1, q.k); }
+    if (!isFinite(k0)) { k0 = 0; k1 = 1; }   // 无有效谐波时的兜底范围
     p.setRange(k0 - 0.5, k1 + 0.5, 0, maxA * 1.08);
     p.clear(); p.grid(null, null); p.axis(true);
     p.clip();
@@ -567,7 +568,7 @@ App.register('fs', (host) => {
       for (let i = 0; i <= NT; i++) {
         const t = (i / NT) * 2;
         const yv = amp * Math.sin(2 * Math.PI * (2 * k - 1) * t);
-        const p = wfProject(-1.25 + t, U.clamp(yv, -1.4, 1.4), z, W, H);
+        const p = wfProject(-1.25 + t * 1.25, U.clamp(yv, -1.4, 1.4), z, W, H);   // t∈[0,2]→x∈[-1.25,1.25]，与刻度/网格一致
         i ? g.lineTo(p.X, p.Y) : g.moveTo(p.X, p.Y);
       }
       g.stroke();
@@ -581,7 +582,7 @@ App.register('fs', (host) => {
     g.beginPath();
     for (let i = 0; i <= NT; i++) {
       const t = (i / NT) * 2;
-      const p = wfProject(-1.25 + t, U.clamp(squareSum(t, n), -1.5, 1.5), Z0 - 0.3, W, H);
+      const p = wfProject(-1.25 + t * 1.25, U.clamp(squareSum(t, n), -1.5, 1.5), Z0 - 0.3, W, H);
       i ? g.lineTo(p.X, p.Y) : g.moveTo(p.X, p.Y);
     }
     g.stroke();
@@ -592,12 +593,10 @@ App.register('fs', (host) => {
     g.beginPath();
     for (let i = 0; i <= 300; i++) {
       const t = (i / 300) * 2;
-      const p = wfProject(-1.25 + t, U.clamp(squarePartial(t), -1.6, 1.6), Z0 - 0.28, W, H);
+      const p = wfProject(-1.25 + t * 1.25, U.clamp(squarePartial(t), -1.6, 1.6), Z0 - 0.28, W, H);
       i ? g.lineTo(p.X, p.Y) : g.moveTo(p.X, p.Y);
     }
     g.stroke(); g.setLineDash([]);
-    g.fillStyle = cv('--cv-label'); g.font = '11px SFMono-Regular, monospace';
-    g.fillText(`部分和瀑布：k = 1 … ${n}（圈数滑块同步）`, 12, 18);
   }
   function wfBind() {
     const cvEl = wf.canvas;
@@ -678,15 +677,21 @@ App.register('fs', (host) => {
     state.t = (state.t + 0.002) % 1;
     if (state.t < prev) traceJustCleared = true;
     draw();
+    // 键盘 F 也会走这里，按钮文字必须在此同步，否则暂停后仍显示「⏸ 暂停」
+    if (fsPlayBtn) fsPlayBtn.textContent = '▶ 播放';
     return true;
   }
-  function reset() { state.t = 0; traceTail = []; view.k = 1; view.cx = 0; view.cy = 0; }
+  function reset() {
+    state.t = 0; traceTail = []; view.k = 1; view.cx = 0; view.cy = 0;
+    if (fsPlayBtn) fsPlayBtn.textContent = state.playing ? '⏸ 暂停' : '▶ 播放';
+  }
   const onResize = () => { fitDraw(); draw(); drawHarmonics(); drawSpec(); if (wf.canvas && !$('#fs-harm-3d').classList.contains('hidden')) wfResize(); };
   window.addEventListener('resize', onResize);
 
   return { title: '傅立叶级数', api: { togglePlay, frame, reset, dispose, onTheme: () => { repaintDraw(); draw(); drawHarmonics(); drawSpec(); } } };
   function dispose() {
     loop.stop();
+    clearTimeout(fsHashTimer);   // 否则 300ms 后仍会改写 hash，覆盖刚打开模块的地址
     window.removeEventListener('resize', onResize);
     window.removeEventListener('pointerup', endFinger);
     window.removeEventListener('pointercancel', endFinger);

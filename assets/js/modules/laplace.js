@@ -10,6 +10,7 @@ App.register('la', (host) => {
   let poleSpecs = [], zeroSpecs = []; // {re, im≥0}：im>0 表示共轭对
   let num, den;
   let showROC = true;
+  let lastSrc = 'tf';   // 最近编辑的输入来源（'tf' 或 'pz'），决定「应用输入」走哪条分支
   let plots = {};   // 全部画图实例（含实时预览迷你图）
 
   host.innerHTML = `
@@ -25,14 +26,7 @@ App.register('la', (host) => {
         </div>
         <details class="plot-fold" id="la-input-fold">
           <summary>手动输入 H(s) / 零极点</summary>
-          <div class="tf-frac" style="margin-top:6px">
-            <input type="text" id="la-num" placeholder="分子  如 1 或 s+2" spellcheck="false" aria-label="分子">
-            <div class="tf-bar" title="分数线"></div>
-            <input type="text" id="la-den" placeholder="分母  如 s^2+0.5*s+1.25" spellcheck="false" aria-label="分母">
-          </div>
-          <div class="row kbd" id="la-pad" style="margin:2px 0 8px"></div>
-          <div class="hint" id="la-preview" style="margin-bottom:8px"></div>
-          <div class="row" id="la-struct" style="margin-bottom:10px"></div>
+          <div id="la-mi" style="margin-top:6px"></div>
           <div class="ctrl"><label>或直接输入极点（逗号分隔，支持 j）</label>
             <input type="text" id="la-poles-in" placeholder="-0.25+1.09j, -0.25-1.09j" spellcheck="false"></div>
           <div class="ctrl"><label>零点（可留空）</label>
@@ -40,7 +34,9 @@ App.register('la', (host) => {
           <div class="ctrl row">
             <button class="btn primary" id="la-apply">应用输入</button>
             <button class="btn" id="la-share" title="复制当前 H(s) 的分享链接">🔗 分享</button>
+            <button class="btn" id="la-toex" title="转到交互求解分析此 H(s)">↗ 求解</button>
           </div>
+          <div id="la-lib" style="margin:8px 0"></div>
           <div class="ctrl"><label>实时预览 · 阶跃响应（输入即算）</label>
             <div class="canvas-wrap" style="height:120px"><canvas class="plot" id="la-mini"></canvas></div>
           </div>
@@ -59,7 +55,7 @@ App.register('la', (host) => {
           <span style="color:var(--danger)">右侧 = 不稳定</span>
           <span style="color:var(--purple)">■ ROC</span>
         </div>
-        <div class="hint" style="margin-top:6px">点选模式：<b>左键</b>加极点(红)、<b>右键</b>加零点(蓝)、<b>拖动</b>移动、<b>双击</b>删除；带虚部的点自动生成共轭对。
+        <div class="hint" style="margin-top:6px">点选模式：<b>单击</b>加极点(红)、<b>右键</b>加零点(蓝)、<b>拖动</b>移动、<b>双击</b>删除（触屏：<b>长按</b>菜单、<b>双指</b>缩放、<b>拖空白</b>平移）；带虚部的点自动生成共轭对。
           反变换 h(t)=L⁻¹{H(s)} 由极点<b>位置</b>和 <b>ROC</b> 共同唯一确定：ROC 在最右极点右侧（因果系统）→ 各极点项为 e^(p·t) 形式。</div>
       </div>
       <details class="pane full plot-fold">
@@ -124,6 +120,7 @@ App.register('la', (host) => {
       preset = id; mode = 'preset';
       pRow.querySelectorAll('.chip').forEach((x) => x.classList.toggle('active', x === el));
       $('#la-custom-mode').classList.remove('active');
+      if (spPlane) spPlane.setEditable(false);
       usePreset(id);
       syncInputs();
     });
@@ -132,18 +129,13 @@ App.register('la', (host) => {
   $('#la-custom-mode').addEventListener('click', () => {
     mode = mode === 'custom' ? 'preset' : 'custom';
     $('#la-custom-mode').classList.toggle('active', mode === 'custom');
+    if (spPlane) spPlane.setEditable(mode === 'custom');
     if (mode === 'custom') { if (!poleSpecs.length) poleSpecs = [{ re: -0.5, im: 1.1 }, { re: -1.5, im: 0 }]; buildFromPZ(); syncInputs(); }
     else usePreset(preset);
   });
   $('#la-roc-toggle').addEventListener('click', () => { showROC = !showROC; $('#la-roc-toggle').classList.toggle('active', showROC); drawSP(); });
-  $('#la-clear').addEventListener('click', () => { poleSpecs = []; zeroSpecs = []; mode = 'custom'; $('#la-custom-mode').classList.add('active'); buildFromPZ(); syncInputs(); });
-  $('#la-reset-view').addEventListener('click', () => {
-    if (!spPlot) return;
-    spPlot.userAdjusted = false;
-    const r = defaultSPRange();
-    spPlot.setRange(r[0], r[1], r[2], r[3], true);
-    drawSP();
-  });
+  $('#la-clear').addEventListener('click', () => { poleSpecs = []; zeroSpecs = []; mode = 'custom'; $('#la-custom-mode').classList.add('active'); if (spPlane) spPlane.setEditable(true); buildFromPZ(); syncInputs(); });
+  $('#la-reset-view').addEventListener('click', () => { if (spPlane) spPlane.resetView(); });
 
   const laStructs = [
     ['一阶', '1', 's+1'],
@@ -151,59 +143,49 @@ App.register('la', (host) => {
     ['带通', 's', 's^2+0.4*s+1.21'],
     ['因式', '(s+2)', '(s+1)*(s+3)']
   ];
-  const laSRow = $('#la-struct');
-  if (laSRow) {
-    laStructs.forEach(([name, n, d]) => {
-      const c = U.el('button', { class: 'chip' }, name);
-      c.addEventListener('click', () => { $('#la-num').value = n; $('#la-den').value = d; applyInputs(); });
-      laSRow.append(c);
-    });
-  }
-  $('#la-apply').addEventListener('click', applyInputs);
-  ['#la-num', '#la-den', '#la-poles-in', '#la-zeros-in'].forEach((sel) => {
-    $(sel).addEventListener('keydown', (e) => { if (e.key === 'Enter') applyInputs(); });
-  });
-
-  /* ---------- H(s) 输入实时预览 + 自动应用 + 迷你波形 ---------- */
-  const laFrac = $('#la-num').closest('.tf-frac');
-  // 符号键盘（光标处插入）
-  {
-    const padRow = $('#la-pad');
-    ['s', '^2', '^3', '*', '/', '(', ')', '+', '-'].forEach((tok) => {
-      const b = U.el('button', { class: 'chip pad-key', title: '插入 ' + tok }, tok === '^2' ? 's²' : tok === '^3' ? 's³' : tok);
-      b.addEventListener('click', () => {
-        const inp = document.activeElement && (document.activeElement.id === 'la-num' || document.activeElement.id === 'la-den') ? document.activeElement : $('#la-den');
-        const s = inp.selectionStart == null ? inp.value.length : inp.selectionStart;
-        const e2 = inp.selectionEnd == null ? s : inp.selectionEnd;
-        inp.value = inp.value.slice(0, s) + tok + inp.value.slice(e2);
-        inp.focus();
-        try { inp.setSelectionRange(s + tok.length, s + tok.length); } catch (err) { }
-        inp.dispatchEvent(new Event('input'));
-      });
-      padRow.append(b);
-    });
-  }
-  let laPvTimer = null, laAutoTimer = null;
-  // 返回解析结果（无效时为 null），同时刷新预览徽标
-  function laPreview() {
-    const nStr = $('#la-num').value.trim(), dStr = $('#la-den').value.trim();
-    const box = $('#la-preview');
-    if (!nStr && !dStr) { box.innerHTML = ''; laFrac.classList.remove('invalid'); drawMini(null); return null; }
-    const t = FX_LIB.parseTFFields(nStr || '1', dStr || '1');
-    if (!t || !t.den || !t.den[0]) {
-      laFrac.classList.add('invalid');
-      box.innerHTML = '<span style="color:var(--danger)">✗ 解析失败：支持 s^2、2*s、(s+1)*(s+3) 等写法</span>';
-      drawMini(null);
-      return null;
+  /* ---------- H(s) 输入（统一输入组件 MI：键盘/徽标/预览/示例/历史） ---------- */
+  const tfIn = MI.tfInput($('#la-mi'), {
+    variable: 's',
+    properness: true,
+    ids: { num: 'la-num', den: 'la-den' },
+    placeholder: { num: '分子  如 1 或 s+2', den: '分母  如 s^2+0.5*s+1.25' },
+    pad: ['s', '^2', '^3', '*', '/', '(', ')', '+', '-'],
+    examples: laStructs,
+    debounce: 350,
+    onApply: (r, src) => {
+      if (!r || !r.tf) return;
+      lastSrc = 'tf';
+      applyTF(r.tf);
+      drawMini({ num, den });
     }
-    laFrac.classList.remove('invalid');
-    const d0 = t.den[0], nn = t.num.map((c) => c / d0), dd = t.den.map((c) => c / d0);
-    const bad = nn.length > dd.length;
-    box.innerHTML = bad ? '<span style="color:var(--warn)">⚠ 非真分式（分子阶次 > 分母阶次）</span>' : '<span style="color:var(--accent-2)">✓ </span>';
-    box.append(FX.span('H(s)=\\dfrac{' + texPoly(nn) + '}{' + texPoly(dd) + '}'));
-    return bad ? null : { num: nn, den: dd };
-  }
-  // 迷你阶跃响应：轻量递推，输入即算
+  });
+  $('#la-apply').addEventListener('click', () => applyInputs());
+  MI.library($('#la-lib'), {
+    kinds: ['tf'],
+    onSave: () => {
+      const c = tfIn.get();
+      if (!c.numStr && !c.denStr) return null;
+      return { kind: 'tf', data: { variable: 's', num: c.numStr || '1', den: c.denStr || '1' } };
+    },
+    onLoad: (m) => {
+      if (!m.data || m.data.variable !== 's') return;
+      tfIn.set(m.data.num, m.data.den);
+      lastSrc = 'tf';
+      applyInputs();
+    }
+  });
+  $('#la-toex').addEventListener('click', () => {
+    const c = tfIn.get();
+    const expr = (c.numStr || '1') + '/(' + (c.denStr || '1') + ')';
+    try { history.replaceState(null, '', '#ex=' + encodeURIComponent(expr)); } catch (e) { }
+    App.open('explore');
+  });
+  $('#la-poles-in').addEventListener('input', () => { lastSrc = 'pz'; });
+  $('#la-zeros-in').addEventListener('input', () => { lastSrc = 'pz'; });
+  $('#la-poles-in').addEventListener('keydown', (e) => { if (e.key === 'Enter') applyInputs(); });
+  $('#la-zeros-in').addEventListener('keydown', (e) => { if (e.key === 'Enter') applyInputs(); });
+
+  /* ---------- 迷你阶跃响应：轻量递推 ---------- */
   let miniTF = null;
   function drawMini(tf) {
     const cvEl = $('#la-mini');
@@ -232,33 +214,33 @@ App.register('la', (host) => {
     p.clip(); p.line(res.t, res.y, { color: cv('--cv-line2'), width: 2 }); p.unclip();
     p.crosshair((t) => 't=' + U.fmt(t, 3), (y) => 'y=' + U.fmt(y, 4));
   }
-  ['#la-num', '#la-den'].forEach((sel) => $(sel).addEventListener('input', () => {
-    clearTimeout(laPvTimer); clearTimeout(laAutoTimer);
-    laPvTimer = setTimeout(() => {
-      const t = laPreview();
-      // 输入合法（真分式）即自动应用，无需手点「应用输入」；出错只提示不打断
-      if (t) laAutoTimer = setTimeout(() => applyInputs(true), 550);
-    }, 250);
-  }));
-  laPreview();
+  // 由 H(s) 应用（MI 校验通过后走这里）
+  function applyTF(t) {
+    num = t.num; den = t.den;
+    const d0 = den[0];
+    num = num.map((c) => c / d0); den = den.map((c) => c / d0);
+    poleSpecs = rootsToSpecs(DSP.polyRoots(den));
+    zeroSpecs = rootsToSpecs(DSP.polyRoots(num));
+    mode = 'custom';
+    $('#la-custom-mode').classList.add('active');
+    pRow.querySelectorAll('.chip').forEach((x) => x.classList.remove('active'));
+    if (spPlane) spPlane.setEditable(true);
+    $('#la-note').textContent = '由 H(s) 求根得到零极点。';
+    if (spPlane) spPlane.resetView();
+    syncInputs();
+    renderTex();
+    laWriteHash();
+    redraw();
+  }
   function applyInputs(fromAuto) {
-    const numStr = ($('#la-num').value || '').trim();
-    const denStr = ($('#la-den').value || '').trim();
     const poleStr = $('#la-poles-in').value.trim();
     const zeroStr = $('#la-zeros-in').value.trim();
-    if (numStr || denStr) {
-      const t = FX_LIB.parseTFFields(numStr || '1', denStr || '1');
-      if (!t || !t.den || !t.den[0]) { if (!fromAuto) $('#la-note').innerHTML = '<span style="color:var(--danger)">H(s) 解析失败，示例：分子 1，分母 s^2+0.5*s+1.25</span>'; return; }
-      if (t.num.length > t.den.length) { if (!fromAuto) $('#la-note').innerHTML = '<span style="color:var(--danger)">分子阶次需 ≤ 分母阶次（非真分式无法仿真时域响应）。</span>'; return; }
-      num = t.num; den = t.den;
-      const d0 = den[0];
-      num = num.map((c) => c / d0); den = den.map((c) => c / d0);
-      poleSpecs = rootsToSpecs(DSP.polyRoots(den));
-      zeroSpecs = rootsToSpecs(DSP.polyRoots(num));
-      mode = 'custom';
-      $('#la-custom-mode').classList.add('active');
-      pRow.querySelectorAll('.chip').forEach((x) => x.classList.remove('active'));
-      $('#la-note').textContent = '由 H(s) 求根得到零极点。';
+    const { numStr, denStr } = tfIn.get();
+    // 用户最后编辑的是零极点输入时，应走零极点分支；否则 H(s) 分支会把用户输入静默覆盖回去
+    const preferPZ = lastSrc === 'pz' && (poleStr || zeroStr);
+    if ((numStr || denStr) && !preferPZ) {
+      tfIn.apply();   // MI 校验并触发 applyTF；解析失败时徽标已提示
+      return;
     } else if (poleStr || zeroStr) {
       const ps = parseComplexList(poleStr), zs = parseComplexList(zeroStr);
       if (ps === null || zs === null) { $('#la-note').innerHTML = '<span style="color:var(--danger)">零极点格式：逗号分隔，如 -0.25+1.09j, -2, 0.5</span>'; return; }
@@ -271,7 +253,7 @@ App.register('la', (host) => {
       $('#la-note').textContent = '请输入 H(s) 或至少一组极点。';
       return;
     }
-    if (spPlot) spPlot.userAdjusted = false;
+    if (spPlane) spPlane.resetView();   // 新输入：视图复位适配新零极点
     syncInputs();
     renderTex();
     laWriteHash();
@@ -280,17 +262,22 @@ App.register('la', (host) => {
 
   // 多项式 → 可解析字符串（自高到低，显式 * 号，保号）
   function polyToStr(c) {
-    return c.map((x, i) => {
+    // 跳过零系数，避免把 0*s^2 这类冗余项写进 URL（也让还原后的分子不含前导零）
+    let out = '';
+    for (let i = 0; i < c.length; i++) {
+      const x = c[i];
+      if (Math.abs(x) < 1e-9) continue;
       const p = c.length - 1 - i;
       const a = +Math.abs(x).toFixed(6);
-      return (x < 0 ? '-' : '+') + a + (p === 0 ? '' : p === 1 ? '*s' : '*s^' + p);
-    }).join('').replace(/^\+/, '');
+      out += (out === '' ? (x < 0 ? '-' : '') : (x < 0 ? '-' : '+')) + a + (p === 0 ? '' : p === 1 ? '*s' : '*s^' + p);
+    }
+    return out || '0';
   }
   function laWriteHash() {
     try {
-      const nStr = $('#la-num').value.trim() || polyToStr(num);
-      const dStr = $('#la-den').value.trim() || polyToStr(den);
-      history.replaceState(null, '', '#lan=' + encodeURIComponent(nStr) + '&lad=' + encodeURIComponent(dStr));
+      const nStr = tfIn.get().numStr || polyToStr(num);
+      const dStr = tfIn.get().denStr || polyToStr(den);
+      if (App.hashFree()) history.replaceState(null, '', '#lan=' + encodeURIComponent(nStr) + '&lad=' + encodeURIComponent(dStr));
     } catch (e) { }
   }
 
@@ -317,7 +304,7 @@ App.register('la', (host) => {
     num = p.num.slice(); den = p.den.slice();
     poleSpecs = rootsToSpecs(DSP.polyRoots(den));
     zeroSpecs = rootsToSpecs(DSP.polyRoots(num));
-    if (spPlot) spPlot.userAdjusted = false;
+    if (spPlane) spPlane.resetView();
     renderTex();
     $('#la-note').textContent = p.note;
     redraw();
@@ -340,9 +327,6 @@ App.register('la', (host) => {
     FX.katex('H(s)=\\dfrac{' + texPoly(num) + '}{' + texPoly(den) + '}', hostEl, { displayMode: true });
   }
   function texPoly(c) { return U.polyTex(c); }
-  function polyStr(c) {
-    return c.map((x, i) => (Math.abs(x) < 1e-9 ? '' : (i === 0 ? '' : (x > 0 ? ' + ' : ' - ')) + Math.abs(x) + 's^' + (c.length - 1 - i))).join('') || '0';
-  }
 
   /* ---------- 留数法部分分式（含重极点）：引擎在 TR 中共享 ---------- */
 
@@ -443,127 +427,79 @@ App.register('la', (host) => {
     p.label('t (s)', p.margin.l + p.drawableW - 24, p.margin.t + p.drawableH - 6, { color: cv('--cv-tick'), size: 10 });
   }
 
-  /* ---------- s 平面（FX.Plot：滚轮缩放） ---------- */
-  function defaultSPRange() {
-    const pts = [...specsToRoots(poleSpecs), ...specsToRoots(zeroSpecs)];
-    let xr = 4, xi = 3;
-    for (const q of pts) {
-      if (!q || !isFinite(q.re) || !isFinite(q.im)) continue;
-      xr = Math.max(xr, Math.abs(q.re) + 1.2);
-      xi = Math.max(xi, Math.abs(q.im) + 1.2);
+  /* ---------- s 平面（共享复平面组件：等比例坐标、触屏可用、ROC 画在 underlay 层） ---------- */
+  let spPlane = null;
+  // 展开后的根下标 → spec 下标（spec 为 {re, im≥0}，im>0 表示共轭对占两个根）
+  function specIdxOf(specs, ri) {
+    let k = ri;
+    for (let s = 0; s < specs.length; s++) {
+      const w = specs[s].im > 1e-6 ? 2 : 1;
+      if (k < w) return s;
+      k -= w;
     }
-    xr = Math.min(Math.max(xr, 2.5), 40);
-    xi = Math.min(Math.max(xi, 2.5), 40);
-    return [-xr, Math.max(1.6, xr * 0.4), -xi, xi];
+    return -1;
   }
-  let spPlot = null;
+  function buildSPPlane() {
+    return new FX.ComplexPlane(spCv, {
+      mode: 'jw',
+      editable: mode === 'custom',
+      blankContextAction: 'zero',
+      margin: { l: 46, r: 16, t: 16, b: 30 },
+      getSpecs: () => ({ poles: specsToRoots(poleSpecs), zeros: specsToRoots(zeroSpecs) }),
+      // ROC：最右极点右侧（因果），画在稳定域着色之后、网格之前
+      onUnderlay: (ctx, pl) => {
+        if (!showROC) return;
+        const roots = specsToRoots(poleSpecs);
+        if (!roots.length) return;
+        const rightmost = roots.reduce((m, q) => Math.max(m, q.re), -Infinity);
+        const ml = pl.margin.l, mt = pl.margin.t, dw = pl.drawableW, dh = pl.drawableH;
+        const rx = U.clamp(pl.sx(rightmost), ml, ml + dw);
+        ctx.fillStyle = cv('--cv-roc-bg');
+        ctx.fillRect(rx, mt, ml + dw - rx, dh);
+        ctx.strokeStyle = cv('--cv-roc-line');
+        ctx.setLineDash([6, 4]); ctx.lineWidth = 1.4;
+        ctx.beginPath(); ctx.moveTo(rx, mt); ctx.lineTo(rx, mt + dh); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = cv('--cv-line3'); ctx.font = '11px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+        ctx.fillText('ROC: σ>' + U.fmt(rightmost, 2), Math.min(rx + 6, ml + dw - 86), mt + 4);
+      },
+      onMove: (kind, ri, z) => {
+        const lst = kind === 'pole' ? poleSpecs : zeroSpecs;
+        const si = specIdxOf(lst, ri);
+        if (si < 0) return;
+        lst[si] = { re: z.re, im: Math.abs(z.im) };
+        buildFromPZ();
+        syncInputs();
+      },
+      onAdd: (kind, z) => {
+        (kind === 'pole' ? poleSpecs : zeroSpecs).push({ re: z.re, im: Math.abs(z.im) });
+        buildFromPZ();
+        syncInputs();
+      },
+      onDelete: (kind, ri) => {
+        const lst = kind === 'pole' ? poleSpecs : zeroSpecs;
+        const si = specIdxOf(lst, ri);
+        if (si >= 0) lst.splice(si, 1);
+        buildFromPZ();
+        syncInputs();
+      },
+      // 预设模式下点击画布 → 进入自定义模式（这一次点击不添加，下一次单击才添加）
+      onBlankTap: () => {
+        if (mode === 'custom') return;
+        mode = 'custom';
+        $('#la-custom-mode').classList.add('active');
+        pRow.querySelectorAll('.chip').forEach((x) => x.classList.remove('active'));
+        if (!poleSpecs.length) poleSpecs = [{ re: -0.5, im: 1.1 }, { re: -1.5, im: 0 }];
+        if (spPlane) spPlane.setEditable(true);
+        buildFromPZ();
+        syncInputs();
+      }
+    });
+  }
   function drawSP() {
-    if (!spPlot) {
-      spPlot = new FX.Plot(spCv, { margin: { l: 46, r: 16, t: 16, b: 30 }, padding: 0, pan: false, hover: false, dblclickReset: false });
-      spPlot.onDraw = drawSP;
-    }
-    if (!spPlot.userAdjusted) {
-      const r = defaultSPRange();
-      spPlot.setRange(r[0], r[1], r[2], r[3], true);
-    }
-    const p = spPlot;
-    const { ctx } = p;
-    p.clear();
-
-    const ml = p.margin.l, mt = p.margin.t, dw = p.drawableW, dh = p.drawableH;
-    const x0px = U.clamp(p.sx(0), ml, ml + dw);
-
-    // 稳定/不稳定底色
-    ctx.fillStyle = cv('--cv-stable-bg'); ctx.fillRect(ml, mt, x0px - ml, dh);
-    ctx.fillStyle = cv('--cv-unstable-bg'); ctx.fillRect(x0px, mt, ml + dw - x0px, dh);
-
-    // ROC：最右极点右侧（因果）
-    const poles = specsToRoots(poleSpecs);
-    if (showROC && poles.length) {
-      const rightmost = poles.reduce((m, q) => Math.max(m, q.re), -Infinity);
-      const rx = U.clamp(p.sx(rightmost), ml, ml + dw);
-      ctx.fillStyle = cv('--cv-roc-bg');
-      ctx.fillRect(rx, mt, ml + dw - rx, dh);
-      ctx.strokeStyle = cv('--cv-roc-line');
-      ctx.setLineDash([6, 4]); ctx.lineWidth = 1.4;
-      ctx.beginPath(); ctx.moveTo(rx, mt); ctx.lineTo(rx, mt + dh); ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = cv('--cv-line3'); ctx.font = '11px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-      ctx.fillText('ROC: σ>' + U.fmt(rightmost, 2), Math.min(rx + 6, ml + dw - 86), mt + 4);
-    }
-
-    p.grid(null, null);
-    p.axis(true);
-    ctx.fillStyle = cv('--cv-label'); ctx.font = '11px monospace';
-    ctx.fillText('σ', ml + dw - 12, mt + 4);
-    ctx.fillText('jω', ml + 6, mt + 14);
-
-    // 极点 / 零点
-    for (const q of poles) drawSym(p.sx(q.re), p.sy(q.im), 'pole', cv('--cv-danger'));
-    for (const z of specsToRoots(zeroSpecs)) drawSym(p.sx(z.re), p.sy(z.im), 'zero', cv('--cv-line1'));
-    function drawSym(x, y, kind, color) {
-      ctx.save();
-      ctx.lineWidth = 2; ctx.strokeStyle = color;
-      if (kind === 'pole') {
-        const s = 8;
-        ctx.beginPath(); ctx.moveTo(x - s, y - s); ctx.lineTo(x + s, y + s); ctx.moveTo(x - s, y + s); ctx.lineTo(x + s, y - s); ctx.stroke();
-      } else {
-        ctx.beginPath(); ctx.arc(x, y, 7, 0, 7); ctx.stroke();
-      }
-      ctx.restore();
-    }
+    if (!spPlane) spPlane = buildSPPlane();
+    spPlane.redraw();
   }
-
-  /* ---------- s 平面交互（考虑缩放） ---------- */
-  function canvasPos(e) {
-    const r = spCv.getBoundingClientRect();
-    const px = (e.clientX - r.left) * (spCv.clientWidth / r.width);
-    const py = (e.clientY - r.top) * (spCv.clientHeight / r.height);
-    const re = spPlot.xAt(px), im = spPlot.yAt(py);
-    const mx = 0.2 * (spPlot.xmax - spPlot.xmin), my = 0.2 * (spPlot.ymax - spPlot.ymin);
-    return { re: U.clamp(re, spPlot.xmin - mx, spPlot.xmax + mx), im: U.clamp(im, spPlot.ymin - my, spPlot.ymax + my) };
-  }
-  function nearSpec(p, specs) {
-    const tol = 0.045 * (spPlot.xmax - spPlot.xmin);   // 容差随缩放自适应
-    let best = -1, bd = tol;
-    for (let i = 0; i < specs.length; i++) {
-      for (const im of specs[i].im > 1e-6 ? [specs[i].im, -specs[i].im] : [0]) {
-        const d = Math.hypot(specs[i].re - p.re, im - p.im);
-        if (d < bd) { bd = d; best = i; }
-      }
-    }
-    return best;
-  }
-  let dragKind = null, dragIdx = -1;
-  spCv.addEventListener('contextmenu', (e) => e.preventDefault());
-  spCv.addEventListener('mousedown', (e) => {
-    if (mode !== 'custom') { mode = 'custom'; $('#la-custom-mode').classList.add('active'); pRow.querySelectorAll('.chip').forEach((x) => x.classList.remove('active')); }
-    const p = canvasPos(e);
-    const pi = nearSpec(p, poleSpecs), zi = nearSpec(p, zeroSpecs);
-    if (pi >= 0) { dragKind = 'pole'; dragIdx = pi; }
-    else if (zi >= 0) { dragKind = 'zero'; dragIdx = zi; }
-    else if (e.button === 2) { zeroSpecs.push({ re: p.re, im: Math.abs(p.im) }); dragKind = null; }
-    else { poleSpecs.push({ re: p.re, im: Math.abs(p.im) }); dragKind = null; }
-    buildFromPZ();
-    syncInputs();
-  });
-  spCv.addEventListener('mousemove', (e) => {
-    if (!dragKind) return;
-    const p = canvasPos(e);
-    const lst = dragKind === 'pole' ? poleSpecs : zeroSpecs;
-    if (lst[dragIdx]) { lst[dragIdx] = { re: p.re, im: Math.abs(p.im) }; buildFromPZ(); }
-  });
-  window.addEventListener('mouseup', () => { if (dragKind) syncInputs(); dragKind = null; dragIdx = -1; });
-  spCv.addEventListener('dblclick', (e) => {
-    if (mode !== 'custom') return;
-    const p = canvasPos(e);
-    const pi = nearSpec(p, poleSpecs), zi = nearSpec(p, zeroSpecs);
-    if (pi >= 0) poleSpecs.splice(pi, 1);
-    else if (zi >= 0) zeroSpecs.splice(zi, 1);
-    else return;
-    buildFromPZ();
-    syncInputs();
-  });
 
   // 初始化：URL 带分享的 H(s)（#lan=..&lad=..）时还原，否则用默认预设
   $('#la-share').addEventListener('click', () => {
@@ -578,16 +514,20 @@ App.register('la', (host) => {
     const lp = new URLSearchParams(location.hash.replace(/^#/, ''));
     const hn = lp.get('lan'), hd = lp.get('lad');
     if (hn != null && hd != null) {
-      $('#la-num').value = hn;
-      $('#la-den').value = hd;
+      tfIn.set(hn, hd);
       $('#la-input-fold').open = true;
+      lastSrc = 'tf';
       applyInputs();
     } else {
       usePreset('second_under');
+      drawMini(null);
     }
   }
   syncInputs();
 
   return { title: '拉普拉斯变换', api: { dispose, onTheme: () => { drawSP(); redraw(); } } };
-  function dispose() { }
+  function dispose() {
+    if (spPlane) spPlane.dispose();
+    tfIn.destroy();
+  }
 });

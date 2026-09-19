@@ -6,8 +6,8 @@
  * ============================================================ */
 App.register('pid', (host) => {
   const cv = FX.cvCol;
-  const polyMul = (a, b) => { const o = new Array(a.length + b.length - 1).fill(0); for (let i = 0; i < a.length; i++) for (let j = 0; j < b.length; j++) o[i + j] += a[i] * b[j]; return o; };
-  const polyAdd = (a, b) => { const n = Math.max(a.length, b.length), o = new Array(n).fill(0); for (let i = 0; i < a.length; i++) o[n - a.length + i] += a[i]; for (let i = 0; i < b.length; i++) o[n - b.length + i] += b[i]; return o; };
+  // 多项式工具复用框图内核（与 blocksolve.js 同一实现，避免三处重复）
+  const polyMul = BLKSOLVE.polyMul, polyAdd = BLKSOLVE.polyAdd;
 
   const plants = {
     p1: { name: '一阶惯性', num: [1], den: [1, 1], tex: '\\dfrac{1}{s+1}' },
@@ -108,7 +108,7 @@ App.register('pid', (host) => {
       $('#' + vid).textContent = get().toFixed(1);
     });
     $('#pid-ctex').innerHTML = '';
-    $('#pid-ctex').append(FX.span('C(s)=K_p+\\dfrac{K_i}{s}+K_d s=' + texPoly([Kd, Kp, Ki])));
+    $('#pid-ctex').append(FX.span('C(s)=K_p+\\dfrac{K_i}{s}+K_d s=\\dfrac{' + texPoly([Kd, Kp, Ki]) + '}{s}'));
   }
   sliderDefs.forEach(([id, vid, get, set]) => {
     $('#' + id).addEventListener('input', (e) => { set(+e.target.value); $('#' + vid).textContent = (+e.target.value).toFixed(1); solve(); });
@@ -135,40 +135,26 @@ App.register('pid', (host) => {
     p.crosshair((t) => 't=' + U.fmt(t, 3), (y) => 'y=' + U.fmt(y, 4));
   }
 
-  // 闭环极点图（参数名 cvEl，避免遮蔽 FX.cvCol）
-  let pzCanvas = null;
+  // 闭环极点图（共享复平面组件，s 平面模式，静态展示：平移/缩放可用）
+  let pzPlane = null, pzPolesNow = [];
   function drawPoles(poles) {
-    const cvEl = $('#pid-pz');
-    pzCanvas = cvEl;
-    const W = cvEl.clientWidth || 420, H = cvEl.clientHeight || 230;
-    const dpr = window.devicePixelRatio || 1;
-    cvEl.width = W * dpr; cvEl.height = H * dpr;
-    const g = cvEl.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    g.clearRect(0, 0, W, H); g.fillStyle = cv('--cv-bg'); g.fillRect(0, 0, W, H);
-    const ml = 36, mr = 12, mt = 12, mb = 22, dw = W - ml - mr, dh = H - mt - mb;
-    const cx = ml + dw / 2, cy = mt + dh / 2;
-    let R = 1.5; for (const q of poles) R = Math.max(R, Math.abs(q.re) + 0.5, Math.abs(q.im) + 0.5);
-    const SX = (r) => cx + (r * dw / 2) / R, SY = (i) => cy - (i * dh / 2) / R;
-    g.fillStyle = cv('--cv-stable-bg'); g.fillRect(ml, mt, cx - ml, dh);
-    g.fillStyle = cv('--cv-unstable-bg'); g.fillRect(cx, mt, ml + dw - cx, dh);
-    g.strokeStyle = cv('--cv-grid');
-    for (let i = 0; i <= 4; i++) { const x = ml + i * dw / 4; g.beginPath(); g.moveTo(x, mt); g.lineTo(x, mt + dh); g.stroke(); }
-    for (let i = 0; i <= 4; i++) { const y = mt + i * dh / 4; g.beginPath(); g.moveTo(ml, y); g.lineTo(ml + dw, y); g.stroke(); }
-    g.strokeStyle = cv('--cv-axis-hi'); g.lineWidth = 1.4; g.beginPath(); g.moveTo(cx, mt); g.lineTo(cx, mt + dh); g.stroke();
-    g.strokeStyle = cv('--cv-axis'); g.beginPath(); g.moveTo(ml, cy); g.lineTo(ml + dw, cy); g.stroke();
-    g.fillStyle = cv('--cv-tick'); g.font = '10px monospace'; g.textAlign = 'left'; g.textBaseline = 'top';
-    g.fillText('jω', cx + 4, mt + 2); g.fillText('σ', ml + dw - 12, cy + 4);
-    g.strokeStyle = cv('--cv-danger'); g.lineWidth = 2;
-    for (const q of poles) {
-      const x = SX(q.re), y = SY(q.im);
-      g.beginPath(); g.moveTo(x - 6, y - 6); g.lineTo(x + 6, y + 6); g.moveTo(x - 6, y + 6); g.lineTo(x + 6, y - 6); g.stroke();
+    pzPolesNow = poles;
+    if (!pzPlane) {
+      pzPlane = new FX.ComplexPlane($('#pid-pz'), {
+        mode: 'jw',
+        editable: false,
+        getSpecs: () => ({ poles: pzPolesNow, zeros: [] })
+      });
     }
+    pzPlane.resetView();   // 每次求解重新适配新极点（与旧版 R 重算语义一致）
   }
 
   /* ---------- 主计算 ---------- */
   function solve() {
     const g = plants[plantKey];
-    const numC = [Kd, Kp, Ki], denC = [1, 0];   // C(s) = (Kd s² + Kp s + Ki)/s
+    // Ki≈0 时 Nc 与分母 s 有公因子，先约成真分式（C=Kd·s+Kp），否则闭环会多出虚假极点 s=0
+    const noKi = Math.abs(Ki) < 1e-12;
+    const numC = noKi ? [Kd, Kp] : [Kd, Kp, Ki], denC = noKi ? [1] : [1, 0];   // C(s) = (Kd s² + Kp s + Ki)/s
     const N0 = polyMul(numC, g.num);
     const D0 = polyAdd(polyMul(denC, g.den), N0);
     const n0 = D0[0] || 1;
@@ -201,10 +187,14 @@ App.register('pid', (host) => {
       if (t10 == null && y[i] >= 0.1 * yf) t10 = t[i];
       if (t10 != null && y[i] >= 0.9 * yf) { tr = t[i] - t10; break; }
     }
+    // 仅当仿真结束时已在 ±2% 带内，ts 才有意义；整段未进入带内视为未达标（NaN → 显示「—」）
     let ts = NaN;
     const band = 0.02 * Math.abs(yf);
-    for (let i = t.length - 1; i >= 0; i--) {
-      if (!isFinite(y[i]) || Math.abs(y[i] - yf) > band) { ts = t[Math.min(i + 1, t.length - 1)]; break; }
+    const yEnd = y[y.length - 1];
+    if (isFinite(yEnd) && Math.abs(yEnd - yf) <= band) {
+      for (let i = t.length - 1; i >= 0; i--) {
+        if (!isFinite(y[i]) || Math.abs(y[i] - yf) > band) { ts = t[Math.min(i + 1, t.length - 1)]; break; }
+      }
     }
     const ess = 1 - yf;
     $('#pid-metrics').innerHTML = `

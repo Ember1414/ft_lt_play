@@ -20,10 +20,20 @@ const DSP = (() => {
 
   // Durand–Kerner 多项式求根
   function polyRoots(coefTopDown) {
-    const n = coefTopDown.length - 1;
+    // 调用方常把分子补零对齐后送来（如 [0,0,1]）；必须先去掉前导零，
+    // 否则 lead=0 会让整条系数变成 NaN，根全废（z 平面白屏、零点丢失）
+    const src = [];
+    let started = false;
+    for (const c of coefTopDown) {
+      if (!started && Math.abs(c) < 1e-12) continue;
+      started = true; src.push(c);
+    }
+    if (!src.length) return [];
+    const n = src.length - 1;
     if (n <= 0) return [];
-    const lead = coefTopDown[0];
-    const coef = coefTopDown.map((c) => c / lead);
+    const lead = src[0];
+    if (!isFinite(lead) || Math.abs(lead) < 1e-300) return [];
+    const coef = src.map((c) => c / lead);
     let R = 1;
     for (let i = 1; i < coef.length; i++) R = Math.max(R, Math.abs(coef[i]));
     R += 1;

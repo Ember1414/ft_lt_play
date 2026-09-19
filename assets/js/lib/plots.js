@@ -65,6 +65,8 @@ const FX = (() => {
   class Plot {
     constructor(canvas, { margin = { l: 54, r: 16, t: 14, b: 34 }, padding = 0.05, logX = false, logY = false, zoom = true, pan = true, hover = true, dblclickReset = true } = {}) {
       this.cv = canvas;
+      // 移动端：画布上的触摸手势交给指针事件（双指捏合/单指平移），不触发页面滚动
+      canvas.style.touchAction = 'none';
       this.ctx = canvas.getContext('2d');
       this.margin = margin;
       this.padding = padding;
@@ -555,6 +557,357 @@ const FX = (() => {
     return nm * pow;
   }
 
+  /* ---------- 复平面画布（s 平面 / z 平面共用） ----------
+     等比例坐标（xy 单位长度像素相同）、虚轴 'jw' / 单位圆 'unit' 两种模式、
+     零极点增删拖（pointer）、捏合缩放、长按菜单、稳定域着色。
+     零极点数据仍由模块持有：getSpecs 读、onAdd/onMove/onDelete 写回，
+     共轭成对 / 实轴吸附后的数据语义由模块自行处理。 */
+  const LONG_PRESS = 450;   // 触屏长按阈值（ms），与 blockdiag 一致
+  class ComplexPlane extends Plot {
+    constructor(canvas, opts = {}) {
+      super(canvas, {
+        margin: opts.margin || { l: 40, r: 14, t: 14, b: 24 },
+        padding: 0,
+        pan: true,
+        hover: false,
+        dblclickReset: false,   // 双击行为自管：命中点=删除、空白=复位
+      });
+      this.mode = opts.mode === 'unit' ? 'unit' : 'jw';
+      this.editable = opts.editable !== false;
+      this.defaultAdd = opts.defaultAdd === 'zero' ? 'zero' : 'pole';
+      this.blankContextAction = opts.blankContextAction === undefined ? 'zero' : opts.blankContextAction;
+      this.getSpecs = opts.getSpecs || (() => ({ poles: [], zeros: [] }));
+      this.onMove = opts.onMove || null;
+      this.onAdd = opts.onAdd || null;
+      this.onDelete = opts.onDelete || null;
+      this.onRestore = opts.onRestore || null;   // 撤销恢复：模块按自身数据模型写回
+      this._undoStack = [];    // 撤销快照（getSpecs 深拷贝，≤30 步）
+      this._dragUndo = null;   // 拖动开始时的快照：首次真实移动才入栈
+      this.onBlankTap = opts.onBlankTap || null;
+      this.onUnderlay = opts.onUnderlay || null;
+      this.onOverlay = opts.onOverlay || null;
+      this._press = null;      // 空白按下：{ x, y, px, py, moved, button, pointerId }
+      this._specDrag = null;   // 拖零极点：{ kind, index, pointerId }
+      this._lpTimer = 0;
+      this._lpGuardAt = 0;     // 长按菜单弹出时刻：吞掉 Android 长按派发的 contextmenu
+      this._menuEl = null;
+      this._homeR = 1.3;
+      this.onDraw = () => this._render();
+      this._bindCP();
+      // Ctrl/Cmd+Z 撤销（文档级；输入框聚焦时让位，画布随模块销毁时移除）
+      this._keyHandler = (e) => {
+        if (!(e.ctrlKey || e.metaKey) || !(e.key === 'z' || e.key === 'Z')) return;
+        const ae = document.activeElement;
+        if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+        if (!this.editable || !this.cv.isConnected) return;
+        if (this.undo() && e.preventDefault) e.preventDefault();
+      };
+      document.addEventListener('keydown', this._keyHandler);
+      this._render();
+    }
+
+    /* ---- 视图：等比例约束 ---- */
+    // 以视野中心为准，把「偏窄」的轴扩到等比（只扩不缩，不裁数据）；返回是否调整过
+    _equalize() {
+      if (!(this.drawableW > 0) || !(this.drawableH > 0)) return false;
+      const ratio = this.drawableH / this.drawableW;   // 期望 spanY/spanX
+      const sx = this.xmax - this.xmin, sy = this.ymax - this.ymin;
+      const wantY = sx * ratio;
+      if (Math.abs(sy - wantY) <= 1e-12 * Math.max(1, Math.abs(wantY))) return false;
+      const cx = (this.xmin + this.xmax) / 2, cy = (this.ymin + this.ymax) / 2;
+      if (sy > wantY) {
+        const wantX = sy / ratio;
+        this.xmin = cx - wantX / 2; this.xmax = cx + wantX / 2;
+      } else {
+        this.ymin = cy - wantY / 2; this.ymax = cy + wantY / 2;
+      }
+      return true;
+    }
+    _zoomAt(px, py, factor) { super._zoomAt(px, py, factor); if (this._equalize()) this._render(); }
+    _pan(dpx, dpy) { super._pan(dpx, dpy); this._equalize(); }   // 平移不改跨度，父类已重绘
+    setRange(xmin, xmax, ymin, ymax, force) {
+      if (this.userAdjusted && !force) return;
+      super.setRange(xmin, xmax, ymin, ymax, true);
+      this._equalize();
+    }
+    // 初始视野：unit 覆盖 max|z|+0.35（≥1.3）；jw 覆盖 max(|re|,|im|)+1.2（≥2.5）
+    _applyHome() {
+      const { poles = [], zeros = [] } = this.getSpecs() || {};
+      const unit = this.mode === 'unit';
+      let R = unit ? 1.3 : 2.5;
+      const pad = unit ? 0.35 : 1.2;
+      for (const q of [...poles, ...zeros]) {
+        const m = unit ? Math.hypot(q.re, q.im) : Math.max(Math.abs(q.re), Math.abs(q.im));
+        if (isFinite(m)) R = Math.max(R, m + pad);
+      }
+      this._homeR = R;
+      const halfY = R, halfX = R * (this.drawableW / (this.drawableH || 1));
+      this.xmin = -halfX; this.xmax = halfX;
+      this.ymin = -halfY; this.ymax = halfY;
+      this._initial = [this.xmin, this.xmax, this.ymin, this.ymax];
+    }
+    resetView() { this.userAdjusted = false; this._render(); }
+
+    /* ---- 坐标换算 ---- */
+    spanX() { return this.xmax - this.xmin; }
+    spanY() { return this.ymax - this.ymin; }
+    pxToWorld(px, py) { return { re: this.xAt(px), im: this.yAt(py) }; }
+    worldToPx(re, im) { return { x: this.sx(re), y: this.sy(im) }; }
+    setEditable(v) { this.editable = !!v; if (!v) { this._cancelLongPress(); this._specDrag = null; } }
+    setDefaultAdd(k) { this.defaultAdd = k === 'zero' ? 'zero' : 'pole'; }
+    dispose() {
+      this._cancelLongPress();
+      this._closeMenu();
+      if (this._keyHandler) document.removeEventListener('keydown', this._keyHandler);
+      if (this.ro) this.ro.disconnect();
+    }
+
+    /* ---- 撤销 ---- */
+    _pushUndo() {
+      const s = this.getSpecs() || {};
+      this._undoStack.push({
+        poles: (s.poles || []).map((q) => ({ re: q.re, im: q.im })),
+        zeros: (s.zeros || []).map((q) => ({ re: q.re, im: q.im }))
+      });
+      if (this._undoStack.length > 30) this._undoStack.shift();
+    }
+    undo() {
+      if (!this._undoStack.length || !this.onRestore) return false;
+      this.onRestore(this._undoStack.pop());
+      return true;
+    }
+
+    /* ---- 绘制 ---- */
+    _render() {
+      if (!this.cv.isConnected) return;   // 模块已切换：旧画布不再绘制
+      if (!this.userAdjusted) this._applyHome();
+      else this._equalize();              // 容器尺寸变化后保持等比例
+      const { ctx } = this;
+      const ml = this.margin.l, mt = this.margin.t, dw = this.drawableW, dh = this.drawableH;
+      const { poles = [], zeros = [] } = this.getSpecs() || {};
+      this.clear();
+      if (this.mode === 'jw') {
+        const x0 = U.clamp(this.sx(0), ml, ml + dw);
+        ctx.fillStyle = cvCol('--cv-stable-bg'); ctx.fillRect(ml, mt, x0 - ml, dh);
+        ctx.fillStyle = cvCol('--cv-unstable-bg'); ctx.fillRect(x0, mt, ml + dw - x0, dh);
+        if (this.onUnderlay) this.onUnderlay(ctx, this);
+        this.grid(null, null);
+        this.axis(true);
+        ctx.strokeStyle = cvCol('--cv-axis-hi'); ctx.lineWidth = 1.4;
+        ctx.beginPath(); ctx.moveTo(x0, mt); ctx.lineTo(x0, mt + dh); ctx.stroke();
+        ctx.fillStyle = cvCol('--cv-label'); ctx.font = '11px monospace';
+        ctx.textAlign = 'right'; ctx.textBaseline = 'top';
+        ctx.fillText('σ', ml + dw - 6, mt + 4);
+        ctx.textAlign = 'left';
+        ctx.fillText('jω', ml + 6, mt + 4);
+      } else {
+        const ox = this.sx(0), oy = this.sy(0), rad = Math.abs(this.sx(1) - this.sx(0));
+        // 圆内着稳定色（仅当全部极点严格在圆内，与 zt 原行为一致）
+        const allInside = poles.every((q) => Math.hypot(q.re, q.im) < 1 - 1e-9);
+        ctx.fillStyle = cvCol(allInside ? '--cv-stable-bg' : '--cv-bg');
+        ctx.beginPath(); ctx.arc(ox, oy, rad, 0, Math.PI * 2); ctx.fill();
+        if (this.onUnderlay) this.onUnderlay(ctx, this);
+        ctx.strokeStyle = cvCol('--cv-grid'); ctx.lineWidth = 1;
+        for (let i = 0; i <= 6; i++) { const x = ml + i * dw / 6; ctx.beginPath(); ctx.moveTo(x, mt); ctx.lineTo(x, mt + dh); ctx.stroke(); }
+        for (let i = 0; i <= 4; i++) { const y = mt + i * dh / 4; ctx.beginPath(); ctx.moveTo(ml, y); ctx.lineTo(ml + dw, y); ctx.stroke(); }
+        ctx.save();
+        ctx.beginPath(); ctx.rect(ml, mt, dw, dh); ctx.clip();
+        ctx.strokeStyle = cvCol('--cv-axis-hi'); ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.arc(ox, oy, rad, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(ox, mt); ctx.lineTo(ox, mt + dh); ctx.stroke();
+        ctx.strokeStyle = cvCol('--cv-axis');
+        ctx.beginPath(); ctx.moveTo(ml, oy); ctx.lineTo(ml + dw, oy); ctx.stroke();
+        ctx.restore();
+        ctx.fillStyle = cvCol('--cv-tick'); ctx.font = '10px monospace';
+        ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+        ctx.fillText('Re(z)', ml + dw - 34, U.clamp(oy + 4, mt + 2, mt + dh - 14));
+        ctx.fillText('Im', U.clamp(ox + 4, ml + 2, ml + dw - 16), mt + 2);
+        if (this.spanY() <= 2 * this._homeR * 1.05) ctx.fillText('|z|=1', ox + rad - 34, oy - rad - 2);
+      }
+      // 零极点符号
+      ctx.strokeStyle = cvCol('--cv-danger'); ctx.lineWidth = 2;
+      for (const q of poles) {
+        const x = this.sx(q.re), y = this.sy(q.im);
+        ctx.beginPath();
+        ctx.moveTo(x - 7, y - 7); ctx.lineTo(x + 7, y + 7);
+        ctx.moveTo(x - 7, y + 7); ctx.lineTo(x + 7, y - 7);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = cvCol('--cv-line1'); ctx.lineWidth = 2;
+      for (const q of zeros) { ctx.beginPath(); ctx.arc(this.sx(q.re), this.sy(q.im), 7, 0, Math.PI * 2); ctx.stroke(); }
+      if (this.onOverlay) this.onOverlay(ctx, this);
+    }
+
+    /* ---- 命中 / 添加 ---- */
+    _canvasPos(e) {
+      const r = this.cv.getBoundingClientRect();
+      return [(e.clientX - r.left) * (this.cv.clientWidth / r.width), (e.clientY - r.top) * (this.cv.clientHeight / r.height)];
+    }
+    // 容差按指针类型：触屏 22px（≈44px 命中直径）、鼠标 12px；极点优先
+    _hitAt(px, py, pointerType) {
+      const tol = pointerType === 'touch' ? 22 : 12;
+      const { poles = [], zeros = [] } = this.getSpecs() || {};
+      const test = (arr) => {
+        for (let i = 0; i < arr.length; i++) {
+          if (Math.hypot(px - this.sx(arr[i].re), py - this.sy(arr[i].im)) < tol) return i;
+        }
+        return -1;
+      };
+      let i = test(poles); if (i >= 0) return { kind: 'pole', index: i };
+      i = test(zeros); if (i >= 0) return { kind: 'zero', index: i };
+      return null;
+    }
+    // 贴近实轴（3% 垂直视野）自动吸附为实数根
+    _snapIm(im) { return Math.abs(im) < 0.03 * this.spanY() ? 0 : im; }
+    _addAt(kind, px, py) {
+      if (!this.onAdd) return;
+      const z = this.pxToWorld(px, py);
+      z.im = this._snapIm(z.im);
+      this._pushUndo();
+      this.onAdd(kind, z);
+    }
+
+    /* ---- 交互（注册于父类手势之后；命中点时屏蔽父类平移） ---- */
+    _bindCP() {
+      const cv = this.cv;
+      cv.addEventListener('pointerdown', (e) => {
+        this._closeMenu();
+        this._lpGuardAt = 0;
+        if (this._pointers.size >= 2) {   // 第二指按下：父类已起捏合，取消一切单指手势
+          this._cancelLongPress();
+          this._press = null;
+          this._specDrag = null;
+          return;
+        }
+        if (e.button === 2) return;       // 右键走 contextmenu
+        const [px, py] = this._canvasPos(e);
+        const hit = this.editable ? this._hitAt(px, py, e.pointerType) : null;
+        if (hit) {
+          this._drag = null;              // 屏蔽父类平移，进入拖点
+          this._specDrag = { kind: hit.kind, index: hit.index, pointerId: e.pointerId };
+          // 拖动撤销快照：先记下，首次真实移动才入栈（单纯点住不产生撤销步）
+          const s0 = this.getSpecs() || {};
+          this._dragUndo = {
+            poles: (s0.poles || []).map((q) => ({ re: q.re, im: q.im })),
+            zeros: (s0.zeros || []).map((q) => ({ re: q.re, im: q.im }))
+          };
+          this._dragUndoPushed = false;
+          try { cv.setPointerCapture(e.pointerId); } catch (err) { }
+          this._startLongPress(e, hit);
+          e.preventDefault();
+          return;
+        }
+        // 空白按下：平移由父类负责，这里只记录按点，供「未移动抬起 = 添加」判定
+        this._press = { x: e.clientX, y: e.clientY, px, py, moved: false, button: e.button, pointerId: e.pointerId };
+        this._startLongPress(e, null);
+      });
+      cv.addEventListener('pointermove', (e) => {
+        const p = this._press;
+        if (p && p.pointerId === e.pointerId && Math.abs(e.clientX - p.x) + Math.abs(e.clientY - p.y) > 6) {
+          p.moved = true;
+          this._cancelLongPress();
+        }
+        if (this._specDrag && e.pointerId === this._specDrag.pointerId) {
+          this._cancelLongPress();
+          if (this._dragUndo && !this._dragUndoPushed) {
+            this._undoStack.push(this._dragUndo);   // 首次真实移动才入栈
+            if (this._undoStack.length > 30) this._undoStack.shift();
+            this._dragUndoPushed = true;
+          }
+          const [px, py] = this._canvasPos(e);
+          const z = this.pxToWorld(px, py);
+          z.im = this._snapIm(z.im);
+          if (this.onMove) this.onMove(this._specDrag.kind, this._specDrag.index, z);
+          e.preventDefault();
+        }
+      });
+      const endGesture = (e) => {
+        this._cancelLongPress();
+        if (this._specDrag && e.pointerId === this._specDrag.pointerId) {
+          this._specDrag = null;
+          this._dragUndo = null;
+          this._dragUndoPushed = false;
+        }
+        if (this._press && e.pointerId === this._press.pointerId) {
+          const p = this._press;
+          this._press = null;
+          if (p.moved || p.button === 2) return;
+          if (this.editable) this._addAt(this.defaultAdd, p.px, p.py);
+          else if (this.onBlankTap) this.onBlankTap(this.pxToWorld(p.px, p.py));
+        }
+      };
+      cv.addEventListener('pointerup', endGesture);
+      cv.addEventListener('pointercancel', (e) => {
+        this._cancelLongPress();
+        this._specDrag = null;
+        this._dragUndo = null;
+        this._dragUndoPushed = false;
+        if (this._press && this._press.pointerId === e.pointerId) this._press = null;
+      });
+      cv.addEventListener('dblclick', (e) => {
+        const [px, py] = this._canvasPos(e);
+        const hit = this.editable ? this._hitAt(px, py, 'mouse') : null;
+        if (hit) { this._pushUndo(); if (this.onDelete) this.onDelete(hit.kind, hit.index); }
+        else this.resetView();
+      });
+      cv.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        // Android 触屏长按也会派发 contextmenu：与组件自身的 450ms 长按菜单叠加时
+        // 会误加零点。长按进行中（定时器挂起）或菜单刚弹出的短窗口内只吞掉不执行。
+        if (this._lpTimer || Date.now() - (this._lpGuardAt || 0) < 750) return;
+        if (!this.editable || this.blankContextAction !== 'zero' || !this.onAdd) return;
+        const [px, py] = this._canvasPos(e);
+        if (this._hitAt(px, py, 'mouse')) return;
+        this._addAt('zero', px, py);
+      });
+    }
+
+    /* ---- 长按菜单（触屏） ---- */
+    _startLongPress(e, hit) {
+      if (e.pointerType === 'mouse' || !this.editable) return;
+      this._cancelLongPress();
+      const x = e.clientX, y = e.clientY;
+      const press = this._press;   // 空白按下时非 null，菜单添加要用按点位置
+      const px = press ? press.px : null, py = press ? press.py : null;
+      this._lpTimer = setTimeout(() => {
+        this._lpTimer = 0;
+        this._press = null;        // 菜单弹出后抬起不再当作点击
+        this._specDrag = null;
+        this._lpGuardAt = Date.now();   // 随后到达的 contextmenu（触屏长按派发）只吞不执行
+        const menu = [];
+        if (this._undoStack.length) menu.push({ label: '撤销', fn: () => this.undo() });
+        if (hit) menu.push({ label: '删除', danger: true, fn: () => { this._pushUndo(); if (this.onDelete) this.onDelete(hit.kind, hit.index); } });
+        else menu.push(
+          { label: '添加极点', fn: () => this._addAt('pole', px, py) },
+          { label: '添加零点', fn: () => this._addAt('zero', px, py) },
+          { label: '复位视图', fn: () => this.resetView() }
+        );
+        this._openMenu(menu, x, y);
+      }, LONG_PRESS);
+    }
+    _cancelLongPress() { if (this._lpTimer) { clearTimeout(this._lpTimer); this._lpTimer = 0; } }
+    _openMenu(items, x, y) {
+      this._closeMenu();
+      if (!items || !items.length) return;
+      const el = document.createElement('div');
+      el.className = 'cp-menu';
+      for (const it of items) {
+        const b = document.createElement('button');
+        b.className = 'cp-menu-item' + (it.danger ? ' danger' : '');
+        b.textContent = it.label;
+        b.addEventListener('click', () => { this._closeMenu(); it.fn(); });
+        el.appendChild(b);
+      }
+      document.body.appendChild(el);
+      const w = el.offsetWidth || 170, h = el.offsetHeight || 40;
+      el.style.left = Math.max(8, Math.min(x, window.innerWidth - w - 8)) + 'px';
+      el.style.top = Math.max(8, Math.min(y, window.innerHeight - h - 8)) + 'px';
+      this._menuEl = el;
+    }
+    _closeMenu() { if (this._menuEl) { this._menuEl.remove(); this._menuEl = null; } }
+    redraw() { this._render(); }
+  }
+
   function redrawFold(details) {
     if (!details.open) return;
     requestAnimationFrame(() => {
@@ -646,7 +999,7 @@ const FX = (() => {
     });
   }
 
-  const api = { katex, span, div, Plot, niceStep, cvCol, refreshTheme, enablePlotChrome };
+  const api = { katex, span, div, Plot, ComplexPlane, niceStep, cvCol, refreshTheme, enablePlotChrome };
   api.themeVer = themeVer;
   return api;
 })();

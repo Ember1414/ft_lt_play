@@ -1,0 +1,16 @@
+{
+  "name": "ft-lt-play",
+  "version": "7.0.0",
+  "private": true,
+  "description": "信号与控制实验平台 —— 傅立叶/拉普拉斯/Z 变换、系统分析、PID 的交互式实验环境（纯前端 local-first）",
+  "type": "module",
+  "scripts": {
+    "test": "node scripts/run-tests.mjs",
+    "check": "node scripts/check.mjs",
+    "lint": "node scripts/lint.mjs",
+    "format": "node scripts/format.mjs",
+    "build": "node scripts/build.mjs",
+    "preview": "node scripts/serve.mjs",
+    "verify": "npm run check && npm run lint && npm test && npm run build"
+  }
+}

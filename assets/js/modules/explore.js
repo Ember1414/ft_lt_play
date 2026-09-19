@@ -8,15 +8,18 @@ App.register('explore', (host) => {
   const cv = FX.cvCol;
   let tab = 'expr';
   let exprRedraw = null, tfRedraw = null, drawReset = null;
-  const rendered = { expr: false, sym: false, draw: false, voice: false };
+  const rendered = { expr: false, sym: false, eq: false, draw: false, voice: false };
   let dloop = null, epicy = null, loopRunning = false;   // 手绘动画循环（模块级，便于清理）
+  let exprInputRef = null;                                // 表达式输入组件引用（语音路由用）
   let speechRec = null;                                   // 语音识别实例（dispose 时停止）
+  let winUpHandler = null, drawRO = null;                 // 全局监听 / ResizeObserver（dispose 时解绑）
 
   host.innerHTML = `
     <div class="module">
       <div class="row" id="ex-tabs" style="margin-bottom:14px"></div>
       <div id="ex-expr" class="hidden"></div>
       <div id="ex-sym" class="hidden"></div>
+      <div id="ex-eq" class="hidden"></div>
       <div id="ex-draw" class="hidden"></div>
       <div id="ex-voice" class="hidden"></div>
     </div>`;
@@ -27,17 +30,7 @@ App.register('explore', (host) => {
     box.innerHTML = `
       <div class="pane" style="margin-bottom:16px">
         <h3>输入表达式 · 自动识别时域信号 / 传递函数</h3>
-        <div class="input-bar">
-          <input type="text" id="ex-input" placeholder="例：exp(-2*t)*sin(10*t)*u(t)   或   5/(s^2+0.5*s+1.25)" spellcheck="false" autocomplete="off">
-          <button class="btn primary" id="ex-go">求解</button>
-          <button class="btn" id="ex-share" title="复制当前表达式的分享链接">🔗</button>
-        </div>
-        <div class="row" style="margin-top:10px;align-items:center">
-          <span id="ex-type" class="hint" style="margin:0"></span>
-        </div>
-        <div class="row kbd" id="ex-pad" style="margin-top:10px"></div>
-        <div class="row" id="ex-history" style="margin-top:10px"></div>
-        <div class="row" id="ex-examples" style="margin-top:10px"></div>
+        <div id="ex-mi"></div>
         <div class="hint">自动识别：含 <code>s</code> 变量且含 <code>/</code> → 按<b>传递函数</b>求解（波特图+阶跃+极点零点）；否则按 <code>t</code> 的<b>时域信号</b>求解（波形+频谱）。
           可用函数：<code>u(t)</code> 阶跃、<code>sinc(x)</code>、<code>rect(x)</code>、<code>tri(x)</code>、<code>exp/ln/sin/cos/tan/abs/sign/sqrt</code>，<code>pi</code>。</div>
       </div>
@@ -53,134 +46,74 @@ App.register('explore', (host) => {
       ['(s+2)/(s^2+4)', '超前网络'],
       ['10/(s*(s+5))', '含积分器']
     ];
-    const exRow = box.querySelector('#ex-examples');
-    examples.forEach(([expr, name]) => {
-      const c = U.el('button', { class: 'chip', title: expr }, name);
-      c.addEventListener('click', () => { const inp = box.querySelector('#ex-input'); inp.value = expr; inp.dispatchEvent(new Event('input')); go(); });
-      exRow.append(c);
+
+    /* ---------- 统一输入组件 MI：键盘/徽标/历史/示例 + 实时识别 ---------- */
+    const ex = MI.exprInput(box.querySelector('#ex-mi'), {
+      id: 'ex-input',
+      placeholder: '例：exp(-2*t)*sin(10*t)*u(t)   或   5/(s^2+0.5*s+1.25)',
+      parse: (str) => {
+        const bare = str.replace(/\s+/g, '');
+        const isTF = /(^|[^a-zA-Z0-9_])s([^a-zA-Z0-9_]|$)/.test(bare) && bare.includes('/');
+        if (isTF) {
+          const t = FX_LIB.parseTF(str);
+          return (t && t.den && t.den[0] && t.num.length <= t.den.length)
+            ? { verdict: 'ok', message: '识别为传递函数 H(s)：将绘制波特图 · 阶跃响应 · 零极点' }
+            : { verdict: 'err', message: '传递函数格式有误（需为 s 的多项式之比，且分子阶次 ≤ 分母阶次）' };
+        }
+        return FX_LIB.parseTimeExpr(str)
+          ? { verdict: 'ok', message: '识别为时域信号 x(t)：将绘制波形 · 幅度谱 · 相位谱' }
+          : { verdict: 'err', message: '暂无法解析，请检查括号与函数名（支持 u(t)、sinc、rect、tri、exp…）' };
+      },
+      pad: ['t', 'u(t)', 'sin(', 'cos(', 'tan(', 'exp(', 'ln(', 'sqrt(', 'abs(',
+        'sinc(', 'rect(', 'tri(', '^2', 'pi', '(', ')', '*', '/', '+', '-'],
+      examples,
+      historyKey: 'flt-expr-history',
+      debounce: 220,
+      autoApply: false,
+      onApply: (str) => go(str)
     });
+    exprInputRef = ex;
+    // 求解/分享按钮注入输入条
+    const goBtn = U.el('button', { class: 'btn primary', id: 'ex-go' }, '求解');
+    goBtn.addEventListener('click', () => ex.apply());
+    const shareBtn = U.el('button', { class: 'btn', id: 'ex-share', title: '复制当前表达式的分享链接' }, '🔗');
+    shareBtn.addEventListener('click', () => shareLink(ex.get()));
+    ex.bar.append(goBtn, shareBtn);
 
-    /* ---------- 符号键盘：在光标处插入 token（手机端友好） ---------- */
-    const pad = box.querySelector('#ex-pad');
-    const tokens = ['t', 'u(t)', 'sin(', 'cos(', 'tan(', 'exp(', 'ln(', 'sqrt(', 'abs(',
-      'sinc(', 'rect(', 'tri(', '^2', 'pi', '(', ')', '*', '/', '+', '-'];
-    tokens.forEach((tok) => {
-      const b = U.el('button', { class: 'chip pad-key', title: '插入 ' + tok }, tok === '^2' ? 'x²' : tok === 'pi' ? 'π' : tok);
-      b.addEventListener('click', () => {
-        const inp = box.querySelector('#ex-input');
-        const s = inp.selectionStart == null ? inp.value.length : inp.selectionStart;
-        const e = inp.selectionEnd == null ? s : inp.selectionEnd;
-        inp.value = inp.value.slice(0, s) + tok + inp.value.slice(e);
-        const pos = s + tok.length;
-        inp.focus();
-        try { inp.setSelectionRange(pos, pos); } catch (err) {}
-        inp.dispatchEvent(new Event('input'));
-      });
-      pad.append(b);
-    });
-
-    /* ---------- 实时识别徽标（输入即校验，无需先点求解） ---------- */
-    const typeEl = box.querySelector('#ex-type');
-    let typeTimer = null;
-    const detectType = (str) => {
-      if (!str) { typeEl.innerHTML = ''; return; }
-      const bare = str.replace(/\s+/g, '');
-      const isTF = /(^|[^a-zA-Z0-9_])s([^a-zA-Z0-9_]|$)/.test(bare) && bare.includes('/');
-      if (isTF) {
-        const t = FX_LIB.parseTF(str);
-        const ok = t && t.den && t.den[0] && t.num.length <= t.den.length;
-        typeEl.innerHTML = ok
-          ? '<span style="color:var(--accent-2)">✓ 识别为传递函数 H(s)：将绘制波特图 · 阶跃响应 · 零极点</span>'
-          : '<span style="color:var(--danger)">✗ 传递函数格式有误（需为 s 的多项式之比，且分子阶次 ≤ 分母阶次）</span>';
-      } else {
-        const f = FX_LIB.parseTimeExpr(str);
-        typeEl.innerHTML = f
-          ? '<span style="color:var(--accent-2)">✓ 识别为时域信号 x(t)：将绘制波形 · 幅度谱 · 相位谱</span>'
-          : '<span style="color:var(--danger)">✗ 暂无法解析，请检查括号与函数名（支持 u(t)、sinc、rect、tri、exp…）</span>';
-      }
-    };
-    const inpEl = box.querySelector('#ex-input');
-    inpEl.addEventListener('input', () => {
-      clearTimeout(typeTimer);
-      typeTimer = setTimeout(() => detectType(inpEl.value.trim()), 220);
-    });
-
-    /* ---------- 历史记录（localStorage，最近 10 条，点击回填） ---------- */
-    const HKEY = 'flt-expr-history';
-    let exprHistory = [];   // 注意：不可命名 history，会遮蔽全局 history 对象
-    try { exprHistory = JSON.parse(localStorage.getItem(HKEY) || '[]'); if (!Array.isArray(exprHistory)) exprHistory = []; } catch (e) { exprHistory = []; }
-    const histRow = box.querySelector('#ex-history');
-    function renderHistory() {
-      histRow.innerHTML = '';
-      if (!exprHistory.length) return;
-      histRow.append(U.el('span', { class: 'hint', style: 'margin:0' }, '历史：'));
-      exprHistory.slice(0, 8).forEach((expr) => {
-        const short = expr.length > 22 ? expr.slice(0, 22) + '…' : expr;
-        const c = U.el('button', { class: 'chip', title: expr }, short);
-        c.addEventListener('click', () => {
-          const inp = box.querySelector('#ex-input');
-          inp.value = expr;
-          inp.dispatchEvent(new Event('input'));
-          go();
-        });
-        histRow.append(c);
-      });
-      const clr = U.el('button', { class: 'chip', title: '清空历史' }, '🗑');
-      clr.addEventListener('click', () => { exprHistory = []; localStorage.removeItem(HKEY); renderHistory(); });
-      histRow.append(clr);
-    }
-    function addHistory(str) {
-      exprHistory = [str, ...exprHistory.filter((x) => x !== str)].slice(0, 10);
-      try { localStorage.setItem(HKEY, JSON.stringify(exprHistory)); } catch (e) {}
-      renderHistory();
-    }
-    renderHistory();
-
-    /* ---------- 分享链接：表达式写入 URL hash ---------- */
-    function shareLink(str) {
-      const url = location.origin + location.pathname + '#ex=' + encodeURIComponent(str);
-      const done = () => { typeEl.innerHTML = '<span style="color:var(--accent-2)">🔗 分享链接已复制</span>'; };
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(url).then(done, () => { location.hash = 'ex=' + encodeURIComponent(str); });
-      } else { location.hash = 'ex=' + encodeURIComponent(str); done(); }
-    }
-
-    const go = () => {
-      const str = box.querySelector('#ex-input').value.trim();
+    const go = (str0) => {
+      const str = (str0 != null ? String(str0) : ex.get()).trim();
       if (!str) return;
       // 's' 必须是独立变量（而非 sin/abs 的首字母）且含 '/' → 传递函数
       const bare = str.replace(/\s+/g, '');
       const isTF = /(^|[^a-zA-Z0-9_])s([^a-zA-Z0-9_]|$)/.test(bare) && bare.includes('/');
       const res = box.querySelector('#ex-result');
-      // 仅在解析成功时写入历史与 URL
-      let ok = false;
+      let okFlag = false;
       if (isTF) {
         const t = FX_LIB.parseTF(str);
-        ok = !!(t && t.den && t.den[0] && t.num.length <= t.den.length);
+        okFlag = !!(t && t.den && t.den[0] && t.num.length <= t.den.length);
       } else {
-        ok = !!FX_LIB.parseTimeExpr(str);
+        okFlag = !!FX_LIB.parseTimeExpr(str);
       }
-      if (!ok) { if (isTF) renderTF(res, str); else renderTime(res, str); return; }
-      addHistory(str);
-      try { history.replaceState(null, '', '#ex=' + encodeURIComponent(str)); } catch (e) {}
+      if (!okFlag) { if (isTF) renderTF(res, str); else renderTime(res, str); return; }
+      try { if (App.hashFree()) history.replaceState(null, '', '#ex=' + encodeURIComponent(str)); } catch (e) {}
       if (isTF) renderTF(res, str); else renderTime(res, str);
     };
-    box.querySelector('#ex-go').addEventListener('click', go);
-    box.querySelector('#ex-share').addEventListener('click', () => shareLink(box.querySelector('#ex-input').value.trim() || inpEl2.value));
-    box.querySelector('#ex-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+
+    /* ---------- 分享链接：表达式写入 URL hash ---------- */
+    function shareLink(str) {
+      const url = location.origin + location.pathname + '#ex=' + encodeURIComponent(str);
+      const done = () => { shareBtn.textContent = '✓'; setTimeout(() => { shareBtn.textContent = '🔗'; }, 1500); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(done, () => { location.hash = 'ex=' + encodeURIComponent(str); });
+      } else { location.hash = 'ex=' + encodeURIComponent(str); done(); }
+    }
 
     // 初始值：优先 URL 分享参数，其次历史最近一条，最后默认示例
     const urlExpr = new URLSearchParams(location.hash.replace(/^#/, '')).get('ex');
-    const inpEl2 = box.querySelector('#ex-input');
-    if (urlExpr) {
-      inpEl2.value = urlExpr;
-    } else if (exprHistory.length) {
-      inpEl2.value = exprHistory[0];
-    } else {
-      inpEl2.value = 'exp(-2*t)*sin(10*t)*u(t)';
-    }
-    inpEl2.dispatchEvent(new Event('input'));
-    go();
+    const hist0 = (JSON.parse(localStorage.getItem('flt-expr-history') || '[]') || [])[0];
+    const init0 = urlExpr || hist0 || 'exp(-2*t)*sin(10*t)*u(t)';
+    ex.set(init0);
+    go(init0);
   }
 
   function renderTime(res, str) {
@@ -199,7 +132,9 @@ App.register('explore', (host) => {
     if (!f) { res.querySelector('#ex-time-info').innerHTML = '<p style="color:var(--danger)">无法解析表达式，请检查语法。</p>'; return; }
 
     const draw = () => {
-      let T0 = parseFloat(res.querySelector('#ex-t0').value), T1 = parseFloat(res.querySelector('#ex-t1').value);
+      const t0El = res.querySelector('#ex-t0'), t1El = res.querySelector('#ex-t1');
+      if (!t0El || !t1El) return;   // 画布已被其它结果覆盖（旧闭包被 onTheme 调用时）
+      let T0 = parseFloat(t0El.value), T1 = parseFloat(t1El.value);
       if (!isFinite(T0) || !isFinite(T1) || T1 <= T0) { T0 = -4; T1 = 8; }
       const N = 8192, dt = (T1 - T0) / (N - 1);
       const tArr = [], xArr = [];
@@ -239,7 +174,7 @@ App.register('explore', (host) => {
         <div class="stat"><span class="k">信号能量 ∫x²dt</span><span class="v">${U.fmt(energy, 3)}</span></div>
         <div class="stat"><span class="k">峰值</span><span class="v">${U.fmt(yhi, 3)}</span></div>`;
     };
-    exprRedraw = draw;
+    exprRedraw = draw; tfRedraw = null; drawReset = null;   // 只保留当前结果的重绘入口
     res.querySelector('#ex-t0').addEventListener('change', () => { Object.values(draw._cache || {}).forEach((p) => p.resetView()); draw(); });
     res.querySelector('#ex-t1').addEventListener('change', () => { Object.values(draw._cache || {}).forEach((p) => p.resetView()); draw(); });
     draw();
@@ -293,17 +228,21 @@ App.register('explore', (host) => {
       const pz = cache.pz;
       pzPlot(pz || (cache.pz = res.querySelector('#ex-pz')), poles, zeros);
     };
-    tfRedraw = drawAll;
+    tfRedraw = drawAll; exprRedraw = null; drawReset = null;   // 只保留当前结果的重绘入口
     drawAll();
 
     const dc = den[den.length - 1] !== 0 ? num[num.length - 1] / den[den.length - 1] : Infinity;
-    const stable = poles.every((p) => p.re < 1e-9);
+    const hasRhp = poles.some((p) => p.re > 1e-9);
+    const hasJw = poles.some((p) => Math.abs(p.re) <= 1e-9);
+    const stable = !hasRhp && !hasJw;
+    const stableText = stable ? '稳定' : (hasRhp ? '不稳定' : '临界稳定');
+    const stableColor = stable ? cv('--cv-line2') : (hasRhp ? cv('--cv-danger') : cv('--cv-warn'));
     const fmtC = (z) => U.fmt(z.re, 2) + (Math.abs(z.im) > 1e-9 ? (z.im >= 0 ? '+' : '') + U.fmt(z.im, 2) + 'j' : '');
     res.querySelector('#ex-metrics').innerHTML = `
       <div class="stat"><span class="k">极点</span><span class="v">${poles.map(fmtC).join(', ') || '—'}</span></div>
       <div class="stat"><span class="k">零点</span><span class="v">${zeros.map(fmtC).join(', ') || '—'}</span></div>
       <div class="stat"><span class="k">DC 增益</span><span class="v">${U.fmt(dc)}</span></div>
-      <div class="stat"><span class="k">稳定性</span><span class="v" style="color:${stable ? cv('--cv-line2') : cv('--cv-danger')}">${stable ? '稳定' : '不稳定'}</span></div>`;
+      <div class="stat"><span class="k">稳定性</span><span class="v" style="color:${stableColor}">${stableText}</span></div>`;
   }
   function polyTex(c) { return U.polyTex(c); }
 
@@ -346,10 +285,12 @@ App.register('explore', (host) => {
     }
     function repaintStroke() { clearInput(); if (pts.length) strokePath(); }
     drawReset = repaintStroke;   // 主题切换时重绘底色与已画轨迹
+    exprRedraw = null; tfRedraw = null;   // 只保留当前结果的重绘入口
     clearInput();
     let drawing = false, pts = [];
     cvs.addEventListener('pointerdown', (e) => { drawing = true; pts = []; clearInput(); try { cvs.setPointerCapture(e.pointerId); } catch (err) {} e.preventDefault(); });
     const onWinUp = () => { drawing = false; };
+    winUpHandler = onWinUp;
     window.addEventListener('pointerup', onWinUp);
     cvs.addEventListener('pointermove', (e) => {
       if (!drawing) return;
@@ -365,7 +306,7 @@ App.register('explore', (host) => {
     });
     // 容器尺寸变化时保持清晰（桌面适配）
     if (typeof ResizeObserver !== 'undefined' && cvs.parentElement) {
-      const drawRO = new ResizeObserver(() => { if (!cvs.isConnected) { drawRO.disconnect(); return; } repaintStroke(); });
+      drawRO = new ResizeObserver(() => { if (!cvs.isConnected) { drawRO.disconnect(); return; } repaintStroke(); });
       drawRO.observe(cvs.parentElement);
     }
     box.querySelector('#ex-drcl').addEventListener('click', () => { pts = []; clearInput(); });
@@ -447,6 +388,297 @@ App.register('explore', (host) => {
     if (FX.enablePlotChrome) FX.enablePlotChrome(box);
   }
 
+  /* ---------- 方程求解：微分方程 / 差分方程 / 数据序列 ---------- */
+  function renderEq() {
+    const box = host.querySelector('#ex-eq');
+    box.innerHTML = `
+      <div class="pane" style="margin-bottom:16px">
+        <h3>方程求解 · 零输入 / 零状态分解</h3>
+        <div class="row" id="eq-modes" style="margin-bottom:12px"></div>
+        <div id="eq-in"></div>
+        <div id="eq-ics" style="margin-top:8px"></div>
+        <div class="hint" id="eq-hint" style="margin-top:8px"></div>
+        <div class="row" id="eq-ex" style="margin-top:10px"></div>
+      </div>
+      <div id="eq-out"><p class="hint">输入方程后自动求解（全解 = 零输入 + 零状态，解析式与数值仿真互证）。</p></div>`;
+    let mode = 'ode';   // ode | dde | data
+    let plot = null, plotData = null;
+
+    const conf = {
+      ode: {
+        label: '微分方程',
+        hint: "写法：<code>y''</code> 二阶导（也支持 <code>y2</code>、<code>y[[2]]</code>），右端 f(t) 支持 <code>exp/sin/cos/t^n/u(t)</code> 线性组合；初值在下方填写（默认 0）。",
+        ex: [["y'' + 3*y' + 2*y = u(t)", '二阶受迫'], ["y'' + 2*y' + y = 0", '临界阻尼'], ["y'' + y = cos(t)", '无阻尼受迫'], ["y' - y = exp(-2*t)*u(t)", '一阶+指数输入'], ["y''' + y = 0", '三阶齐次']]
+      },
+      dde: {
+        label: '差分方程',
+        hint: '写法：<code>y[n+2]</code>（也支持 <code>y2</code>、<code>y(n+2)</code>），右端 x[n] 支持 <code>0.5^n</code>、<code>n</code>、<code>cos(w*n)</code>、<code>u(n)</code>、<code>delta(n)</code> 组合。',
+        ex: [['y[n+2] - 1.5*y[n+1] + 0.5*y[n] = u[n]', '二阶受迫'], ['y[n+1] - 0.5*y[n] = 0', '一阶齐次'], ['y[n+1] - y[n] = n*u[n]', '斜坡输入'], ['y[n+2] + y[n] = delta[n]', '脉冲响应']]
+      },
+      data: {
+        label: '数据序列',
+        hint: '粘贴一列数（逗号 / 空格 / 换行分隔），绘制序列杆状图与幅度谱（DFT）。',
+        ex: [['1, -1, 1, -1, 1, -1, 1, -1', '交替序列'], ['1 2 3 4 5 4 3 2', '三角波']]
+      }
+    };
+
+    const modesRow = box.querySelector('#eq-modes');
+    const inBox = box.querySelector('#eq-in');
+    const icsBox = box.querySelector('#eq-ics');
+    const hintEl = box.querySelector('#eq-hint');
+    const out = box.querySelector('#eq-out');
+    const eqIn = MI.exprInput(inBox, {
+      id: 'eq-in-str',
+      placeholder: "例：y'' + 3*y' + 2*y = u(t)",
+      pad: ['y', "'", '^2', '[n+2]', '*', '+', '-', '='],
+      debounce: 400,
+      autoApply: false,
+      parse: (str) => {
+        if (mode === 'data') return { verdict: 'ok' };
+        const p = mode === 'ode' ? ODE.parseODE(str) : ODE.parseDiffEq(str);
+        if (!p.ok) return { verdict: 'err', message: p.note };
+        return { verdict: 'ok', message: '阶数 ' + p.n + ' · 右端 ' + p.rhsItems.length + ' 项' };
+      },
+      onApply: () => solveEq()
+    });
+    const goBtn = U.el('button', { class: 'btn primary', id: 'eq-go' }, '求解');
+    goBtn.addEventListener('click', () => eqIn.apply());
+    eqIn.bar.append(goBtn);
+
+    const icsState = {};   // 初值输入缓存（模式切换后重建）
+    function buildIcs(n, names) {
+      icsBox.innerHTML = '';
+      if (mode === 'data' || !n) return;
+      const row = U.el('div', { class: 'row', style: 'flex-wrap:wrap;gap:8px;align-items:center' });
+      for (let m = 0; m < n; m++) {
+        if (!(m in icsState)) icsState[m] = '0';
+        const inp = U.el('input', { type: 'number', step: 'any', value: icsState[m], 'aria-label': names(m), style: 'width:86px' });
+        inp.addEventListener('input', () => { icsState[m] = inp.value; solveEq(); });
+        row.append(U.el('label', { class: 'chip' }, names(m)), inp);
+      }
+      icsBox.appendChild(row);
+    }
+
+    function renderMode() {
+      hintEl.innerHTML = conf[mode].hint;
+      renderExamples(conf[mode].ex);
+      icsBox.innerHTML = '';
+      if (mode === 'data') {
+        eqIn.input.style.display = 'none';
+        goBtn.style.display = 'none';
+        buildDataArea();
+      } else {
+        eqIn.input.style.display = '';
+        goBtn.style.display = '';
+        out.innerHTML = '<p class="hint">输入方程后自动求解。</p>';
+        eqIn.set(mode === 'ode' ? "y'' + 3*y' + 2*y = u(t)" : 'y[n+2] - 1.5*y[n+1] + 0.5*y[n] = u[n]');
+        eqIn.apply();
+      }
+    }
+    function renderExamples(exs) {
+      const row = box.querySelector('#eq-ex');
+      row.innerHTML = '';
+      exs.forEach(([expr, name]) => {
+        const c = U.el('button', { class: 'chip', title: expr }, name);
+        c.addEventListener('click', () => {
+          if (mode === 'data') { const ta = box.querySelector('#eq-data'); if (ta) { ta.value = expr; solveEq(); } }
+          else { eqIn.set(expr); eqIn.apply(); }
+        });
+        row.append(c);
+      });
+    }
+    function buildDataArea() {
+      const ta = U.el('textarea', { id: 'eq-data', rows: '4', spellcheck: 'false', 'aria-label': '数据序列', style: 'width:100%;font-family:var(--mono);font-size:13px' });
+      ta.value = '1, 0.5, 0.25, 0.125, 0.0625';
+      const found = box.querySelector('#eq-data');
+      ta.addEventListener('input', () => solveEq());
+      icsBox.appendChild(ta);
+      solveEq();
+    }
+
+    function solveEq() {
+      if (mode === 'data') {
+        const ta = box.querySelector('#eq-data');
+        const d = ODE.parseDataSeq(ta ? ta.value : '');
+        if (!d.ok) { out.innerHTML = '<p class="hint" style="color:var(--danger)">✗ ' + (d.note || '解析失败') + '</p>'; return; }
+        drawData(d.values);
+        return;
+      }
+      const str = eqIn.get();
+      if (!str) return;
+      const p = mode === 'ode' ? ODE.parseODE(str) : ODE.parseDiffEq(str);
+      if (!p.ok) { out.innerHTML = '<p class="hint" style="color:var(--danger)">✗ ' + p.note + '</p>'; return; }
+      const names = (m) => mode === 'ode' ? (m === 0 ? 'y(0)' : 'y' + "'".repeat(m) + '(0)') : 'y[' + m + ']';
+      buildIcs(p.n, names);
+      const ics = [];
+      for (let m = 0; m < p.n; m++) ics.push(isFinite(+icsState[m]) ? +icsState[m] : 0);
+      const r = mode === 'ode' ? ODE.solveODE(p.a, p.rhsItems, ics) : ODE.solveDiffEq(p.a, p.rhsItems, ics);
+      if (!r.ok) { out.innerHTML = '<p class="hint" style="color:var(--danger)">✗ ' + r.note + '</p>'; return; }
+      drawSolution(p, r, ics);
+    }
+
+    function fmtTex(el, tex) {
+      el.innerHTML = '';
+      if (tex) FX.katex(tex, el, { displayMode: true });
+      else el.innerHTML = '<span style="color:var(--warn)">解析式暂不可用（见提示）</span>';
+    }
+    function drawSolution(p, r, ics) {
+      out.innerHTML = '';
+      const isOde = mode === 'ode';
+      const poleStr = r.poles.map((q) => U.fmt(q.re, 3) + (Math.abs(q.im) > 1e-9 ? (q.im > 0 ? '+' : '') + U.fmt(q.im, 3) + 'j' : '')).join(', ');
+      const stats = U.el('div', { class: 'statbar' });
+      stats.innerHTML = `
+        <div class="stat"><span class="k">阶数</span><span class="v">${p.n}</span></div>
+        <div class="stat"><span class="k">${isOde ? '特征根' : '极点'}</span><span class="v" style="max-width:280px;word-break:break-all">${poleStr || '—'}</span></div>
+        <div class="stat"><span class="k">稳定性</span><span class="v" style="color:${/不稳定/.test(r.stableText) ? 'var(--danger)' : /临界/.test(r.stableText) ? 'var(--warn)' : 'var(--accent-2)'}">${r.stableText}</span></div>`;
+      out.append(stats);
+      if (r.note) out.append(U.el('p', { class: 'hint', html: '<span style="color:var(--warn)">⚠ ' + r.note + '</span>' }));
+      const fullBox = U.el('div', { class: 'formula-center', style: 'margin:10px 0' });
+      fmtTex(fullBox, r.full.tex);
+      out.append(fullBox);
+      const split = U.el('div', { class: 'layout', style: 'margin:6px 0' });
+      const ziBox = U.el('div', { class: 'pane' });
+      const zsBox = U.el('div', { class: 'pane' });
+      ziBox.innerHTML = '<h3 style="margin-top:0">零输入响应</h3>';
+      zsBox.innerHTML = '<h3 style="margin-top:0">零状态响应</h3>';
+      const ziTex = U.el('div', { class: 'formula-center' });
+      const zsTex = U.el('div', { class: 'formula-center' });
+      fmtTex(ziTex, r.zi.tex);
+      fmtTex(zsTex, r.zs.tex);
+      ziBox.append(ziTex); zsBox.append(zsTex);
+      split.append(ziBox, zsBox);
+      out.append(split);
+      const wrap = U.el('div', { class: 'pane' });
+      wrap.innerHTML = '<h3 style="margin-top:0">响应曲线（解析 = 线 · 数值 = 点）</h3><div class="canvas-wrap" style="height:240px"><canvas class="plot" id="eq-cv"></canvas></div>';
+      out.append(wrap);
+      const tblWrap = U.el('div');
+      out.append(tblWrap);
+
+      let tmax, N, tArr, fullY, ziY, zsY, numT, numY, verify;
+      if (isOde) {
+        const unstable = r.poles.some((q) => q.re > 1e-9);
+        const marginal = r.poles.some((q) => Math.abs(q.re) <= 1e-9);
+        tmax = unstable ? 4 : marginal ? 8 : U.clamp(4 / Math.max(1e-9, Math.max(...r.poles.map((q) => -q.re))), 1, 20);
+        N = 600;
+        tArr = []; fullY = []; ziY = []; zsY = [];
+        for (let i = 0; i <= N; i++) {
+          const t = (i / N) * tmax;
+          tArr.push(t);
+          fullY.push(r.full.evalT ? r.full.evalT(t) : NaN);
+          ziY.push(r.zi.evalT ? r.zi.evalT(t) : NaN);
+          zsY.push(r.zs.evalT ? r.zs.evalT(t) : NaN);
+        }
+        const sim = ODE.simulateODE(p.a, (t) => TR.fNumeric(p.rhsItems, t), ics, 0, tmax, 1200);
+        numT = sim.t; numY = sim.y;
+        verify = [0.25, 0.5, 1, 2, 4].map((f) => f * tmax / 4).filter((t) => t <= tmax);
+      } else {
+        const maxMod = r.poles.reduce((m, q) => Math.max(m, Math.hypot(q.re, q.im)), 0);
+        N = Math.min(Math.max(Math.round(maxMod > 1 ? 16 : 6 / (1 - Math.min(maxMod, 0.999))), 20), 40);
+        tArr = []; fullY = []; ziY = []; zsY = [];
+        for (let n = 0; n <= N; n++) { tArr.push(n); fullY.push(r.full.evalN(n)); ziY.push(r.zi.evalN(n)); zsY.push(r.zs.evalN(n)); }
+        numT = tArr.slice();
+        numY = ODE.recurDiff(p.a, ics, (m) => TR.xNumeric(p.rhsItems, m), N);
+        verify = [1, 2, 3, 5, 8, 13].filter((n) => n <= N);
+      }
+      const rows = verify.map((t) => {
+        const i = isOde ? Math.round(t / tmax * 600) : t;
+        const ana = isOde ? r.full.evalT(t) : r.full.evalN(t);
+        const num = numY[Math.min(i, numY.length - 1)];
+        const err = Math.abs(num - ana) / Math.max(1, Math.abs(ana));
+        return { t, ana, num, err };
+      });
+      tblWrap.innerHTML = '<table class="tbl" style="max-width:560px"><tr><th>' + (isOde ? 't' : 'n') + '</th><th>解析</th><th>数值</th><th>相对误差</th></tr>' +
+        rows.map((x) => `<tr><td>${U.fmt(x.t, 3)}</td><td>${U.fmt(x.ana, 6)}</td><td>${U.fmt(x.num, 6)}</td><td style="color:${x.err < 1e-6 ? 'var(--accent-2)' : 'var(--warn)'}">${x.err < 1e-12 ? '&lt;1e-12' : U.fmt(x.err, 3)}</td></tr>`).join('') + '</table>' +
+        '<p class="hint">数值通道与解析式相互独立（' + (isOde ? 'RK4 状态空间仿真' : '差分方程直接递推') + '），误差应接近机器精度——解算无误的硬证据。</p>';
+
+      const cvEl = wrap.querySelector('#eq-cv');
+      if (!plot) { plot = new FX.Plot(cvEl); plot.onDraw = drawResp; }
+      plotData = { tArr, fullY, ziY, zsY, numT, numY, isOde };
+      drawResp();
+
+      function drawResp() {
+        const d = plotData; if (!d) return;
+        let lo = Infinity, hi = -Infinity;
+        for (const arr of [d.fullY, d.ziY, d.zsY, d.numY]) for (const v of arr) if (isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+        if (!isFinite(lo)) { lo = -1; hi = 1; }
+        if (hi - lo < 1e-6) { lo -= 1; hi += 1; }
+        const pad = (hi - lo) * 0.12;
+        plot.setRange(d.tArr[0], d.tArr[d.tArr.length - 1], lo - pad, hi + pad);
+        plot.clear(); plot.grid(); plot.axis(true);
+        plot.clip();
+        plot.line(d.tArr, d.numY, { color: cv('--cv-tick'), width: 1.2 });
+        plot.line(d.tArr, d.ziY, { color: cv('--cv-line3'), width: 1.6 });
+        plot.line(d.tArr, d.zsY, { color: cv('--cv-pink'), width: 1.6 });
+        plot.line(d.tArr, d.fullY, { color: cv('--cv-line1'), width: 2.2 });
+        if (d.isOde) {
+          const stride = Math.max(1, Math.floor(d.numT.length / 60));
+          const xs = [], ys = [];
+          for (let i = 0; i < d.numT.length; i += stride) { xs.push(d.numT[i]); ys.push(d.numY[i]); }
+          plot.dots(xs, ys, { color: cv('--cv-warn'), r: 2.2 });
+        } else {
+          plot.dots(d.numT, d.numY, { color: cv('--cv-warn'), r: 2.6 });
+        }
+        plot.unclip();
+        plot.label('全解 · 零输入(绿) · 零状态(粉) · 数值(点)', plot.margin.l + 8, plot.margin.t + 14, { color: cv('--cv-label'), size: 11 });
+        plot.crosshair((x) => (d.isOde ? 't=' : 'n=') + U.fmt(x, 3), (y) => 'y=' + U.fmt(y, 4));
+      }
+    }
+
+    function drawData(values) {
+      out.innerHTML = '';
+      let energy = 0, mean = 0;
+      for (const v of values) { energy += v * v; mean += v; }
+      mean /= values.length;
+      const stats = U.el('div', { class: 'statbar' });
+      stats.innerHTML = `
+        <div class="stat"><span class="k">点数</span><span class="v">${values.length}</span></div>
+        <div class="stat"><span class="k">均值</span><span class="v">${U.fmt(mean, 4)}</span></div>
+        <div class="stat"><span class="k">能量 Σx²</span><span class="v">${U.fmt(energy, 4)}</span></div>`;
+      out.append(stats);
+      const wrap = U.el('div', { class: 'pane' });
+      wrap.innerHTML = '<h3 style="margin-top:0">序列 x[n] 与幅度谱 |X(f)|</h3><div class="canvas-wrap" style="height:230px"><canvas class="plot" id="eq-cv"></canvas></div><div class="canvas-wrap" style="height:170px;margin-top:8px"><canvas class="plot" id="eq-spec"></canvas></div>';
+      out.append(wrap);
+      const n = values.length;
+      const idx = values.map((_, i) => i);
+      let p1 = null, p2 = null;
+      const drawAll = () => {
+        let lo = Infinity, hi = -Infinity;
+        for (const v of values) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+        if (hi - lo < 1e-6) { lo -= 1; hi += 1; }
+        p1.setRange(0, n - 1, lo - (hi - lo) * 0.12, hi + (hi - lo) * 0.12);
+        p1.clear(); p1.grid(); p1.axis(true);
+        p1.clip();
+        for (let i = 0; i < n; i++) p1.line([i, i], [Math.min(0, lo), values[i]], { color: cv('--cv-line1'), width: 2 });
+        p1.unclip();
+        p1.dots(idx, values, { color: cv('--cv-warn'), r: 2.6 });
+        p1.crosshair((x) => 'n=' + Math.round(x), (y) => 'x=' + U.fmt(y, 4));
+        const sp = DSP.spectrum(values, 1);
+        let mm = 1e-9; for (const v of sp.mag) if (v > mm) mm = v;
+        p2.setRange(0, sp.f[sp.f.length - 1], 0, mm * 1.08);
+        p2.clear(); p2.grid(); p2.axis(true);
+        p2.clip(); p2.line(sp.f, sp.mag, { color: cv('--cv-line3'), width: 2, fill: cv('--cv-fill-purple') }); p2.unclip();
+        p2.crosshair((f) => 'f=' + U.fmt(f, 3) + '×fs', (y) => '|X|=' + U.fmt(y, 4));
+      };
+      p1 = new FX.Plot(wrap.querySelector('#eq-cv')); p1.onDraw = drawAll;
+      p2 = new FX.Plot(wrap.querySelector('#eq-spec')); p2.onDraw = drawAll;
+      drawAll();
+    }
+
+    // 模式 chips
+    Object.entries(conf).forEach(([k, c]) => {
+      const chip = U.el('button', { class: 'chip' + (k === mode ? ' active' : ''), 'data-m': k }, c.label);
+      chip.addEventListener('click', () => {
+        mode = k;
+        Object.keys(icsState).forEach((key) => delete icsState[key]);
+        modesRow.querySelectorAll('.chip').forEach((x) => x.classList.toggle('active', x.dataset.m === k));
+        plot = null; plotData = null;
+        renderMode();
+      });
+      modesRow.append(chip);
+    });
+    renderMode();
+  }
+
   /* ---------- 语音 ---------- */
   function renderVoice() {
     const box = host.querySelector('#ex-voice');
@@ -485,10 +717,7 @@ App.register('explore', (host) => {
     box.querySelector('#ex-voiceroute').addEventListener('click', () => {
       const expr = mapSpeech(finalTxt);
       tab = 'expr'; switchTab();
-      if (expr) {
-        const inp = host.querySelector('#ex-input');
-        if (inp) { inp.value = expr; host.querySelector('#ex-go').click(); }
-      }
+      if (expr && exprInputRef) { exprInputRef.set(expr); exprInputRef.apply(); }
     });
   }
   function mapSpeech(txt) {
@@ -881,12 +1110,14 @@ App.register('explore', (host) => {
   function switchTab() {
     host.querySelector('#ex-expr').classList.toggle('hidden', tab !== 'expr');
     host.querySelector('#ex-sym').classList.toggle('hidden', tab !== 'sym');
+    host.querySelector('#ex-eq').classList.toggle('hidden', tab !== 'eq');
     host.querySelector('#ex-draw').classList.toggle('hidden', tab !== 'draw');
     host.querySelector('#ex-voice').classList.toggle('hidden', tab !== 'voice');
     host.querySelectorAll('#ex-tabs .chip').forEach((x) => x.classList.toggle('active', x.dataset.k === tab));
     // 惰性渲染：仅首次进入可见方创建，避免 display:none 导致画布尺寸为 0
     if (tab === 'expr' && !rendered.expr) { renderExpr(); rendered.expr = true; }
     else if (tab === 'sym' && !rendered.sym) { renderSym(); rendered.sym = true; }
+    else if (tab === 'eq' && !rendered.eq) { renderEq(); rendered.eq = true; }
     else if (tab === 'draw' && !rendered.draw) { renderDraw(); rendered.draw = true; }
     else if (tab === 'voice' && !rendered.voice) { renderVoice(); rendered.voice = true; }
     // 手绘动画：仅在当前页可见时运行，切走即停，避免后台空转
@@ -900,39 +1131,38 @@ App.register('explore', (host) => {
     const tb = host.querySelector('#ex-tabs');
     tb.innerHTML = '';
     const mk = (k, l) => { const c = U.el('button', { class: 'chip' + (tab === k ? ' active' : ''), 'data-k': k }, l); c.addEventListener('click', () => { tab = k; switchTab(); }); tb.append(c); return c; };
-    mk('expr', '表达式求解'); mk('sym', '符号变换'); mk('draw', '手绘画圈'); mk('voice', '语音输入');
+    mk('expr', '表达式求解'); mk('sym', '符号变换'); mk('eq', '方程求解'); mk('draw', '手绘画圈'); mk('voice', '语音输入');
   }
 
-  // 工具：极点图（参数名用 cvEl，避免遮蔽外层 FX.cvCol 调色函数）
+  // 工具：极点图（共享复平面组件，s 平面模式，静态展示：平移/缩放可用）
+  let pzPlane = null, pzPolesNow = [], pzZerosNow = [];
   function pzPlot(cvEl, poles, zeros) {
-    const W = cvEl.clientWidth || 400, H = cvEl.clientHeight || 220;
-    const dpr = window.devicePixelRatio || 1; cvEl.width = W * dpr; cvEl.height = H * dpr;
-    const g = cvEl.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    g.clearRect(0, 0, W, H); g.fillStyle = cv('--cv-bg'); g.fillRect(0, 0, W, H);
-    const ml = 40, mr = 14, mt = 14, mb = 24, dw = W - ml - mr, dh = H - mt - mb;
-    const cx = ml + dw / 2, cy = mt + dh / 2;
-    let R = 3; for (const p of [...poles, ...zeros]) R = Math.max(R, Math.abs(p.re) + 0.3, Math.abs(p.im) + 0.3);
-    const SX = (r) => cx + (r * dw / 2) / R, SY = (i) => cy - (i * dh / 2) / R;
-    g.fillStyle = cv('--cv-stable-bg'); g.fillRect(ml, mt, cx - ml, dh);
-    g.strokeStyle = cv('--cv-grid');
-    for (let i = 0; i <= 4; i++) { const x = ml + (i / 4) * dw; g.beginPath(); g.moveTo(x, mt); g.lineTo(x, mt + dh); g.stroke(); }
-    for (let i = 0; i <= 4; i++) { const y = mt + (i / 4) * dh; g.beginPath(); g.moveTo(ml, y); g.lineTo(ml + dw, y); g.stroke(); }
-    g.strokeStyle = cv('--cv-axis-hi'); g.lineWidth = 1.5; g.beginPath(); g.moveTo(cx, mt); g.lineTo(cx, mt + dh); g.stroke();
-    g.strokeStyle = cv('--cv-axis'); g.beginPath(); g.moveTo(ml, cy); g.lineTo(ml + dw, cy); g.stroke();
-    g.fillStyle = cv('--cv-tick'); g.font = '10px monospace'; g.textAlign = 'left'; g.textBaseline = 'top';
-    g.fillText('jω', cx + 4, mt + 2); g.fillText('σ', ml + dw - 12, cy + 4);
-    g.strokeStyle = cv('--cv-danger'); g.lineWidth = 2;
-    for (const p of poles) { const x = SX(p.re), y = SY(p.im); g.beginPath(); g.moveTo(x - 7, y - 7); g.lineTo(x + 7, y + 7); g.moveTo(x - 7, y + 7); g.lineTo(x + 7, y - 7); g.stroke(); }
-    g.strokeStyle = cv('--cv-line1');
-    for (const z of zeros) { const x = SX(z.re), y = SY(z.im); g.beginPath(); g.arc(x, y, 7, 0, 7); g.stroke(); }
+    pzPolesNow = poles; pzZerosNow = zeros;
+    if (!pzPlane || pzPlane.cv !== cvEl) {
+      // 新结果容器 → 新画布 → 新实例（构造即按新零极点适配视野）
+      pzPlane = new FX.ComplexPlane(cvEl, {
+        mode: 'jw',
+        editable: false,
+        getSpecs: () => ({ poles: pzPolesNow, zeros: pzZerosNow })
+      });
+    } else {
+      pzPlane.redraw();
+    }
   }
 
   tabBar();
   switchTab();
 
-  return { title: '交互求解', api: { dispose, onTheme: () => { if (tab === 'expr' && exprRedraw) exprRedraw(); if (tab === 'expr' && tfRedraw) tfRedraw(); if (drawReset) drawReset(); } } };
+  return { title: '交互求解', api: { dispose, onTheme: () => {
+    // 只重绘当前可见页签；时域与传函结果互斥，调用仍然有效的那一个，避免旧闭包访问已移除的 DOM
+    if (tab === 'expr') { if (exprRedraw) exprRedraw(); else if (tfRedraw) tfRedraw(); }
+    else if (tab === 'draw' && drawReset) drawReset();
+  } } };
   function dispose() {
     if (dloop && loopRunning) { loopRunning = false; dloop.stop(); }
     if (speechRec) { try { speechRec.onend = null; speechRec.stop(); } catch (e) {} speechRec = null; }
+    if (winUpHandler) { window.removeEventListener('pointerup', winUpHandler); winUpHandler = null; }
+    if (drawRO) { drawRO.disconnect(); drawRO = null; }
+    exprRedraw = tfRedraw = drawReset = null;
   }
 });

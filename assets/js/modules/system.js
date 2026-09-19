@@ -26,17 +26,17 @@ App.register('sys', (host) => {
     <div class="module layout">
       <div class="pane">
         <h3>传递函数 H(s)</h3>
-        <div class="tf-frac">
-          <input type="text" id="sys-num" value="1" placeholder="分子  如 1 或 (s+2)" spellcheck="false" aria-label="分子">
-          <div class="tf-bar" title="分数线"></div>
-          <input type="text" id="sys-den" value="s^2+2*s+5" placeholder="分母  如 s^2+2*s+5 或 (s+1)*(s+2)" spellcheck="false" aria-label="分母">
-        </div>
-        <div class="hint" id="sys-preview" style="margin-top:-6px"></div>
+        <div id="sys-mi"></div>
         <div class="row" id="sys-struct" style="margin-bottom:10px"></div>
-        <div class="row" style="margin-bottom:12px">
+        <div class="row" style="margin-bottom:8px">
           <button class="btn primary" id="sys-apply">求解并绘图</button>
-          <button class="btn" id="sys-share" title="复制当前 H(s) 的分享链接">🔗 分享</button>
+          <button class="btn" id="sys-share" title="复制当前 H(s) 的分享链接（旧版单输入格式）">🔗 分享</button>
+          <button class="btn" id="sys-toblk" title="把当前 H(s) 作为开环传函在系统框图中打开">↗ 框图</button>
+          <button class="btn" id="sys-toex" title="转到交互求解分析此 H(s)">↗ 求解</button>
         </div>
+        <div id="sys-rtb"></div>
+        <div id="sys-lib"></div>
+        <div id="sys-params" style="display:none"></div>
         <h3>预设</h3>
         <div class="row" id="sys-presets" style="margin-bottom:12px"></div>
         <div class="formula-center" id="sys-tex"></div>
@@ -116,8 +116,7 @@ App.register('sys', (host) => {
   const $ = (s) => host.querySelector(s);
   function setTF(str) {
     const f = FX_LIB.tfToFields(str);
-    $('#sys-num').value = f.num;
-    $('#sys-den').value = f.den;
+    tfIn.set(f.num, f.den);
   }
   const pRow = $('#sys-presets');
   Object.keys(presets).forEach((id) => {
@@ -134,69 +133,110 @@ App.register('sys', (host) => {
     ['PID', 'kd*s^2+kp*s+ki', 's', { kp: 1, ki: 0.5, kd: 0.1 }]
   ];
   const sRow = $('#sys-struct');
-  structs.forEach(([name, numT, denT, vals]) => {
+  structs.forEach(([name, numT, denT, defaults]) => {
     const c = U.el('button', { class: 'chip' }, name);
     c.addEventListener('click', () => {
-      let n = numT, d = denT;
-      for (const [k, v] of Object.entries(vals)) {
-        const re = new RegExp('\\b' + k + '\\b', 'g');
-        n = n.replace(re, String(v)); d = d.replace(re, String(v));
-      }
-      $('#sys-num').value = n; $('#sys-den').value = d; solve();
+      // 插入符号串 + 参数种子值：参数行自动出现，改值即重解
+      paramSeeds = Object.assign({}, defaults);
+      paramScope = {}; sweeps = {};
+      tfIn.set(numT, denT);
+      solve();
     });
     sRow.append(c);
   });
   $('#sys-apply').addEventListener('click', solve);
+  /* ---------- 模型库与跨模块交接 ---------- */
+  MI.library($('#sys-lib'), {
+    kinds: ['tf'],
+    onSave: () => {
+      const c = tfIn.get();
+      if (!c.numStr && !c.denStr) return null;
+      return { kind: 'tf', data: { variable: 's', num: c.numStr || '1', den: c.denStr || '1' } };
+    },
+    onLoad: (m) => {
+      if (!m.data || m.data.variable !== 's') return;
+      tfIn.set(m.data.num, m.data.den);
+      solve();
+    }
+  });
+  $('#sys-toblk').addEventListener('click', () => {
+    const c = tfIn.get();
+    const H = (c.numStr || '1') + '/(' + (c.denStr || '1') + ')';
+    const slim = { v: 1, n: [
+      { i: 1, k: 'sum', m: 'Σ1', s: '1', x: 200, y: 230, r: 1, o: 0, z: 0 },
+      { i: 2, k: 'box', m: 'G1', s: H, x: 470, y: 230, r: 0, o: 1, z: 0 }
+    ], e: [[1, 2, 1], [2, 1, 0]] };
+    try { history.replaceState(null, '', '#blk=blk1.' + btoa(unescape(encodeURIComponent(JSON.stringify(slim))))); } catch (e) { }
+    App.open('blk');
+  });
+  $('#sys-toex').addEventListener('click', () => {
+    const c = tfIn.get();
+    const expr = (c.numStr || '1') + '/(' + (c.denStr || '1') + ')';
+    try { history.replaceState(null, '', '#ex=' + encodeURIComponent(expr)); } catch (e) { }
+    App.open('explore');
+  });
   $('#sys-share').addEventListener('click', () => {
     const url = location.origin + location.pathname + location.hash;
     const done = () => { $('#sys-tex').innerHTML = '<span style="color:var(--accent-2)">🔗 分享链接已复制</span>'; };
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(done, () => {});
     else done();
   });
-  ['#sys-num', '#sys-den'].forEach((sel) => $(sel).addEventListener('keydown', (e) => { if (e.key === 'Enter') solve(); }));
+  // （MI.tfInput 已在输入框上原生处理 Enter → onApply → solve，无需重复绑定）
 
-  /* ---------- H(s) 输入实时预览（边输入边解析，错误即刻高亮） ---------- */
-  const fracBox = $('#sys-preview').closest('.pane').querySelector('.tf-frac');
-  let pvTimer = null;
-  function previewTF() {
-    const nStr = $('#sys-num').value.trim(), dStr = $('#sys-den').value.trim();
-    const box = $('#sys-preview');
-    if (!nStr && !dStr) { box.innerHTML = ''; fracBox.classList.remove('invalid'); return; }
-    const t = FX_LIB.parseTFFields(nStr || '1', dStr || '1');
-    if (!t || !t.den || !t.den[0]) {
-      fracBox.classList.add('invalid');
-      box.innerHTML = '<span style="color:var(--danger)">✗ 解析失败：支持 s^2、2*s、(s+1)*(s+3) 等写法</span>';
-      return;
-    }
-    if (t.num.length > t.den.length) {
-      fracBox.classList.add('invalid');
-      box.innerHTML = '<span style="color:var(--warn)">⚠ 非真分式（分子阶次 > 分母阶次），时域响应无法仿真</span>';
-      return;
-    }
-    fracBox.classList.remove('invalid');
-    const d0 = t.den[0], nn = t.num.map((c) => c / d0), dd = t.den.map((c) => c / d0);
-    box.innerHTML = '<span style="color:var(--accent-2)">✓ </span>';
-    box.append(FX.span('H(s)=\\dfrac{' + polyTex(nn) + '}{' + polyTex(dd) + '}'));
+  /* ---------- H(s) 输入（统一输入组件 MI：键盘/徽标/校验；显式求解节奏） ---------- */
+  const tfIn = MI.tfInput($('#sys-mi'), {
+    variable: 's',
+    properness: true,
+    autoApply: false,
+    ids: { num: 'sys-num', den: 'sys-den' },
+    placeholder: { num: '分子  如 1 或 (s+2)', den: '分母  如 s^2+2*s+5 或 (s+1)*(s+2)' },
+    pad: ['s', '^2', '^3', '*', '/', '(', ')', '+', '-'],
+    debounce: 250,
+    onApply: () => solve()
+  });
+  tfIn.set('1', 's^2+2*s+5');
+
+  /* ---------- 实验接入：状态捕获 / 回放 / 统一结果工具栏 ---------- */
+  function getState() {
+    const c = tfIn.get();
+    return { num: c.numStr || '1', den: c.denStr || '1', chart, params: { ...paramScope } };
   }
-  ['#sys-num', '#sys-den'].forEach((sel) => $(sel).addEventListener('input', () => {
-    clearTimeout(pvTimer);
-    pvTimer = setTimeout(previewTF, 250);
-  }));
-  previewTF();
+  function applyState(s) {
+    if (!s || typeof s !== 'object') return;
+    paramScope = (s.params && typeof s.params === 'object') ? { ...s.params } : {};
+    sweeps = {}; paramSeeds = {};
+    tfIn.set(String(s.num || '1'), String(s.den || '1'));
+    if (s.chart === 'bode' || s.chart === 'nyquist' || s.chart === 'root') setChart(s.chart);
+    solve();
+  }
+  RTB.attach($('#sys-rtb'), {
+    module: 'sys',
+    getState, applyState,
+    canvases: () => ['#sys-bmag', '#sys-bph', '#sys-nyq', '#sys-root', '#sys-step', '#sys-imp'].map((s) => $(s)).filter(Boolean),
+    csv: () => {
+      const b = getBode();
+      return {
+        name: 'bode',
+        header: ['omega(rad/s)', 'gain(dB)', 'phase(deg)'],
+        rows: b.w.map((w, i) => [w.toPrecision(6), b.mag[i].toPrecision(6), b.ph[i].toPrecision(6)])
+      };
+    }
+  });
 
   // 图表切换
   const chartRow = $('#sys-charts');
   const chartDefs = [['bode', '波特图'], ['nyquist', '奈奎斯特图'], ['root', '根轨迹']];
+  function setChart(id) {
+    chart = id;
+    chartRow.querySelectorAll('.chip').forEach((x) => x.classList.toggle('active', x.dataset.chart === id));
+    $('#sys-chart-bode').classList.toggle('hidden', chart !== 'bode');
+    $('#sys-chart-nyq').classList.toggle('hidden', chart !== 'nyquist');
+    $('#sys-chart-root').classList.toggle('hidden', chart !== 'root');
+    renderChart();
+  }
   chartDefs.forEach(([id, label]) => {
     const c = U.el('button', { class: 'chip' + (chart === id ? ' active' : ''), 'data-chart': id }, label);
-    c.addEventListener('click', () => {
-      chart = id;
-      chartRow.querySelectorAll('.chip').forEach((x) => x.classList.toggle('active', x.dataset.chart === id));
-      $('#sys-chart-bode').classList.toggle('hidden', chart !== 'bode');
-      $('#sys-chart-nyq').classList.toggle('hidden', chart !== 'nyquist');
-      $('#sys-chart-root').classList.toggle('hidden', chart !== 'root');
-      renderChart();
-    });
+    c.addEventListener('click', () => setChart(id));
     chartRow.append(c);
   });
 
@@ -208,19 +248,73 @@ App.register('sys', (host) => {
     return plots[id];
   }
 
+  /* ---------- 符号参数与家族 ---------- */
+  let paramScope = {};   // 参数名 → 当前值
+  let sweeps = {};       // 参数名 → 扫掠数组（可选）
+  let paramSeeds = {};   // 结构模板种子值（hash 还原时兜底）
+  function renderParamRow(params) {
+    const box = $('#sys-params');
+    box.innerHTML = '';
+    if (!params.length) { box.style.display = 'none'; return; }
+    box.style.display = '';
+    const row = U.el('div', { class: 'row', style: 'flex-wrap:wrap;gap:8px;align-items:center' });
+    for (const p of params) {
+      if (!(p in paramScope)) paramScope[p] = paramSeeds[p] != null ? paramSeeds[p] : 1;
+      const val = U.el('input', { type: 'number', step: 'any', value: paramScope[p], style: 'width:80px', 'aria-label': '参数 ' + p });
+      val.addEventListener('change', () => { paramScope[p] = +val.value; delete sweeps[p]; solve(); });
+      const sw = U.el('input', { type: 'text', value: (sweeps[p] || []).join(','), placeholder: '扫掠: 0.5,1,2', style: 'width:130px', 'aria-label': p + ' 扫掠列表' });
+      sw.addEventListener('change', () => {
+        const list = sw.value.trim() ? sw.value.split(/[,，]/).map(Number).filter(isFinite) : null;
+        if (list && list.length) sweeps[p] = list.slice(0, 5); else delete sweeps[p];
+        solve();
+      });
+      row.append(U.el('label', { class: 'chip' }, p), val, sw);
+    }
+    box.append(U.el('div', { class: 'hint', style: 'margin:0 0 6px' }, '检测到符号参数：填值后重解；填「扫掠」可画一族曲线对比。'), row);
+  }
+  function buildFamily(rawNum, rawDen, params) {
+    // 主成员（当前值）+ 各参数扫掠成员（逐参数，上限 5）
+    const mkMember = (scope) => {
+      const full = { pi: Math.PI, e: Math.E, ...scope };
+      const tn = FX_LIB.parseTF(FX_LIB.substituteParams(rawNum || '1', full) + '/(' + FX_LIB.substituteParams(rawDen || '1', full) + ')');
+      if (!tn || !tn.den || !tn.den[0] || tn.num.length > tn.den.length) return null;
+      return { scope, num: tn.num, den: tn.den };
+    };
+    const main = mkMember(paramScope);
+    if (!main) return null;
+    const family = [main];
+    for (const p of params) {
+      const list = sweeps[p] || [];
+      for (const v of list) {
+        if (family.length >= 5) break;
+        const scope = { ...paramScope, [p]: v };
+        if (family.some((m) => JSON.stringify(m.scope) === JSON.stringify(scope))) continue;
+        const m = mkMember(scope);
+        if (m) family.push(m);
+      }
+    }
+    return family;
+  }
+
   function solve() {
-    const res = FX_LIB.parseTFFields($('#sys-num').value, $('#sys-den').value);
-    if (!res) { $('#sys-tex').innerHTML = '<span style="color:#ff6b6b">无法解析分子/分母，检查括号与 * 号。</span>'; return; }
-    if (res.num.length > res.den.length) {
-      $('#sys-tex').innerHTML = '<span style="color:var(--danger)">分子阶次需 ≤ 分母阶次（当前为非真分式，无法正确仿真时域响应）。请检查 H(s)，例如 PID 开环传函请配合反馈结构使用。</span>';
+    const cur = tfIn.get();
+    const rawNum = cur.numStr || '1', rawDen = cur.denStr || '1';
+    const params = [...new Set([...FX_LIB.extractParams(rawNum, ['s']), ...FX_LIB.extractParams(rawDen, ['s'])])];
+    renderParamRow(params);
+    const family = buildFamily(rawNum, rawDen, params);
+    if (!family) {
+      $('#sys-tex').innerHTML = '<span style="color:#ff6b6b">无法解析分子/分母，检查括号与 * 号。</span>';
       return;
     }
-    num = res.num; den = res.den;
+    num = family[0].num; den = family[0].den;
     const d0 = den[0];
     num = num.map((c) => c / d0); den = den.map((c) => c / d0);
-    // H(s) 写入 URL（分享/刷新后还原），replaceState 避免污染浏览记录
-    try { history.replaceState(null, '', '#hn=' + encodeURIComponent($('#sys-num').value.trim()) + '&hd=' + encodeURIComponent($('#sys-den').value.trim())); } catch (e) {}
-    Object.keys(cache).forEach((k) => delete cache[k]);
+    family[0].num = num; family[0].den = den;   // 主成员归一化后回写，绘制直接用
+    cache.family = family;
+    // H(s) 写入 URL（分享/刷新后还原，含参数符号），replaceState 避免污染浏览记录
+    // 实验激活期间不写旧版 hash，避免覆盖 #exp= 路由（实验状态走实验存储）
+    try { if (App.hashFree()) history.replaceState(null, '', '#hn=' + encodeURIComponent(rawNum) + '&hd=' + encodeURIComponent(rawDen)); } catch (e) {}
+    Object.keys(cache).forEach((k) => { if (k !== 'family') delete cache[k]; });
     Object.values(plots).forEach((p) => p.resetView());
     render();
   }
@@ -392,6 +486,7 @@ App.register('sys', (host) => {
     bm.setRange(bode.w[0], bode.w[bode.w.length - 1], lo - 8, hi + 8);
     bm.clear(); bm.grid(null, null); bm.axis();
     bm.line(bode.w, bode.mag, { color: bodeColors.mag, width: 2, fill: cv('--cv-fill-blue') });
+    drawFamily(bm, (m) => DSP.bode(m.num, m.den, -2, 3, 400), (b) => [b.w, b.mag]);
     bm.crosshair((w) => 'ω=' + U.fmt(w, 3) + ' rad/s', (m) => m.toFixed(1) + ' dB');
 
     const bp = getPlot('#sys-bph', { logX: true, padding: 0.04 }, drawBode);
@@ -402,6 +497,7 @@ App.register('sys', (host) => {
     bp.setRange(bode.w[0], bode.w[bode.w.length - 1], plo - 15, phi + 15);
     bp.clear(); bp.grid(null, null); bp.axis();
     bp.line(bode.w, bode.ph, { color: bodeColors.ph, width: 2 });
+    drawFamily(bp, (m) => DSP.bode(m.num, m.den, -2, 3, 400), (b) => [b.w, b.ph]);
     bp.crosshair((w) => 'ω=' + U.fmt(w, 3) + ' rad/s', (p) => p.toFixed(1) + '°');
   }
 
@@ -424,6 +520,11 @@ App.register('sys', (host) => {
     p.unclip();
     // G(jω) 轨迹
     p.line(d.re, d.im, { color: cv('--cv-line2'), width: 2 });
+    drawFamily(p, (m) => {
+      const re = [], im = [];
+      for (let i = 0; i < 300; i++) { const h = DSP.evalH(m.num, m.den, Math.pow(10, U.lerp(-2, 2.5, i / 299))); re.push(h.re); im.push(h.im); }
+      return [re, im];
+    });
     // 镜像（ω<0，共轭）弱显示
     p.line(d.re, d.im.map((v) => -v), { color: cv('--cv-line2-soft'), width: 1.5 });
     // 起点终点标注
@@ -601,51 +702,92 @@ App.register('sys', (host) => {
     }
   }
 
+  // 家族成员叠加（成员 0 = 主成员，由调用方画粗线）：从成员 1 起画细渐变线
+  function drawFamily(p, compute, pick) {
+    const fam = cache.family;
+    if (!fam || fam.length < 2) return;
+    p.clip();
+    for (let i = 1; i < fam.length; i++) {
+      const [xs, ys] = pick(compute(fam[i]));
+      p.line(xs, ys, { color: famColor(i), width: 1.4 });
+    }
+    p.unclip();
+  }
+  const famColor = (i) => `hsla(${210 + i * 45}, 75%, 60%, 0.95)`;
+
   function renderMetrics() {
     const bode = getBode();
     const poles = DSP.polyRoots(den);
     const zeros = DSP.polyRoots(num);
     const dc = num[num.length - 1] / den[den.length - 1];
-    const stable = poles.every((p) => p.re < 1e-9);
+    const hasRhp = poles.some((p) => p.re > 1e-9);
+    const hasJw = poles.some((p) => Math.abs(p.re) <= 1e-9);
+    const stable = !hasRhp && !hasJw;
+    const stableText = stable ? '稳定' : (hasRhp ? '不稳定' : '临界稳定');
     let bw = null;
     const dcmag = Math.abs(dc);
-    if (dcmag > 1e-6) {
-      const ref = dcmag * 0.707;
-      for (let i = 0; i < bode.mag.length; i++) if (bode.mag[i] < 20 * Math.log10(ref + 1e-12)) { bw = bode.w[i]; break; }
+    if (isFinite(dcmag) && dcmag > 1e-6) {
+      // 参考电平取 dB，避免 dc 非有限（如 1/s）时把首点误当带宽
+      const ref = 20 * Math.log10(dcmag) - 3;
+      for (let i = 0; i < bode.mag.length; i++) if (bode.mag[i] < ref) { bw = bode.w[i]; break; }
     }
     const stats = [];
     stats.push({ k: 'DC 增益', v: U.fmt(dc) });
     stats.push({ k: '带宽(-3dB)', v: bw ? U.fmt(bw) + ' rad/s' : '—' });
-    stats.push({ k: '稳定性', v: stable ? '稳定' : '不稳定', color: stable ? 'var(--accent-2)' : 'var(--danger)' });
-    for (const p of poles) {
-      if (Math.abs(p.im) > 1e-6 && p.re < 0) {
-        const wn = Math.hypot(p.re, p.im), zeta = -p.re / wn;
-        stats.push({ k: 'ωₙ / ζ', v: U.fmt(wn) + ' / ' + U.fmt(zeta) });
-        break;
-      }
+    stats.push({ k: '稳定性', v: stableText, color: stable ? 'var(--accent-2)' : (hasRhp ? 'var(--danger)' : 'var(--warn)') });
+    // 主导极点（实部最大且 < 0）决定 ωₙ / ζ，而非取第一个共轭根
+    let dom = null;
+    for (const p of poles) { if (p.re >= -1e-9) continue; if (!dom || p.re > dom.re) dom = p; }
+    if (dom) {
+      const wn = Math.hypot(dom.re, dom.im), zeta = -dom.re / wn;
+      stats.push({ k: 'ωₙ / ζ', v: U.fmt(wn) + ' / ' + U.fmt(zeta) });
     }
-    // 增益裕度（相位穿越 -180° 处的增益）与相位裕度
+    // 相位裕度 PM：幅值穿越频率（|H| = 0 dB）处的 180° + ∠H
     const pm = (() => {
+      // 取 0 dB 的首次穿越（升/降穿越都算，兼容高通型回路），而非相位穿越 -180°
+      let idx = -1;
+      for (let i = 0; i < bode.mag.length - 1; i++) if (bode.mag[i] * bode.mag[i + 1] < 0) { idx = i; break; }
+      if (idx < 0) return null;
+      const dm = bode.mag[idx + 1] - bode.mag[idx];
+      const t = Math.abs(dm) < 1e-12 ? 0 : -bode.mag[idx] / dm;
+      const phAt = bode.ph[idx] + t * (bode.ph[idx + 1] - bode.ph[idx]);
+      return 180 + phAt;
+    })();
+    stats.push({ k: '相位裕度 PM', v: pm == null ? '—' : U.fmt(pm, 1) + '°' });
+    // 增益裕度 GM：相位穿越 -180° 处的增益余量（>0 dB 稳定方向）；不穿越则为无穷
+    const gm = (() => {
       let idx = -1;
       for (let i = 0; i < bode.ph.length; i++) if (bode.ph[i] > -180 && (i === bode.ph.length - 1 || bode.ph[i + 1] <= -180)) { idx = i; break; }
-      if (idx < 0) return null;
-      const t = (-180 - bode.ph[idx]) / (bode.ph[idx + 1] - bode.ph[idx] || 1);
+      if (idx < 0) return Infinity;
+      // 扫到上界相位仍未跌破 -180°（如二阶系统相位渐近 -180°）→ 无相位穿越，GM 为无穷
+      if (idx + 1 >= bode.ph.length) return Infinity;
+      const dp = bode.ph[idx + 1] - bode.ph[idx];
+      const t = Math.abs(dp) < 1e-12 ? 0 : (-180 - bode.ph[idx]) / dp;
       const magAt = bode.mag[idx] + t * (bode.mag[idx + 1] - bode.mag[idx]);
-      return -magAt;
+      return isFinite(magAt) ? -magAt : null;
     })();
-    if (pm != null) stats.push({ k: '相位裕度 PM', v: U.fmt(pm, 1) + '°' });
-    // 增益裕度 GM：-180° 相位处的增益余量（>0 dB 稳定方向）；相位不穿越 -180° 时为无穷
-    const gm = (() => {
-      for (let i = 0; i < bode.ph.length; i++) {
-        if (bode.ph[i] <= -180) {
-          const magAt = bode.mag[i];
-          return magAt != null && isFinite(magAt) ? -magAt : null;
-        }
-      }
-      return Infinity;
-    })();
-    stats.push({ k: '增益裕度 GM', v: gm === Infinity ? '∞ dB' : U.fmt(gm, 1) + ' dB' });
+    stats.push({ k: '增益裕度 GM', v: gm === Infinity ? '∞ dB' : gm == null ? '—' : U.fmt(gm, 1) + ' dB' });
     $('#sys-metrics').innerHTML = stats.map((s) => `<div class="stat"><span class="k">${s.k}</span><span class="v"${s.color ? ' style="color:' + s.color + '"' : ''}>${s.v}</span></div>`).join('');
+    // 家族成员指标表（扫掠时出现）
+    const fam = cache.family || [];
+    if (fam.length > 1) {
+      const rows = fam.map((m, i) => {
+        const poles = DSP.polyRoots(m.den);
+        const hasRhp = poles.some((q) => q.re > 1e-9);
+        const hasJw = poles.some((q) => Math.abs(q.re) <= 1e-9);
+        const st = !hasRhp && !hasJw ? '稳定' : hasRhp ? '不稳定' : '临界';
+        const stColor = !hasRhp && !hasJw ? 'var(--accent-2)' : hasRhp ? 'var(--danger)' : 'var(--warn)';
+        let dom = null;
+        for (const q of poles) { if (q.re >= -1e-9) continue; if (!dom || q.re > dom.re) dom = q; }
+        const zwn = dom ? 'ζ=' + U.fmt(-dom.re / Math.hypot(dom.re, dom.im), 2) + ' ωₙ=' + U.fmt(Math.hypot(dom.re, dom.im), 2) : '—';
+        const lbl = Object.entries(m.scope).filter(([k]) => k !== 'pi' && k !== 'e').map(([k, v]) => k + '=' + U.fmt(v, 3)).join(' ');
+        const swatch = i === 0 ? '<span class="sw" style="background:var(--accent)"></span>' : `<span class="sw" style="background:${famColor(i)}"></span>`;
+        return `<tr><td>${swatch}${lbl || '主成员'}</td><td style="color:${stColor}">${st}</td><td>${zwn}</td></tr>`;
+      }).join('');
+      const box = document.createElement('div');
+      box.innerHTML = '<table class="tbl" style="max-width:520px;margin-top:8px"><tr><th>成员</th><th>稳定性</th><th>主导极点</th></tr>' + rows + '</table>';
+      ($('#sys-metrics').parentElement || $('#sys-metrics')).appendChild(box);
+    }
   }
 
   let lastSim = null;
@@ -664,17 +806,32 @@ App.register('sys', (host) => {
   }
   function drawTimeStep() {
     computeTime();
-    timeCanvas('#sys-step', lastSim.step, cv('--cv-line1'));
+    // 家族成员阶跃细线（主成员由 timeCanvas 画粗线）
+    let famSteps = null;
+    const fam = cache.family || [];
+    if (fam.length > 1) {
+      famSteps = fam.slice(1).map((m, i) => ({
+        color: famColor(i + 1),
+        res: DSP.ltiResponse(m.num, m.den, (t) => (t >= 0 ? 1 : 0), 0, lastSim.tmax, 1200)
+      }));
+    }
+    timeCanvas('#sys-step', lastSim.step, cv('--cv-line1'), famSteps);
     timeCanvas('#sys-imp', lastSim.imp, cv('--cv-purple2'));
   }
-  function timeCanvas(id, data, color) {
-    const p = getPlot(id, { margin: { l: 50, r: 12, t: 10, b: 26 } }, () => timeCanvas(id, data, color));
+  function timeCanvas(id, data, color, extraLines) {
+    const p = getPlot(id, { margin: { l: 50, r: 12, t: 10, b: 26 } });
+    // 每次都刷新 onDraw 闭包：data 每次求解都是新对象，沿用旧闭包会让悬停/缩放用旧响应覆盖
+    p.onDraw = () => timeCanvas(id, data, color, extraLines);
     let lo = Infinity, hi = -Infinity; for (const v of data.y) if (isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+    if (extraLines) for (const e of extraLines) for (const v of e.res.y) if (isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
     if (!isFinite(lo)) { lo = -1; hi = 1; } if (hi - lo < 1e-6) { lo -= 1; hi += 1; }
     const pad = (hi - lo) * 0.12; lo -= pad; hi += pad;
     p.setRange(data.t[0], data.t[data.t.length - 1], lo, hi);
     p.clear(); p.grid(); p.axis(true);
-    p.clip(); p.line(data.t, data.y, { color, width: 2 }); p.unclip();
+    p.clip();
+    if (extraLines) for (const e of extraLines) p.line(e.res.t, e.res.y, { color: e.color, width: 1.3 });
+    p.line(data.t, data.y, { color, width: 2 });
+    p.unclip();
     p.crosshair((t) => 't=' + U.fmt(t, 4), (y) => 'y=' + U.fmt(y, 4));
   }
 
@@ -717,21 +874,21 @@ App.register('sys', (host) => {
     const notes = [];
     rows.push(coef.filter((_, i) => i % 2 === 0));
     rows.push(coef.filter((_, i) => i % 2 === 1));
+    let critical = false;
+    const noteZeroRow = () => { critical = true; notes.push('出现全零行：存在关于原点对称的根（纯虚根 / 正负实根对），系统临界，需用辅助方程进一步分析'); };
     let guard = 0;
     while (guard++ < 24) {
       const prev = rows[rows.length - 2], last = rows[rows.length - 1];
-      if (!last.some((v) => Math.abs(v) > 1e-12)) {
-        notes.push('出现全零行：存在关于原点对称的根（纯虚根/正负实根对），系统临界，需进一步分析');
-        break;
-      }
+      if (!last.some((v) => Math.abs(v) > 1e-12)) { noteZeroRow(); break; }
       if (Math.abs(last[0]) < 1e-10) {
         notes.push('首列出现 0：用小正数 ε 代替继续计算');
         last[0] = 1e-10;
       }
       const nr = [];
       for (let i = 0; i < last.length - 1; i++) nr.push((last[0] * prev[i + 1] - prev[0] * last[i + 1]) / last[0]);
+      // 计算出的整行全零同样代表对称根，必须在此判定——否则被 trim 成空数组直接 break 而漏报
+      if (!nr.some((v) => Math.abs(v) > 1e-12)) { noteZeroRow(); break; }
       while (nr.length && Math.abs(nr[nr.length - 1]) < 1e-12) nr.pop();
-      if (!nr.length) break;
       rows.push(nr);
     }
     // 第一列符号（|v|<1e-8 视作 ε，按正号处理）
@@ -741,7 +898,7 @@ App.register('sys', (host) => {
     for (let i = 1; i < firstCol.length; i++) {
       if (signOf(firstCol[i]) !== signOf(firstCol[i - 1])) changes++;
     }
-    return { rows, notes, changes };
+    return { rows, notes, changes, critical };
   }
   function renderRouth(coefStr) {
     const out = $('#sys-routh-out');
@@ -750,7 +907,7 @@ App.register('sys', (host) => {
       out.innerHTML = '<p style="color:var(--danger)">无法解析特征多项式（首项系数需不为 0），示例：s^3+2*s^2+2*s+1</p>';
       return;
     }
-    const { rows, notes, changes } = routhCompute(c);
+    const { rows, notes, changes, critical } = routhCompute(c);
     const n = c.length - 1;
     let html = '<table class="tbl" style="margin-top:8px;max-width:520px"><tr><th>行</th>';
     const maxLen = Math.max(...rows.map((r) => r.length));
@@ -769,9 +926,11 @@ App.register('sys', (host) => {
     // 数值求根交叉验证
     const roots = DSP.polyRoots(c);
     const rhp = roots.filter((q) => q.re > 1e-9).length;
-    const concl = changes === 0
-      ? `<p style="color:var(--accent-2);font-weight:600">✓ 第一列无变号 → 右半平面根 0 个 → 系统稳定</p>`
-      : `<p style="color:var(--danger);font-weight:600">✗ 第一列变号 ${changes} 次 → 右半平面根 ${changes} 个 → 系统不稳定</p>`;
+    const concl = changes > 0
+      ? `<p style="color:var(--danger);font-weight:600">✗ 第一列变号 ${changes} 次 → 右半平面根 ${changes} 个 → 系统不稳定</p>`
+      : critical
+        ? `<p style="color:var(--warn);font-weight:600">△ 第一列无变号，但存在全零行 → 临界稳定（虚轴/对称根），不能判定为稳定</p>`
+        : `<p style="color:var(--accent-2);font-weight:600">✓ 第一列无变号 → 右半平面根 0 个 → 系统稳定</p>`;
     html += concl + `<p class="hint">数值求根验证：右半平面根实际 ${rhp} 个${rhp === changes ? '（与劳斯表一致）' : '（与劳斯表不一致，通常因 ε 近似/临界情形）'}。特征多项式：${polyToPlain(c)}</p>`;
     out.innerHTML = html;
   }
@@ -858,15 +1017,20 @@ App.register('sys', (host) => {
       t.push(tv); y.push(acc);
     }
     const p = new FX.Plot($('#sys-char-cv'), { margin: { l: 48, r: 12, t: 10, b: 26 } });
-    let lo = Infinity, hi = -Infinity;
-    for (const v of y) if (isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
-    if (!isFinite(lo)) { lo = -1; hi = 1; }
-    if (hi - lo < 1e-6) { lo -= 1; hi += 1; }
-    const pad = (hi - lo) * 0.12;
-    p.setRange(0, tmax, lo - pad, hi + pad);
-    p.clear(); p.grid(); p.axis(true);
-    p.clip(); p.line(t, y, { color: unstable ? cv('--cv-danger') : cv('--cv-line1'), width: 2 }); p.unclip();
-    p.crosshair((x) => 't=' + U.fmt(x, 3), (yy) => 'y=' + U.fmt(yy, 4));
+    // 注册 onDraw，否则缩放/平移/主题切换后画面不更新
+    const drawChar = () => {
+      let lo = Infinity, hi = -Infinity;
+      for (const v of y) if (isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+      if (!isFinite(lo)) { lo = -1; hi = 1; }
+      if (hi - lo < 1e-6) { lo -= 1; hi += 1; }
+      const pad = (hi - lo) * 0.12;
+      p.setRange(0, tmax, lo - pad, hi + pad);
+      p.clear(); p.grid(); p.axis(true);
+      p.clip(); p.line(t, y, { color: unstable ? cv('--cv-danger') : cv('--cv-line1'), width: 2 }); p.unclip();
+      p.crosshair((x) => 't=' + U.fmt(x, 3), (yy) => 'y=' + U.fmt(yy, 4));
+    };
+    p.onDraw = drawChar;
+    drawChar();
     if (repeated) out.append(U.el('p', { class: 'hint', html: '<span style="color:var(--warn)">⚠ 检测到重根：自由响应含 t·e^{λt} 模态，上图仅绘制单根近似。</span>' }));
   }
   $('#sys-char-go').addEventListener('click', () => renderChar($('#sys-char-in').value));
@@ -880,10 +1044,10 @@ App.register('sys', (host) => {
   {
     const hp = new URLSearchParams(location.hash.replace(/^#/, ''));
     const hn = hp.get('hn'), hd = hp.get('hd');
-    if (hn != null && hd != null) { $('#sys-num').value = hn; $('#sys-den').value = hd; }
+    if (hn != null && hd != null) { tfIn.set(hn, hd); }
   }
   solve();
 
-  return { title: '系统分析', api: { dispose, onTheme: () => { renderChart(); drawTimeStep(); } } };
+  return { title: '系统分析', api: { dispose, onTheme: () => { renderChart(); drawTimeStep(); }, getState, applyState } };
   function dispose() { }
 });

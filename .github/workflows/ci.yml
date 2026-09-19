@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Syntax check（node --check 全部源码）
+        run: npm run check
+      - name: Lint（静态安全审计 + 引用完整性）
+        run: npm run lint
+      - name: Test（全部 *.test.mjs）
+        run: npm test
+      - name: Build 校验（资源引用 / _headers / 体积）
+        run: npm run build

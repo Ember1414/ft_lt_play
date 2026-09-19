@@ -10,21 +10,19 @@ App.register('zt', (host) => {
   let pzPoles = [], pzZeros = [];   // 零极点编辑数据源（完整复数根）
   let editMode = 'pole';            // 点击空白时添加的类型
   let freqPlots = {}, respPlots = {};
-  let pzView = { cx: 0, cy: 0, sx: 1, sy: 1 };  // 绘制参数（命中检测用）
+  let plane = null;                 // 共享复平面组件（惰性创建）
 
   host.innerHTML = `
     <div class="module layout">
       <div class="pane">
         <h3>离散传函 H(z)</h3>
-        <div class="tf-frac">
-          <input type="text" id="zt-num" value="1" placeholder="分子  如 1 或 z+0.5" spellcheck="false" aria-label="分子">
-          <div class="tf-bar" title="分数线"></div>
-          <input type="text" id="zt-den" value="z-0.5" placeholder="分母  如 z-0.5 或 z^2-0.25" spellcheck="false" aria-label="分母">
+        <div id="zt-mi" style="margin-top:8px"></div>
+        <div class="row" style="margin-top:8px;align-items:center">
+          <button class="btn primary" id="zt-apply">求解并绘图</button>
+          <button class="btn" id="zt-save" title="保存当前 H(z) 到模型库">💾 保存</button>
         </div>
-        <div class="row kbd" id="zt-pad" style="margin-top:8px"></div>
-        <div class="hint" id="zt-preview" style="margin:8px 0"></div>
-        <div class="row" id="zt-examples" style="margin-bottom:10px"></div>
-        <button class="btn primary" id="zt-apply">求解并绘图</button>
+        <div id="zt-rtb"></div>
+        <div class="row" id="zt-models" style="flex-wrap:wrap;gap:6px;margin:8px 0"></div>
         <div class="formula-center" id="zt-tex" style="margin-top:10px"></div>
         <div class="statbar" id="zt-stats"></div>
         <div class="hint">多项式用<b>正幂 z</b> 书写（如 <code>z^2-0.25</code>），支持因式 <code>(z-0.5)*(z+0.5)</code>。
@@ -33,7 +31,7 @@ App.register('zt', (host) => {
       </div>
       <div class="pane">
         <h3>z 平面 · 零极点（可编辑）</h3>
-        <div class="canvas-wrap" style="height:300px"><canvas id="zt-pz" style="width:100%;height:100%;touch-action:none"></canvas></div>
+        <div class="canvas-wrap" style="height:300px"><canvas id="zt-pz" class="plot" style="width:100%;height:100%"></canvas></div>
         <div class="row" id="zt-modes" style="margin-top:8px">
           <button class="chip active" data-m="pole">✕ 点击空白加极点</button>
           <button class="chip" data-m="zero">○ 点击空白加零点</button>
@@ -43,7 +41,7 @@ App.register('zt', (host) => {
           <span><span class="sw" style="background:var(--danger)"></span>极点 ×</span>
           <span><span class="sw" style="background:var(--accent)"></span>零点 ○</span>
           <span><span class="sw" style="background:var(--accent-2)"></span>单位圆</span>
-          <span><b>拖动</b>移动 · <b>双击</b>删除（共轭自动成对）· <b>滚轮</b>缩放 · <b>拖空白</b>平移</span>
+          <span><b>拖动</b>移动 · <b>双击</b>删除（共轭自动成对）· <b>滚轮/双指</b>缩放 · <b>拖空白</b>平移 · <b>长按</b>菜单</span>
         </div>
       </div>
       <details class="pane full plot-fold">
@@ -85,69 +83,60 @@ App.register('zt', (host) => {
   }).join('').replace(/^\+/, '');
   const fmtC = (z) => U.fmt(z.re, 3) + (Math.abs(z.im) > 1e-9 ? (z.im >= 0 ? '+' : '') + U.fmt(z.im, 3) + 'j' : '');
 
-  const examples = [
-    ['1', 'z-0.5', '一阶低通'], ['1', 'z^2-0.25', '双极点'],
-    ['z', 'z^2-1.6*z+0.9425', '谐振器'], ['z-0.5', 'z^2-0.25', '带零点'],
-    ['1', 'z-1', '积分器(边界)'], ['0.2', 'z-0.8', '漏积分']
-  ];
-  const exRow = $('#zt-examples');
-  examples.forEach(([n, d, name]) => {
-    const c = U.el('button', { class: 'chip', title: 'H(z)=' + n + '/(' + d + ')' }, name);
-    c.addEventListener('click', () => { $('#zt-num').value = n; $('#zt-den').value = d; fromInputs(); });
-    exRow.append(c);
+  /* ---------- 输入路径（统一输入组件 MI：键盘/徽标/示例/历史/防抖应用） ---------- */
+  const tfIn = MI.tfInput($('#zt-mi'), {
+    variable: 'z',
+    properness: true,
+    ids: { num: 'zt-num', den: 'zt-den' },
+    placeholder: { num: '分子  如 1 或 z+0.5', den: '分母  如 z-0.5 或 z^2-0.25' },
+    pad: ['z', '^2', '^3', '*', '(', ')', '+', '-'],
+    examples: [
+      ['1', 'z-0.5', '一阶低通'], ['1', 'z^2-0.25', '双极点'],
+      ['z', 'z^2-1.6*z+0.9425', '谐振器'], ['z-0.5', 'z^2-0.25', '带零点'],
+      ['1', 'z-1', '积分器(边界)'], ['0.2', 'z-0.8', '漏积分']
+    ],
+    debounce: 350,
+    onApply: (r) => { if (r && r.tf) fromTF(r.tf); }
   });
-  // 插入符号键盘
-  const pad = $('#zt-pad');
-  ['z', '^2', '^3', '*', '(', ')', '+', '-'].forEach((tok) => {
-    const b = U.el('button', { class: 'chip pad-key', title: '插入 ' + tok }, tok === '^2' ? 'z²' : tok === '^3' ? 'z³' : tok);
-    b.addEventListener('click', () => {
-      const inp = document.activeElement && document.activeElement.id && document.activeElement.id.startsWith('zt-') ? document.activeElement : $('#zt-den');
-      const s = inp.selectionStart == null ? inp.value.length : inp.selectionStart;
-      const e2 = inp.selectionEnd == null ? s : inp.selectionEnd;
-      inp.value = inp.value.slice(0, s) + tok + inp.value.slice(e2);
-      inp.focus();
-      try { inp.setSelectionRange(s + tok.length, s + tok.length); } catch (err) { }
-      inp.dispatchEvent(new Event('input'));
-    });
-    pad.append(b);
-  });
-
-  /* ---------- 输入路径 ---------- */
-  let pvTimer = null;
-  function preview() {
-    const nStr = $('#zt-num').value.trim(), dStr = $('#zt-den').value.trim();
-    const box = $('#zt-preview'), frac = $('#zt-num').closest('.tf-frac');
-    if (!nStr && !dStr) { box.innerHTML = ''; frac.classList.remove('invalid'); return; }
-    const t = FX_LIB.parseTFFields(nStr || '1', dStr || '1', 'z');
-    if (!t || !t.den || !t.den[0]) {
-      frac.classList.add('invalid');
-      box.innerHTML = '<span style="color:var(--danger)">✗ 解析失败：支持 z^2、0.5*z、(z-0.5)*(z+0.5) 等写法</span>';
-      return;
-    }
-    frac.classList.remove('invalid');
-    box.innerHTML = '<span style="color:var(--accent-2)">✓ </span>';
-    box.append(FX.span('H(z)=\\dfrac{' + texPolyZ(t.num) + '}{' + texPolyZ(t.den) + '}'));
-  }
-  ['#zt-num', '#zt-den'].forEach((sel) => $(sel).addEventListener('input', () => { clearTimeout(pvTimer); pvTimer = setTimeout(fromInputs, 350); }));
-  ['#zt-num', '#zt-den'].forEach((sel) => $(sel).addEventListener('keydown', (e) => { if (e.key === 'Enter') fromInputs(); }));
-  $('#zt-apply').addEventListener('click', fromInputs);
-  $('#zt-pzreset').addEventListener('click', () => { pzPoles = []; pzZeros = []; den = [1]; num = [1]; $('#zt-num').value = '1'; $('#zt-den').value = '1'; fromInputs(); });
-  $('#zt-modes').addEventListener('click', (e) => {
-    const b = e.target.closest('.chip'); if (!b || !b.dataset.m) return;
-    editMode = b.dataset.m;
-    $('#zt-modes').querySelectorAll('.chip').forEach((x) => x.classList.toggle('active', x === b));
-  });
-
-  function fromInputs() {
-    const t = FX_LIB.parseTFFields($('#zt-num').value || '1', $('#zt-den').value || '1', 'z');
-    if (!t || !t.den || !t.den[0] || t.num.length > t.den.length) { preview(); return; }
+  function fromTF(t) {
+    if (!t || !t.den || !t.den[0]) return;
     const d0 = t.den[0];
     num = t.num.map((c) => c / d0); den = t.den.map((c) => c / d0);
     pzPoles = DSP.polyRoots(den);
     pzZeros = t.num.length > 1 ? DSP.polyRoots(num) : [];
-    pzZoom = { cxw: 0, cyw: 0, k: 1 };   // 新 H(z)：视图复位适配新零极点
     renderAll();
+    if (plane) plane.resetView();   // 新 H(z)：视图复位适配新零极点
   }
+  $('#zt-apply').addEventListener('click', () => tfIn.apply());
+  $('#zt-save').addEventListener('click', () => {
+    const c = tfIn.get();
+    if (!c.numStr && !c.denStr) return;
+    MI.nameAsk('H(z) 模型', (name) => {
+      App.models.save({ name, kind: 'tf', data: { variable: 'z', num: c.numStr || '1', den: c.denStr || '1' } });
+      renderModels();
+    });
+  });
+  const renderModels = App.models.renderChips($('#zt-models'), {
+    kinds: ['tf'],
+    emptyText: '暂无保存的模型',
+    onLoad: (m) => {
+      if (!m.data || m.data.variable !== 'z') return;
+      tfIn.set(m.data.num, m.data.den);
+      fromTF(FX_LIB.parseTFFields(m.data.num || '1', m.data.den || '1', 'z'));
+    }
+  });
+  $('#zt-pzreset').addEventListener('click', () => {
+    pzPoles = []; pzZeros = []; num = [1]; den = [1];
+    tfIn.set('1', '1');
+    renderAll();
+    if (plane) plane.resetView();
+  });
+  $('#zt-modes').addEventListener('click', (e) => {
+    const b = e.target.closest('.chip'); if (!b || !b.dataset.m) return;
+    editMode = b.dataset.m;
+    if (plane) plane.setDefaultAdd(editMode);
+    $('#zt-modes').querySelectorAll('.chip').forEach((x) => x.classList.toggle('active', x === b));
+  });
   // 零极点编辑路径：由 specs 重建多项式 → 输入框同步 → 全量渲染
   function applySpecs() {
     if (pzPoles.length) {
@@ -159,9 +148,7 @@ App.register('zt', (host) => {
       const n0 = num[0] || 1; num = num.map((c) => c / n0);
     } else num = [1];
     while (num.length < den.length) num.unshift(0);
-    $('#zt-num').value = plainZ(num);
-    $('#zt-den').value = plainZ(den);
-    preview();
+    tfIn.set(plainZ(num), plainZ(den));
     renderAll();
   }
 
@@ -169,8 +156,10 @@ App.register('zt', (host) => {
   function renderAll() {
     const poles = pzPoles, zeros = pzZeros;
     const maxAbs = poles.reduce((m, q) => Math.max(m, Math.hypot(q.re, q.im)), 0);
-    const stable = poles.every((q) => Math.hypot(q.re, q.im) < 1 - 1e-9);
     const onCircle = poles.some((q) => Math.abs(Math.hypot(q.re, q.im) - 1) < 1e-6);
+    const unstable = poles.some((q) => Math.hypot(q.re, q.im) > 1 + 1e-9);
+    // 圆外极点优先于圆上极点：两者并存时系统是不稳定，而非“临界”
+    const stable = !unstable && !onCircle;
     $('#zt-tex').innerHTML = '';
     FX.katex('H(z)=\\dfrac{' + texPolyZ(num) + '}{' + texPolyZ(den) + '}', $('#zt-tex'), { displayMode: true });
     $('#zt-stats').innerHTML = `
@@ -178,7 +167,7 @@ App.register('zt', (host) => {
       <div class="stat"><span class="k">零点</span><span class="v">${zeros.map(fmtC).join(', ') || '—'}</span></div>
       <div class="stat"><span class="k">最大极点模</span><span class="v">${U.fmt(maxAbs, 3)}</span></div>
       <div class="stat"><span class="k">ROC(因果)</span><span class="v">${maxAbs > 0 ? '|z|>' + U.fmt(maxAbs, 3) : '全平面'}</span></div>
-      <div class="stat"><span class="k">稳定性</span><span class="v" style="color:${stable ? cv('--cv-line2') : onCircle ? cv('--cv-warn') : cv('--cv-danger')}">${stable ? '稳定' : onCircle ? '临界(极点在圆上)' : '不稳定'}</span></div>`;
+      <div class="stat"><span class="k">稳定性</span><span class="v" style="color:${stable ? cv('--cv-line2') : unstable ? cv('--cv-danger') : cv('--cv-warn')}">${stable ? '稳定' : unstable ? '不稳定' : '临界(极点在圆上)'}</span></div>`;
     drawPZ();
     drawFreq();
     drawResp(stable);
@@ -193,166 +182,50 @@ App.register('zt', (host) => {
     }
   }
 
-  /* ---------- z 平面（可交互：点击加 / 拖动移 / 双击删 / 滚轮缩放 / 拖空白平移） ---------- */
-  let pzZoom = { cxw: 0, cyw: 0, k: 1 };   // 视图中心（z 域坐标）+ 缩放倍数
-  function drawPZ() {
+  /* ---------- z 平面（共享复平面组件：点击加 / 拖动移 / 双击删 / 滚轮·双指缩放 / 长按菜单） ---------- */
+  function ensurePlane() {
+    if (plane) return plane;
     const cvEl = $('#zt-pz');
-    if (!cvEl || !cvEl.isConnected) return;
-    const W = cvEl.clientWidth || 420, H = cvEl.clientHeight || 300;
-    const dpr = window.devicePixelRatio || 1;
-    const nw = Math.round(W * dpr), nh = Math.round(H * dpr);
-    if (cvEl.width !== nw || cvEl.height !== nh) { cvEl.width = nw; cvEl.height = nh; }
-    const g = cvEl.getContext('2d');
-    g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    g.fillStyle = cv('--cv-bg'); g.fillRect(0, 0, W, H);
-    const ml = 30, mr = 14, mt = 14, mb = 22, dw = W - ml - mr, dh = H - mt - mb;
-    const cx = ml + dw / 2, cy = mt + dh / 2;
-    let baseR = 1.3;
-    for (const q of [...pzPoles, ...pzZeros]) baseR = Math.max(baseR, Math.hypot(q.re, q.im) + 0.35);
-    const R = baseR / pzZoom.k;
-    const sx = dw / (2 * R), sy = dh / (2 * R);
-    pzView = { cx, cy, sx, sy };
-    const PX = (r) => cx + (r - pzZoom.cxw) * sx, PY = (i) => cy - (i - pzZoom.cyw) * sy;
-    const ox = PX(0), oy = PY(0);   // 世界原点像素位置（平移后不再等于画布中心）
-    const rad = Math.min(sx, sy);
-    g.fillStyle = pzPoles.every((q) => Math.hypot(q.re, q.im) < 1 - 1e-9) ? cv('--cv-stable-bg') : cv('--cv-bg');
-    g.beginPath(); g.arc(ox, oy, rad, 0, Math.PI * 2); g.fill();
-    g.strokeStyle = cv('--cv-grid'); g.lineWidth = 1;
-    for (let i = 0; i <= 6; i++) { const x = ml + i * dw / 6; g.beginPath(); g.moveTo(x, mt); g.lineTo(x, mt + dh); g.stroke(); }
-    for (let i = 0; i <= 4; i++) { const y = mt + i * dh / 4; g.beginPath(); g.moveTo(ml, y); g.lineTo(ml + dw, y); g.stroke(); }
-    g.strokeStyle = cv('--cv-line2'); g.lineWidth = 1.6;
-    g.beginPath(); g.arc(ox, oy, rad, 0, Math.PI * 2); g.stroke();
-    // 坐标轴（随视图平移，裁剪在绘图区内）
-    g.save();
-    g.beginPath(); g.rect(ml, mt, dw, dh); g.clip();
-    g.strokeStyle = cv('--cv-axis-hi'); g.beginPath(); g.moveTo(ox, mt); g.lineTo(ox, mt + dh); g.stroke();
-    g.strokeStyle = cv('--cv-axis'); g.beginPath(); g.moveTo(ml, oy); g.lineTo(ml + dw, oy); g.stroke();
-    g.restore();
-    g.fillStyle = cv('--cv-tick'); g.font = '10px monospace'; g.textAlign = 'left'; g.textBaseline = 'top';
-    g.fillText('Re(z)', ml + dw - 34, U.clamp(oy + 4, mt + 2, mt + dh - 14));
-    g.fillText('Im', U.clamp(ox + 4, ml + 2, ml + dw - 16), mt + 2);
-    if (pzZoom.k > 0.9) g.fillText('|z|=1', ox + rad - 34, oy - rad - 2);
-    g.strokeStyle = cv('--cv-danger'); g.lineWidth = 2;
-    for (const q of pzPoles) {
-      const x = PX(q.re), y = PY(q.im);
-      g.beginPath(); g.moveTo(x - 6, y - 6); g.lineTo(x + 6, y + 6); g.moveTo(x - 6, y + 6); g.lineTo(x + 6, y - 6); g.stroke();
-    }
-    g.strokeStyle = cv('--cv-line1'); g.lineWidth = 2;
-    for (const q of pzZeros) { g.beginPath(); g.arc(PX(q.re), PY(q.im), 6, 0, Math.PI * 2); g.stroke(); }
-  }
-
-  /* ---------- z 平面交互：点击加 / 拖动移 / 双击删 ---------- */
-  let drag = null;
-  function hitTest(px, py) {
-    const tol = 12;
-    const test = (specs) => {
-      for (let i = 0; i < specs.length; i++) {
-        const x = pzView.cx + specs[i].re * pzView.sx, y = pzView.cy - specs[i].im * pzView.sy;
-        if (Math.hypot(px - x, py - y) < tol) return i;
+    if (!cvEl) return null;
+    plane = new FX.ComplexPlane(cvEl, {
+      mode: 'unit',
+      editable: true,
+      defaultAdd: editMode,
+      blankContextAction: 'zero',
+      getSpecs: () => ({ poles: pzPoles, zeros: pzZeros }),
+      // 拖动：先按「旧位置」锁定共轭伙伴再同步移动（此前在重赋值后反查，实际拖动中共轭并不跟随）
+      onMove: (kind, i, z) => {
+        const arr = kind === 'pole' ? pzPoles : pzZeros;
+        const cur = arr[i];
+        const wasConj = Math.abs(cur.im) > 1e-9;
+        const j = wasConj ? arr.findIndex((q, k) => k !== i && Math.abs(q.re - cur.re) < 1e-6 && Math.abs(q.im + cur.im) < 1e-6) : -1;
+        arr[i] = { re: z.re, im: z.im };
+        if (j >= 0) arr[j] = Math.abs(z.im) > 1e-9 ? { re: z.re, im: -z.im } : { re: z.re, im: 0 };
+        applySpecs();
+      },
+      onAdd: (kind, z) => {
+        const arr = kind === 'pole' ? pzPoles : pzZeros;
+        arr.push({ re: z.re, im: z.im });
+        if (Math.abs(z.im) > 1e-9) arr.push({ re: z.re, im: -z.im });
+        applySpecs();
+      },
+      onDelete: (kind, i) => {
+        const arr = kind === 'pole' ? pzPoles : pzZeros;
+        const q = arr[i];
+        for (let k = arr.length - 1; k >= 0; k--) {
+          if (k === i) continue;
+          if (Math.abs(arr[k].re - q.re) < 1e-6 && Math.abs(arr[k].im + q.im) < 1e-6) arr.splice(k, 1);
+        }
+        arr.splice(i, 1);
+        applySpecs();
       }
-      return -1;
-    };
-    let i = test(pzPoles); if (i >= 0) return { kind: 'pole', i };
-    i = test(pzZeros); if (i >= 0) return { kind: 'zero', i };
-    return null;
+    });
+    return plane;
   }
-  const toZ = (px, py) => ({ re: (px - pzView.cx) / pzView.sx + pzZoom.cxw, im: (pzView.cy - py) / pzView.sy + pzZoom.cyw });
-  function moveSpec(kind, i, z) {
-    const arr = kind === 'pole' ? pzPoles : pzZeros;
-    const wasConj = Math.abs(arr[i].im) > 1e-9;
-    arr[i] = { re: z.re, im: z.im };
-    if (wasConj && Math.abs(z.im) > 1e-9) {
-      // 同步共轭成员
-      const j = arr.findIndex((q, k) => k !== i && Math.abs(q.re - z.re) < 1e-6 && Math.abs(q.im + arr[i].im) < 1e-6);
-      if (j >= 0) arr[j] = { re: z.re, im: -z.im };
-    }
-    applySpecs();
-  }
-  const pzCv = $('#zt-pz');
-  const pzPos = (e) => {
-    const r = pzCv.getBoundingClientRect();
-    return { x: (e.clientX - r.left) * (pzCv.clientWidth / r.width), y: (e.clientY - r.top) * (pzCv.clientHeight / r.height) };
-  };
-  let pzDrag = null;   // 空白处拖动 = 平移视图；未移动的抬起 = 点击添加
-  pzCv.addEventListener('pointerdown', (e) => {
-    const pos = pzPos(e);
-    const hit = hitTest(pos.x, pos.y);
-    if (hit) { drag = { ...hit }; try { pzCv.setPointerCapture(e.pointerId); } catch (err) { } return; }
-    pzDrag = { x: e.clientX, y: e.clientY, moved: false, button: e.button };
-    try { pzCv.setPointerCapture(e.pointerId); } catch (err) { }
-  });
-  pzCv.addEventListener('pointermove', (e) => {
-    if (drag) {
-      const pos = pzPos(e);
-      moveSpec(drag.kind, drag.i, toZ(pos.x, pos.y));
-      return;
-    }
-    if (!pzDrag) return;
-    const dx = e.clientX - pzDrag.x, dy = e.clientY - pzDrag.y;
-    if (!pzDrag.moved && Math.abs(dx) + Math.abs(dy) < 3) return;
-    pzDrag.moved = true;
-    // 像素位移 → 世界位移（注意 im 轴向下为负）
-    pzZoom.cxw -= dx / pzView.sx;
-    pzZoom.cyw += dy / pzView.sy;
-    pzDrag.x = e.clientX; pzDrag.y = e.clientY;
-    drawPZ();
-  });
-  pzCv.addEventListener('pointerup', (e) => {
-    if (pzDrag && !pzDrag.moved) {
-      // 视为点击：按模式添加（贴近实轴自动吸附为实数根）
-      const pos = pzPos(e);
-      const z = toZ(pos.x, pos.y);
-      if (Math.abs(z.im) < 0.04) z.im = 0;
-      if (pzDrag.button === 2) {
-        pzZeros.push({ ...z });
-        if (Math.abs(z.im) > 1e-9) pzZeros.push({ re: z.re, im: -z.im });
-        drag = { kind: 'zero', i: pzZeros.length - 1 };
-      } else {
-        if (editMode === 'pole') pzPoles.push({ ...z });
-        else pzZeros.push({ ...z });
-        if (Math.abs(z.im) > 1e-9) (editMode === 'pole' ? pzPoles : pzZeros).push({ re: z.re, im: -z.im });
-        drag = { kind: editMode, i: (editMode === 'pole' ? pzPoles : pzZeros).length - 1 };
-      }
-      applySpecs();
-    }
-    pzDrag = null;
-  });
-  pzCv.addEventListener('contextmenu', (e) => e.preventDefault());
-  // 滚轮缩放（以光标为中心）
-  pzCv.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    const pos = pzPos(e);
-    const w = toZ(pos.x, pos.y);
-    const f = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-    const k2 = U.clamp(pzZoom.k * f, 0.5, 80);
-    // 调整视图中心，使光标下的 z 点保持不动
-    pzZoom.cxw = w.re - (pos.x - pzView.cx) / (pzView.sx * (k2 / pzZoom.k));
-    pzZoom.cyw = w.im + (pos.y - pzView.cy) / (pzView.sy * (k2 / pzZoom.k));
-    pzZoom.k = k2;
-    drawPZ();
-  }, { passive: false });
-  pzCv.addEventListener('dblclick', (e) => {
-    const pos = pzPos(e);
-    const hit = hitTest(pos.x, pos.y);
-    if (!hit) { pzZoom = { cxw: 0, cyw: 0, k: 1 }; drawPZ(); return; }   // 双击空白：复位视图
-    const arr = hit.kind === 'pole' ? pzPoles : pzZeros;
-    const q = arr[hit.i];
-    // 删除时连同共轭成员
-    for (let k = arr.length - 1; k >= 0; k--) {
-      if (k === hit.i) continue;
-      if (Math.abs(arr[k].re - q.re) < 1e-6 && Math.abs(arr[k].im + q.im) < 1e-6) arr.splice(k, 1);
-    }
-    arr.splice(hit.i, 1);
-    applySpecs();
-  });
-  // 画布随容器尺寸变化自动重绘（桌面适配，避免拉伸变形）
-  if (typeof ResizeObserver !== 'undefined' && pzCv.parentElement) {
-    const pzRO = new ResizeObserver(() => { if (!pzCv.isConnected) { pzRO.disconnect(); return; } drawPZ(); });
-    pzRO.observe(pzCv.parentElement);
-  }
+  function drawPZ() { if (ensurePlane()) plane.redraw(); }
 
   /* ---------- 频率响应 ---------- */
-  function drawFreq() {
+  function freqData() {
     const NW = 600, w = [], mag = [], ph = [];
     for (let i = 0; i < NW; i++) {
       const wv = (i / (NW - 1)) * Math.PI;
@@ -360,6 +233,10 @@ App.register('zt', (host) => {
       const h = DSP.cdiv(DSP.horner(num, z), DSP.horner(den, z));
       w.push(wv); mag.push(U.toDb(Math.hypot(h.re, h.im))); ph.push((180 / Math.PI) * Math.atan2(h.im, h.re));
     }
+    return { w, mag, ph };
+  }
+  function drawFreq() {
+    const { w, mag, ph } = freqData();
     const drawOne = (id, ys, color, unit) => {
       let p = freqPlots[id];
       if (!p) { p = new FX.Plot($(id), { padding: 0.03 }); p.onDraw = drawFreq; freqPlots[id] = p; }
@@ -388,7 +265,8 @@ App.register('zt', (host) => {
     const y = new Array(xArr.length).fill(0);
     for (let i = 0; i < xArr.length; i++) {
       let acc = 0;
-      for (let k = 0; k <= n; k++) if (i - k >= 0) acc += b[k] * xArr[i - k];
+      // 遍历 b 的全部长度：非真分式（分子阶次更高）时高次项也参与，不可截断到 n
+      for (let k = 0; k < b.length; k++) if (i - k >= 0) acc += b[k] * xArr[i - k];
       for (let j = 1; j <= n; j++) if (i - j >= 0) acc -= a[j] * y[i - j];
       y[i] = acc;
     }
@@ -412,12 +290,40 @@ App.register('zt', (host) => {
       p.clip(); p.line(nIdx, ys, { color, width: 1.4 }); p.dots(nIdx, ys, { color, r: 2.4 }); p.unclip();
       p.crosshair((n) => 'n=' + Math.round(n), (v) => 'y=' + U.fmt(v, 4));
     };
+    // h/s 每次都是新数组：onDraw 必须刷新，否则悬停/缩放会用上一次的响应重绘
     function drawRespAll() { drawStem('#zt-imp', h, cv('--cv-line1')); drawStem('#zt-step', s, cv('--cv-line2')); }
+    Object.values(respPlots).forEach((p) => { p.onDraw = drawRespAll; });
     drawRespAll();
   }
 
-  fromInputs();
+  tfIn.set('1', 'z-0.5');
+  fromTF(FX_LIB.parseTFFields('1', 'z-0.5', 'z'));
 
-  return { title: 'Z 变换', api: { dispose, onTheme: () => { renderAll(); } } };
-  function dispose() { }
+  /* ---------- 实验接入：状态捕获 / 回放 / 统一结果工具栏 ---------- */
+  function getState() {
+    const c = tfIn.get();
+    return { num: c.numStr || '1', den: c.denStr || '1', editMode };
+  }
+  function applyState(s) {
+    if (!s || typeof s !== 'object') return;
+    tfIn.set(String(s.num || '1'), String(s.den || '1'));
+    const t = FX_LIB.parseTFFields(String(s.num || '1'), String(s.den || '1'), 'z');
+    if (t) fromTF(t);
+  }
+  RTB.attach($('#zt-rtb'), {
+    module: 'zt',
+    getState, applyState,
+    canvases: () => ['#zt-pz', '#zt-mag', '#zt-ph', '#zt-imp', '#zt-step'].map((s) => $(s)).filter(Boolean),
+    csv: () => {
+      const d = freqData();
+      return {
+        name: 'freq',
+        header: ['omega(rad)', 'gain(dB)', 'phase(deg)'],
+        rows: d.w.map((w, i) => [w.toPrecision(6), d.mag[i].toPrecision(6), d.ph[i].toPrecision(6)])
+      };
+    }
+  });
+
+  return { title: 'Z 变换', api: { dispose, onTheme: () => { renderAll(); }, getState, applyState } };
+  function dispose() { if (plane) plane.dispose(); }
 });
