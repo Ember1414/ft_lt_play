@@ -2,6 +2,18 @@
 
 格式参考 Keep a Changelog；版本号 = `package.json` version（页面资源 `?v=` 与侧栏版本同步更新）。
 
+## [8.5.0] — 2026-09-19 · PWA 离线支持
+
+### 新增
+- **Service Worker**（sw.js）：本地版本化资产 cache-first + 后台更新、
+  导航 network-first 离线回落、CDN（KaTeX/mathjs/字体）stale-while-revalidate
+  ——首次在线后核心功能可完全离线使用
+- **manifest.webmanifest** + SVG 图标（安装为独立应用）；app.js 安全上下文
+  注册 + 新版本就绪提示
+- build.mjs 校验 sw.js CORE 覆盖 index.html 全部本地资源且 VER 与 ?v= 同步；
+  `tests/pwa.test.mjs` 10 项 PWA 契约
+- 版本 8.5.0 / ?v=8.5 / 侧栏 v4.1
+
 ## [8.4.0] — 2026-09-19 · 傅立叶变换 Parseval 能量定理
 
 ### 新增

@@ -1,0 +1,15 @@
+{
+  "name": "信号与控制实验平台",
+  "short_name": "实验平台",
+  "description": "傅立叶/拉普拉斯/Z 变换、系统分析、PID 的交互式实验环境（本地优先，支持离线）",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0b0e14",
+  "theme_color": "#0b0e14",
+  "lang": "zh-CN",
+  "icons": [
+    { "src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

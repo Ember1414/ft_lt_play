@@ -375,6 +375,21 @@
     });
   }
 
+  // PWA：Service Worker 注册（仅安全上下文；新版本就绪时提示刷新）
+  if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator && location.protocol === 'https:' || (typeof navigator !== 'undefined' && 'serviceWorker' in navigator && ['localhost', '127.0.0.1'].includes(location.hostname))) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').then((reg) => {
+        reg.addEventListener('updatefound', () => {
+          const sw = reg.installing;
+          if (!sw) return;
+          sw.addEventListener('statechange', () => {
+            if (sw.state === 'installed' && navigator.serviceWorker.controller) App.toast('新版本已就绪，刷新页面即可启用');
+          });
+        });
+      }).catch(() => { });
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', () => App.init());
 
   // 模块自注册：每个 module 文件调用 App.register(名称, factory)

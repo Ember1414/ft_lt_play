@@ -35,5 +35,18 @@ for (const p of refs) {
   else console.log(`  ${p} ${kb}KB`);
 }
 
+// PWA：sw.js CORE 必须覆盖 index.html 全部本地资源，且 VER 与 ?v= 同步
+{
+  const swSrc = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
+  const verM = html.match(/\?v=([^"]+)/);
+  const ver = verM ? verM[1] : '';
+  if (ver && !swSrc.includes('fltp-' + ver)) err(`sw.js VER 未同步 ?v=${ver}`);
+  for (const p of refs) {
+    const withV = p + '?v=' + ver;
+    if (!swSrc.includes(p)) err(`sw.js CORE 缺少 ${p}`);
+  }
+  if (!html.includes('manifest.webmanifest')) err('index.html 缺少 manifest 链接');
+}
+
 if (bad) { console.error(`✗ build 校验失败 ${bad} 项`); process.exit(1); }
 console.log(`✓ build 校验通过（静态直传，无打包产物）`);
