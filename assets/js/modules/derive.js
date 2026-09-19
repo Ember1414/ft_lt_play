@@ -3,6 +3,7 @@
  *   性质表 + 逐步推导 + 小例子
  * ============================================================ */
 App.register('derive', (host) => {
+  let dvRef = null;   // 自定义推导输入组件引用（实验状态捕获用）
   /* ---------- 性质表数据 ---------- */
   const tables = {
     ft: {
@@ -290,6 +291,7 @@ App.register('derive', (host) => {
         <h3>输入函数 → 逐步变换推导</h3>
         <p class="hint" style="margin-top:-6px">输入一个因果信号 f(t)，这里会像教科书一样<b>逐项写出拉普拉斯变换的推导步骤</b>（定义积分 / 欧拉展开 / s 域性质），给出 ROC 与傅里叶变换，最后用数值积分验证每一步得到的 F(s)。</p>
         <div id="dv-mi" style="margin-top:10px"></div>
+        <div id="dv-rtb"></div>
         <div class="hint">支持的项：<code>c*exp(-a*t)*u(t)</code>、<code>c*sin(w*t)*u(t)</code>、<code>c*cos(w*t)*u(t)</code>、<code>c*t^n*u(t)</code>、<code>c*t^n*exp(-a*t)*u(t)</code>、<code>u(t)</code>、常数 c。写法宽松：<code>2sin(3t)</code>、<code>e^(-2t)</code>、<code>t²e^{-t}</code>、<code>sin(2πt)</code> 都可以；用 + - 连接多项。</div>
       </div>
       <div id="dv-cout"><p class="hint">输入表达式后点击“推导”。</p></div>`;
@@ -317,6 +319,7 @@ App.register('derive', (host) => {
       autoApply: false,
       onApply: () => runCustom()
     });
+    dvRef = dv;
     const goBtn = U.el('button', { class: 'btn primary', id: 'dv-cgo' }, '推导');
     goBtn.addEventListener('click', () => dv.apply());
     dv.bar.append(goBtn);
@@ -475,6 +478,18 @@ App.register('derive', (host) => {
   host.querySelector('#dv-zout').addEventListener('click', () => { zscale = Math.max(0.8, +(zscale - 0.1).toFixed(2)); applyZ(); });
   zReset.addEventListener('click', () => { zscale = 1; applyZ(); });
 
-  return { title: '公式推导', api: { dispose } };
+  /* ---------- 实验接入：状态捕获 / 回放（自定义推导输入） ---------- */
+  function getState() { return { expr: dvRef ? dvRef.get() : '' }; }
+  function applyState(sv) {
+    if (!sv || typeof sv !== 'object' || typeof sv.expr !== 'string' || !sv.expr || !dvRef) return;
+    dvRef.set(sv.expr);
+    dvRef.apply();
+  }
+  RTB.attach(content.querySelector('#dv-rtb'), {
+    module: 'derive',
+    getState, applyState,
+    canvases: () => U.$$('canvas', content)
+  });
+  return { title: '公式推导', api: { dispose, onTheme: () => { }, getState, applyState } };
   function dispose() { }
 });

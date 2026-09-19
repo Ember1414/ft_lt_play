@@ -83,7 +83,7 @@ for (const f of ['assets/js/lib/util.js', 'assets/js/lib/mathdsp.js', 'assets/js
   'assets/js/lib/project.js', 'assets/js/lib/toolbar.js', 'assets/js/app.js', 'assets/js/modules/workbench.js',
   'assets/js/modules/zt.js', 'assets/js/modules/system.js', 'assets/js/modules/laplace.js',
   'assets/js/modules/explore.js', 'assets/js/modules/pid.js',
-  'assets/js/modules/fourier-series.js', 'assets/js/modules/fourier-transform.js', 'assets/js/modules/blockdiag.js']) {
+  'assets/js/modules/fourier-series.js', 'assets/js/modules/fourier-transform.js', 'assets/js/modules/blockdiag.js', 'assets/js/modules/derive.js']) {
   vm.runInContext(read(f), sandbox, { filename: f });
 }
 const { App, PX } = sandbox.window;
@@ -95,7 +95,7 @@ App.open = () => { };
 App.toast = () => { };
 App.hashFree = () => !App.exps.cur();
 
-for (const key of ['sys', 'zt', 'la', 'pid', 'explore', 'fs', 'ft', 'blk']) {
+for (const key of ['sys', 'zt', 'la', 'pid', 'explore', 'fs', 'ft', 'blk', 'derive']) {
   const host = new El('div');
   const mod = App.modules[key](host);
   const api = mod.api || mod;
