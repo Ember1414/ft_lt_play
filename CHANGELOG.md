@@ -2,6 +2,15 @@
 
 格式参考 Keep a Changelog；版本号 = `package.json` version（页面资源 `?v=` 与侧栏版本同步更新）。
 
+## [8.9.0] — 2026-09-19 · CDN 资源 SRI 完整性校验
+
+### 新增
+- KaTeX CSS/JS、mathjs JS、Inter 字体 CSS 四个 CDN 资源全部加上
+  integrity=sha384 与 crossorigin=anonymous（哈希实测计算）
+- 与 SW 离线缓存、unpkg 动态回退构成三层可用性保障
+- 浏览器实测：SRI 生效下 KaTeX/mathjs 正常加载、公式渲染正常
+- 版本 8.9.0 / ?v=8.9 / sw VER fltp-8.9
+
 ## [8.8.0] — 2026-09-19 · 交互求解：卷积/互相关求解器
 
 ### 新增
@@ -29,6 +38,15 @@
 - PID 指标寻优迁移至 Worker 池：按钮计算中状态 + 60s 超时；主线程不再阻塞
 - `tests/workerpool.test.mjs` 7 项（回退路径/错误回传/协议检查）
 - 版本 8.6.0 / ?v=8.6；sw.js 同步 workerpool 资产
+
+## [8.9.0] — 2026-09-19 · CDN 资源 SRI 完整性校验
+
+### 新增
+- KaTeX CSS/JS、mathjs JS、Inter 字体 CSS 四个 CDN 资源全部加上
+  integrity=sha384 与 crossorigin=anonymous（哈希实测计算）
+- 与 SW 离线缓存、unpkg 动态回退构成三层可用性保障
+- 浏览器实测：SRI 生效下 KaTeX/mathjs 正常加载、公式渲染正常
+- 版本 8.9.0 / ?v=8.9 / sw VER fltp-8.9
 
 ## [8.8.0] — 2026-09-19 · 交互求解：卷积/互相关求解器
 
