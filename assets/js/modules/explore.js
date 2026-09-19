@@ -17,6 +17,7 @@ App.register('explore', (host) => {
   host.innerHTML = `
     <div class="module">
       <div class="row" id="ex-tabs" style="margin-bottom:14px"></div>
+      <div id="ex-rtb"></div>
       <div id="ex-expr" class="hidden"></div>
       <div id="ex-sym" class="hidden"></div>
       <div id="ex-eq" class="hidden"></div>
@@ -1153,11 +1154,29 @@ App.register('explore', (host) => {
   tabBar();
   switchTab();
 
+  /* ---------- 实验接入：状态捕获 / 回放 / 统一结果工具栏 ---------- */
+  function getState() {
+    return { tab, expr: exprInputRef ? exprInputRef.get() : '' };
+  }
+  function applyState(s) {
+    if (!s || typeof s !== 'object') return;
+    if (s.tab && ['expr', 'sym', 'eq', 'draw', 'voice'].includes(s.tab)) { tab = s.tab; switchTab(); }
+    if (typeof s.expr === 'string' && s.expr && tab === 'expr' && exprInputRef) {
+      exprInputRef.set(s.expr);
+      exprInputRef.apply();
+    }
+  }
+  RTB.attach(host.querySelector('#ex-rtb'), {
+    module: 'explore',
+    getState, applyState,
+    canvases: () => U.$$('canvas', host)
+  });
+
   return { title: '交互求解', api: { dispose, onTheme: () => {
     // 只重绘当前可见页签；时域与传函结果互斥，调用仍然有效的那一个，避免旧闭包访问已移除的 DOM
     if (tab === 'expr') { if (exprRedraw) exprRedraw(); else if (tfRedraw) tfRedraw(); }
     else if (tab === 'draw' && drawReset) drawReset();
-  } } };
+  }, getState, applyState } };
   function dispose() {
     if (dloop && loopRunning) { loopRunning = false; dloop.stop(); }
     if (speechRec) { try { speechRec.onend = null; speechRec.stop(); } catch (e) {} speechRec = null; }

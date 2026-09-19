@@ -78,7 +78,8 @@ vm.createContext(sandbox);
 for (const f of ['assets/js/lib/util.js', 'assets/js/lib/mathdsp.js', 'assets/js/lib/plots.js', 'assets/js/lib/fx.js',
   'assets/js/lib/mathinput.js', 'assets/js/lib/blocksolve.js', 'assets/js/lib/transforms.js', 'assets/js/lib/odesolve.js',
   'assets/js/lib/project.js', 'assets/js/lib/toolbar.js', 'assets/js/app.js', 'assets/js/modules/workbench.js',
-  'assets/js/modules/zt.js', 'assets/js/modules/system.js']) {
+  'assets/js/modules/zt.js', 'assets/js/modules/system.js', 'assets/js/modules/laplace.js',
+  'assets/js/modules/explore.js', 'assets/js/modules/pid.js']) {
   vm.runInContext(read(f), sandbox, { filename: f });
 }
 const { App, PX } = sandbox.window;
@@ -90,7 +91,7 @@ App.open = () => { };
 App.toast = () => { };
 App.hashFree = () => !App.exps.cur();
 
-for (const key of ['sys', 'zt']) {
+for (const key of ['sys', 'zt', 'la', 'pid', 'explore']) {
   const host = new El('div');
   const mod = App.modules[key](host);
   const api = mod.api || mod;

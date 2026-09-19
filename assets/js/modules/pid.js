@@ -34,6 +34,7 @@ App.register('pid', (host) => {
         <div class="ctrl"><label>微分 Kd <span class="val" id="pid-kdv"></span></label>
           <input type="range" id="pid-kd" min="0" max="5" step="0.1" value="0"></div>
         <div class="row" id="pid-recipes" style="margin-bottom:8px"></div>
+        <div id="pid-rtb"></div>
         <div class="hint">单位负反馈闭环 <b>T(s)=C·G/(1+C·G)</b>。经验：Kp 加快响应但增大超调；Ki 消除稳态误差但易振荡；Kd 增大阻尼、抑制超调（对噪声敏感）。试试用「不稳定对象」把它拉回稳定！</div>
       </div>
       <div class="pane">
@@ -150,6 +151,7 @@ App.register('pid', (host) => {
   }
 
   /* ---------- 主计算 ---------- */
+  let lastStep = null;   // 最近一次阶跃仿真（CSV 导出用）
   function solve() {
     const g = plants[plantKey];
     // Ki≈0 时 Nc 与分母 s 有公因子，先约成真分式（C=Kd·s+Kp），否则闭环会多出虚假极点 s=0
@@ -173,6 +175,7 @@ App.register('pid', (host) => {
     const tmax = unstable ? 6 : U.clamp(5 / (nearest || 1), 1, 30);
     const steps = 3000;
     const res = DSP.ltiResponse(N, D, (t) => (t >= 0 ? 1 : 0), 0, tmax, steps);
+    lastStep = res;
 
     const yInf = D[D.length - 1] !== 0 ? N[N.length - 1] / D[D.length - 1] : NaN;
     drawStep(res, yInf, unstable);
@@ -215,6 +218,35 @@ App.register('pid', (host) => {
   syncSliders();
   solve();
 
-  return { title: 'PID 整定', api: { dispose, onTheme: () => { renderG(); solve(); } } };
+  /* ---------- 实验接入：状态捕获 / 回放 / 统一结果工具栏 ---------- */
+  function setPlant(k) {
+    if (!plants[k]) return;
+    plantKey = k;
+    prow.querySelectorAll('.chip').forEach((x) => x.classList.toggle('active', x.dataset.k === k));
+    renderG();
+  }
+  function getState() { return { plant: plantKey, kp: Kp, ki: Ki, kd: Kd }; }
+  function applyState(s) {
+    if (!s || typeof s !== 'object') return;
+    if (s.plant) setPlant(s.plant);
+    Kp = +s.kp || 0; Ki = +s.ki || 0; Kd = +s.kd || 0;
+    syncSliders();
+    solve();
+  }
+  RTB.attach($('#pid-rtb'), {
+    module: 'pid',
+    getState, applyState,
+    canvases: () => ['#pid-step', '#pid-pz'].map((s) => $(s)).filter(Boolean),
+    csv: () => {
+      if (!lastStep) return null;
+      return {
+        name: 'step',
+        header: ['t(s)', 'y(t)'],
+        rows: lastStep.t.map((t, i) => [t.toPrecision(6), lastStep.y[i].toPrecision(6)])
+      };
+    }
+  });
+
+  return { title: 'PID 整定', api: { dispose, onTheme: () => { renderG(); solve(); }, getState, applyState } };
   function dispose() { }
 });

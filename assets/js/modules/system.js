@@ -41,6 +41,7 @@ App.register('sys', (host) => {
         <div class="row" id="sys-presets" style="margin-bottom:12px"></div>
         <div class="formula-center" id="sys-tex"></div>
         <div class="statbar" id="sys-metrics"></div>
+        <div class="hint" id="sys-ess-hint" style="margin-top:4px"></div>
         <details class="plot-fold" id="sys-routh-fold">
           <summary>劳斯稳定性判据（特征多项式）</summary>
           <div class="ctrl row" style="margin-top:6px">
@@ -545,12 +546,17 @@ App.register('sys', (host) => {
     p.ctx.stroke();
     p.label('(−1, 0)', cx, cy + 20, { color: cv('--cv-danger'), size: 11, align: 'center' });
     p.crosshair((x) => 'Re=' + U.fmt(x, 4), (y) => 'Im=' + U.fmt(y, 4));
-    // 判稳提示（开环无右半平面极点时适用）
-    const openPoles = DSP.polyRoots(den);
-    const openStable = openPoles.every((q) => q.re < 1e-9);
-    $('#sys-nyq-note').innerHTML = openStable
-      ? '开环稳定：G(jω) 轨迹<b>不包围</b> (−1,0) 点 → 闭环稳定；包围 → 闭环不稳定。'
-      : '<span style="color:var(--warn)">开环含右半平面极点，需按逆时针包围圈数判断（完整奈奎斯特判据）。</span>';
+    // 判稳提示：完整奈奎斯特判据 Z = N + P（适用于开环不稳定 / 含积分器的情形）
+    const nf = DSP.nyquistFull(num, den);
+    const kk = (v) => (v > 0 && !isFinite(v)) || v === Infinity ? '∞' : U.fmt(v, 2);
+    const nfColor = nf.onCritical ? 'var(--warn)' : nf.stable ? 'var(--accent-2)' : 'var(--danger)';
+    const nfText = nf.onCritical
+      ? 'G(jω) 曲线经过 (−1,0) 临界点 → 闭环临界稳定（等幅振荡）'
+      : nf.stable ? 'Z = N + P = ' + nf.N + ' + ' + nf.P + ' = 0 → 闭环稳定'
+        : 'Z = N + P = ' + nf.N + ' + ' + nf.P + ' = ' + nf.Z + ' → 闭环不稳定（' + nf.Z + ' 个右半平面闭环极点）';
+    $('#sys-nyq-note').innerHTML =
+      '<span style="color:' + nfColor + ';font-weight:600">完整奈奎斯特判据：P=' + nf.P + '（开环右半平面极点）· N=' + nf.N + '（顺时针包围 −1 圈数）· ' + nfText + '</span>'
+      + '<span class="hint" style="display:block;margin-top:4px">开环稳定（P=0）时可用简化判据：曲线不包围 (−1,0) → 闭环稳定。含积分器（型别 ≥1）或开环不稳定时必须用上式。</span>';
   }
 
   function drawRoot() {
@@ -767,7 +773,19 @@ App.register('sys', (host) => {
       return isFinite(magAt) ? -magAt : null;
     })();
     stats.push({ k: '增益裕度 GM', v: gm === Infinity ? '∞ dB' : gm == null ? '—' : U.fmt(gm, 1) + ' dB' });
+    // 稳态误差与系统型别（单位负反馈）
+    const sse = DSP.steadyState(num, den);
+    const fmtInf = (v) => !isFinite(v) ? '∞' : U.fmt(v, 3);
+    stats.push({ k: '系统型别 ν', v: String(sse.type), color: sse.type > 0 ? 'var(--accent-2)' : undefined });
+    stats.push({ k: '误差系数 Kp/Kv/Ka', v: fmtInf(sse.Kp) + ' / ' + fmtInf(sse.Kv) + ' / ' + fmtInf(sse.Ka) });
     $('#sys-metrics').innerHTML = stats.map((s) => `<div class="stat"><span class="k">${s.k}</span><span class="v"${s.color ? ' style="color:' + s.color + '"' : ''}>${s.v}</span></div>`).join('');
+    // 稳态误差说明（单位反馈；型别不足 → ∞，型别富余 → 0）
+    const essT = (v) => !isFinite(v) ? '∞' : (Math.abs(v) < 1e-12 ? '0' : U.fmt(v, 4));
+    $('#sys-ess-hint').textContent =
+      '单位反馈稳态误差（幅值 R 的输入）：阶跃 R/s → ' + essT(sse.ess.step)
+      + '；斜坡 R/s² → ' + essT(sse.ess.ramp)
+      + '；抛物线 R/s³ → ' + essT(sse.ess.para)
+      + '。型别 ν = 开环积分环节个数；型别不足时误差为 ∞，型别富余时为 0。';
     // 家族成员指标表（扫掠时出现）
     const fam = cache.family || [];
     if (fam.length > 1) {

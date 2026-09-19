@@ -54,7 +54,9 @@ return {
 };
 ```
 
-已接入：`sys`（num/den/chart/params + PNG/CSV）、`zt`（num/den/editMode + PNG/CSV）。未接入模块不受影响（工作台/控制器对其降级为不可捕获）。
+已接入：`sys`（num/den/chart/params + PNG/CSV）、`zt`（num/den/editMode + PNG/CSV）、
+`la`（num/den + PNG/CSV）、`pid`（plant/kp/ki/kd + PNG/CSV）、`explore`（tab/expr + PNG）。
+未接入模块不受影响（工作台/控制器对其降级为不可捕获）。
 
 ### hash 路由约定
 

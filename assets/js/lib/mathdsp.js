@@ -245,7 +245,92 @@ const DSP = (() => {
     return { w, mag, ph };
   }
 
-  return { horner, polyRoots, polyFromRoots, cdiv, fft, ifft, spectrum, dftPhasors, integrate, conv, ltiResponse, evalH, bode };
+  /* ---------- 稳态误差与系统型别（单位负反馈，开环 L(s)=num/den，互质前提） ---------- */
+  // 型别 ν = 分母在原点的极点数；Kp/Kv/Ka 为静态位置/速度/加速度误差系数，
+  // ess 为单位阶跃/斜坡/抛物线输入下的稳态误差（型别不足 → Infinity，型别富余 → 0）。
+  function steadyState(num, den) {
+    let nu = 0;
+    for (let i = den.length - 1; i >= 0; i--) { if (Math.abs(den[i]) < 1e-9) nu++; else break; }
+    const numEnd = num[num.length - 1] || 0;
+    const coefAt = (k) => den[den.length - 1 - k];   // s^k 的系数（自高到低数组）
+    const Kp = nu >= 1 ? Infinity : numEnd / (den[den.length - 1] || 1);
+    const Kv = nu >= 2 ? Infinity : nu === 1 ? numEnd / (coefAt(1) || 1e-12) : 0;
+    const Ka = nu >= 3 ? Infinity : nu === 2 ? numEnd / (coefAt(2) || 1e-12) : 0;
+    return {
+      type: nu, Kp, Kv, Ka,
+      ess: {
+        step: nu >= 1 ? 0 : 1 / (1 + Kp),
+        ramp: nu >= 2 ? 0 : (nu === 1 ? 1 / Kv : Infinity),   // 型别不足 → ∞
+        para: nu >= 3 ? 0 : (nu === 2 ? 1 / Ka : Infinity)
+      }
+    };
+  }
+
+  /* ---------- 完整奈奎斯特判据 Z = N + P ----------
+   * s 域围线：jω 轴（ω: −∞→∞）在虚轴极点处向右侧作小半圆 indent（半径 ε），
+   * 右侧大半圆闭合（严格真分式时映射到原点附近，不贡献包围）。
+   * N = G(jω) 曲线对 (−1,0) 的顺时针包围圈数（沿映射曲线的总辐角增量 / −2π）。
+   * 返回 { P, N, Z, stable, onCritical }；闭环右半平面极点数 Z>0 ⇔ 闭环不稳定。 */
+  function nyquistFull(num, den) {
+    const poles = polyRoots(den).filter((q) => isFinite(q.re) && isFinite(q.im));
+    const P = poles.filter((q) => q.re > 1e-9).length;
+    // 虚轴极点（含原点）：按虚部排序并去重（重根只绕一次即可，重根映射的无限大弧自然是 ν×半圈）
+    const jwPoles = poles.filter((q) => Math.abs(q.re) <= 1e-9).map((q) => q.im)
+      .sort((a, b) => a - b)
+      .filter((im, i, arr) => i === 0 || im - arr[i - 1] > 1e-6);
+    const scale = Math.max(1, ...poles.map((q) => Math.abs(q.re) + Math.abs(q.im)));
+    const eps = 1e-5 * scale;
+    const wMax = 200 * scale;
+
+    // s 平面围线采样（按行进顺序：ω 从 −ωmax 升到 +ωmax，途中绕开虚轴极点）
+    const sPts = [];
+    let w = -wMax;
+    for (const pim of [...jwPoles, Infinity]) {
+      const wStop = pim === Infinity ? wMax : pim - eps;
+      if (wStop > w + 1e-12) {
+        // 直线段 s=jω：从当前 w 到 wStop（首段含起点，后续段跳过重复点）
+        const SEG = 500;
+        for (let i = (sPts.length ? 1 : 0); i <= SEG; i++) sPts.push({ re: 0, im: w + ((wStop - w) * i) / SEG });
+      }
+      if (pim !== Infinity) {
+        // 右侧 indent：s = ε·e^{jθ}（绕过 pim），θ: −π/2 → +π/2（从下方经右侧到上方）
+        for (let i = 1; i <= 48; i++) {
+          const th = -Math.PI / 2 + (Math.PI * i) / 48;
+          sPts.push({ re: eps * Math.cos(th), im: pim + eps * Math.sin(th) });
+        }
+        w = pim + eps;
+      } else {
+        w = wStop;
+      }
+    }
+    // 大半圆闭合：s = R·e^{jθ}，θ: +π/2 → −π/2（顺时针）
+    const R = 1e3 * scale;
+    for (let i = 1; i <= 80; i++) {
+      const th = Math.PI / 2 - (Math.PI * i) / 80;
+      sPts.push({ re: R * Math.cos(th), im: R * Math.sin(th) });
+    }
+    // 映射 G(s)，统计对 (−1,0) 的辐角增量
+    let total = 0, prev = null, minDist = Infinity;
+    for (const s of sPts) {
+      const g = cdiv(horner(num, s), horner(den, s));
+      const dx = g.re + 1, dy = g.im;
+      const dist = Math.hypot(dx, dy);
+      if (dist < minDist) minDist = dist;
+      const a = Math.atan2(dy, dx);
+      if (prev != null) {
+        let d = a - prev;
+        if (d > Math.PI) d -= 2 * Math.PI;
+        else if (d < -Math.PI) d += 2 * Math.PI;
+        total += d;
+      }
+      prev = a;
+    }
+    const N = Math.round(-total / (2 * Math.PI));   // 顺时针为正（教材约定）
+    const Z = N + P;
+    return { P, N, Z, stable: Z === 0 && minDist > 1e-6 * scale, onCritical: minDist < 1e-6 * scale };
+  }
+
+  return { horner, polyRoots, polyFromRoots, cdiv, fft, ifft, spectrum, dftPhasors, integrate, conv, ltiResponse, evalH, bode, steadyState, nyquistFull };
 })();
 
 window.DSP = DSP;

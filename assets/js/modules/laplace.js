@@ -45,6 +45,7 @@ App.register('la', (host) => {
         <div class="formula-center" id="la-tex"></div>
         <div class="hint" id="la-note"></div>
         <div id="la-status" class="statbar"></div>
+        <div id="la-rtb"></div>
       </div>
       <div class="pane">
         <h3>s 平面（稳定性区域）</h3>
@@ -525,7 +526,29 @@ App.register('la', (host) => {
   }
   syncInputs();
 
-  return { title: '拉普拉斯变换', api: { dispose, onTheme: () => { drawSP(); redraw(); } } };
+  /* ---------- 实验接入：状态捕获 / 回放 / 统一结果工具栏 ---------- */
+  function getState() {
+    const c = tfIn.get();
+    return { num: c.numStr || '1', den: c.denStr || '1' };
+  }
+  function applyState(s) {
+    if (!s || typeof s !== 'object') return;
+    tfIn.set(String(s.num || '1'), String(s.den || '1'));
+    lastSrc = 'tf';
+    applyInputs();   // 与模型库回载同一路径：MI 校验 + applyTF + 全量渲染
+  }
+  RTB.attach($('#la-rtb'), {
+    module: 'la',
+    getState, applyState,
+    canvases: () => ['#la-sp', '#la-imp', '#la-step', '#la-mini'].map((q) => $(q)).filter(Boolean),
+    csv: () => {
+      if (!num || !den) return null;
+      const r = DSP.ltiResponse(num, den, (t) => (t >= 0 ? 1 : 0), 0, 12, 400);
+      return { name: 'step', header: ['t(s)', 'y(t)'], rows: r.t.map((t, i) => [t.toPrecision(6), r.y[i].toPrecision(6)]) };
+    }
+  });
+
+  return { title: '拉普拉斯变换', api: { dispose, onTheme: () => { drawSP(); redraw(); }, getState, applyState } };
   function dispose() {
     if (spPlane) spPlane.dispose();
     tfIn.destroy();
