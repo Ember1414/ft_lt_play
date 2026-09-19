@@ -187,10 +187,21 @@ App.register('ft', (host) => {
       // 能量 / 峰值统计
       let peak = 0, peakF = 0;
       for (let i = 0; i < sp.f.length; i++) if (sp.mag[i] > peak) { peak = sp.mag[i]; peakF = sp.f[i]; }
+      // Parseval 能量守恒：∫|x(t)|²dt = ∫|X(f)|²df（DFT 域严格成立）
+      const pdt = d.tArr.length > 1 ? d.tArr[1] - d.tArr[0] : 1;
+      let te = 0; for (const v of xArr) te += v * v; te *= pdt;
+      const cRe = xArr.slice(), cIm = new Array(xArr.length).fill(0);
+      DSP.fft(cRe, cIm);
+      let fe = 0; for (let k = 0; k < cRe.length; k++) fe += cRe[k] * cRe[k] + cIm[k] * cIm[k];
+      fe *= pdt / xArr.length;
+      const ratio = te / fe;
       host.querySelector('#ft-stats').innerHTML = `
         <div class="stat"><span class="k">谱峰幅度</span><span class="v">${U.fmt(peak, 3)}</span></div>
         <div class="stat"><span class="k">谱峰位置</span><span class="v">${U.fmt(peakF, 3)} Hz</span></div>
-        <div class="stat"><span class="k">频率分辨率</span><span class="v">${U.fmt(sp.f[1] - sp.f[0], 4)} Hz</span></div>`;
+        <div class="stat"><span class="k">频率分辨率</span><span class="v">${U.fmt(sp.f[1] - sp.f[0], 4)} Hz</span></div>
+        <div class="stat"><span class="k">时域能量 ∫|x|²dt</span><span class="v">${U.fmt(te, 4)}</span></div>
+        <div class="stat"><span class="k">频域能量 ∫|X|²df</span><span class="v">${U.fmt(fe, 4)}</span></div>
+        <div class="stat"><span class="k">Parseval 比值</span><span class="v" style="color:${isFinite(ratio) && Math.abs(ratio - 1) < 1e-6 ? cv('--cv-line2') : cv('--cv-danger')}">${U.fmt(ratio, 6)}</span></div>`;
     }
     mapCtx.draw = draw;
     const interpAt = (arrX, arrY, x) => {
