@@ -548,7 +548,105 @@ const DSP = (() => {
     return { ok: true, gains: { kp: p[0], ki: p[1], kd: p[2] }, start: { kp: start.kp, ki: start.ki, kd: start.kd }, value: bestV, startValue, sims };
   }
 
-  return { horner, polyRoots, polyFromRoots, cdiv, fft, ifft, spectrum, dftPhasors, integrate, conv, ltiResponse, evalH, bode, steadyState, nyquistFull, jury, errMetrics, pidLoopSim, znUltimate, fopdtFit, pidOptimize };
+  /* ---------- 根轨迹计算（纯函数）：1 + K·L(s) = 0，K: 0→∞ 对数扫描 ----------
+   * 分支按「实根/共轭对」分组追踪；输出分支/极零点/渐近线/分离点/临界增益。
+   * numS/denS 为开环传函自高到低系数（分母 1–8 阶）。 */
+  const symGroup = (roots) => {
+    const items = roots.map((r) => ({ re: r.re, im: r.im, used: false }));
+    const reals = [], pairs = [];
+    for (const it of items) {
+      if (it.used) continue;
+      if (Math.abs(it.im) < 1e-7) { it.used = true; reals.push({ re: it.re }); continue; }
+      const cj = items.find((o) => !o.used && o !== it && Math.abs(o.re - it.re) < 1e-6 && Math.abs(o.im + it.im) < 1e-6);
+      if (cj) { it.used = cj.used = true; pairs.push({ re: it.re, im: Math.abs(it.im) }); }
+      else { it.used = true; reals.push({ re: it.re }); }
+    }
+    return { reals, pairs };
+  };
+  function rootLocus(numS, denS) {
+    const n = denS.length - 1, m = numS.length - 1;
+    if (n < 1 || n > 8) return null;
+    const poles = polyRoots(denS);
+    const zeros = m >= 1 ? polyRoots(numS) : [];
+    const numP = numS.slice();
+    while (numP.length < denS.length) numP.unshift(0);
+    const Ks = [0];
+    for (let i = 0; i < 120; i++) Ks.push(Math.pow(10, U.lerp(-4, -0.5, i / 119)));
+    for (let i = 1; i <= 260; i++) Ks.push(Math.pow(10, U.lerp(-0.5, 5, i / 259)));
+    const g0 = symGroup(poles);
+    const branches = [];
+    for (const r of g0.reals) branches.push({ type: 'real', cur: { re: r.re, im: 0 }, pts: [] });
+    for (const p of g0.pairs) branches.push({ type: 'pair', cur: { re: p.re, im: p.im }, pts: [] });
+    branches.forEach((b) => b.pts.push({ re: b.cur.re, im: b.cur.im, K: 0 }));
+    for (const K of Ks) {
+      if (K === 0) continue;
+      const coef = denS.map((c, i) => c + K * (numP[i] || 0));
+      if (!isFinite(coef[0]) || Math.abs(coef[0]) < 1e-18) continue;
+      const roots = polyRoots(coef);
+      if (roots.length !== n || roots.some((r) => !isFinite(r.re) || !isFinite(r.im))) continue;
+      const g = symGroup(roots);
+      const cands = [];
+      g.reals.forEach((r) => cands.push({ type: 'real', v: { re: r.re, im: 0 }, used: false }));
+      g.pairs.forEach((p) => cands.push({ type: 'pair', v: { re: p.re, im: p.im }, used: false }));
+      for (const b of branches) {
+        let bi = -1, bd = Infinity;
+        cands.forEach((c, i) => {
+          if (c.used) return;
+          const d = Math.hypot(c.v.re - b.cur.re, (c.v.im - b.cur.im) * (c.type === b.type ? 1 : 0.35));
+          if (d < bd) { bd = d; bi = i; }
+        });
+        if (bi >= 0) { cands[bi].used = true; b.cur = { ...cands[bi].v }; }
+        b.pts.push({ re: b.cur.re, im: b.cur.im, K });
+      }
+    }
+    const excess = n - m;
+    let centroid = { re: 0, im: 0 }, angles = [];
+    if (excess > 0) {
+      let sr = 0, si = 0;
+      for (const q of poles) { sr += q.re; si += q.im; }
+      for (const q of zeros) { sr -= q.re; si -= q.im; }
+      centroid = { re: sr / excess, im: si / excess };
+      for (let k = 0; k < excess; k++) angles.push(((2 * k + 1) * Math.PI) / excess);
+    }
+    const crossings = [];
+    for (const b of branches) {
+      for (let i = 1; i < b.pts.length; i++) {
+        const p0 = b.pts[i - 1], p1 = b.pts[i];
+        if ((p0.re > 0) !== (p1.re > 0) && Math.abs(p0.re - p1.re) > 1e-12) {
+          const t = (0 - p0.re) / (p1.re - p0.re);
+          const im = Math.abs(p0.im + t * (p1.im - p0.im));
+          crossings.push({ im, K: p0.K + t * (p1.K - p0.K) });
+        }
+      }
+    }
+    crossings.sort((a, b) => a.K - b.K);
+    const brk = [];
+    {
+      let rEst = 1;
+      for (const q of [...poles, ...zeros]) rEst = Math.max(rEst, Math.abs(q.re) + 1, Math.abs(q.im) + 1);
+      const lo = -rEst * 1.2, hi = rEst * 1.2, grid = 3000;
+      const samples = [];
+      for (let i = 0; i <= grid; i++) {
+        const s = lo + ((hi - lo) * i) / grid;
+        const nv = horner(numS, { re: s, im: 0 }).re;
+        const dvv = horner(denS, { re: s, im: 0 }).re;
+        if (Math.abs(nv) < 1e-9) continue;
+        const K = -dvv / nv;
+        const cnt = poles.filter((q) => q.re > s).length + zeros.filter((q) => q.re > s).length;
+        if (cnt % 2 !== 1 || K < 1e-9) continue;
+        samples.push({ s, K, i });
+      }
+      for (let i = 1; i < samples.length - 1; i++) {
+        if (samples[i + 1].i - samples[i].i > 2 || samples[i].i - samples[i - 1].i > 2) continue;
+        const d1 = samples[i].K - samples[i - 1].K, d2 = samples[i + 1].K - samples[i].K;
+        if (d1 * d2 < 0) brk.push({ s: samples[i].s, K: samples[i].K });
+      }
+      for (let i = brk.length - 2; i >= 0; i--) if (Math.abs(brk[i].s - brk[i + 1].s) < (hi - lo) / grid * 4) brk.splice(i + 1, 1);
+    }
+    return { branches, poles, zeros, centroid, angles, excess, crossings, brk };
+  }
+
+  return { horner, polyRoots, polyFromRoots, cdiv, fft, ifft, spectrum, dftPhasors, integrate, conv, ltiResponse, evalH, bode, steadyState, nyquistFull, jury, errMetrics, pidLoopSim, znUltimate, fopdtFit, pidOptimize, rootLocus };
 })();
 
 window.DSP = DSP;
