@@ -507,7 +507,48 @@ const DSP = (() => {
     return { ok: true, K, T, L: Math.max(0, L) };
   }
 
-  return { horner, polyRoots, polyFromRoots, cdiv, fft, ifft, spectrum, dftPhasors, integrate, conv, ltiResponse, evalH, bode, steadyState, nyquistFull, jury, errMetrics, pidLoopSim, znUltimate, fopdtFit };
+  /* ---------- PID 参数寻优：坐标下降最小化 ISE/IAE/ITAE ----------
+   * 以 pidLoopSim 为目标函数，确定性坐标下降（步长减半细化），增益非负。
+   * 返回 { ok, gains:{kp,ki,kd}, start, value, startValue, sims } */
+  function pidOptimize(num, den, criterion, start, opts) {
+    opts = opts || {};
+    if (!['ise', 'iae', 'itae'].includes(criterion)) return { ok: false, note: 'criterion 须为 ise/iae/itae' };
+    const base = {
+      tmax: +opts.tmax || 12, steps: Math.min(+opts.steps || 1500, 4000),
+      uMax: opts.uMax != null ? opts.uMax : null, aw: opts.aw, Tt: opts.Tt, Ts: opts.Ts
+    };
+    const Tf = Math.max(+start.Tf || 0, 0);
+    const dOnM = !!start.dOnM;
+    let sims = 0;
+    const crit = (g) => {
+      sims++;
+      const r = pidLoopSim(num, den, { kp: g.kp, ki: g.ki, kd: g.kd, Tf, dOnM }, base);
+      if (!r.ok || !r.y.every((v) => isFinite(v))) return Infinity;
+      return errMetrics(r.t, r.e)[criterion];
+    };
+    const p = [Math.max(0, +start.kp || 0), Math.max(0, +start.ki || 0), Math.max(0, +start.kd || 0)];
+    const startValue = crit({ kp: p[0], ki: p[1], kd: p[2] });
+    let bestV = startValue;
+    let steps = [0, 1, 2].map((i) => 0.3 * (Math.abs(p[i]) || 1));
+    const maxSims = +opts.maxSims || 400;
+    for (let iter = 0; iter < 60 && sims < maxSims; iter++) {
+      let improved = false;
+      for (let d = 0; d < 3 && sims < maxSims; d++) {
+        for (const sgn of [1, -1]) {
+          const q = p.slice();
+          q[d] = Math.max(0, q[d] + sgn * steps[d]);
+          if (q[d] === p[d]) continue;
+          const v = crit({ kp: q[0], ki: q[1], kd: q[2] });
+          if (v < bestV) { bestV = v; p[d] = q[d]; improved = true; break; }
+        }
+      }
+      if (!improved) steps = steps.map((x) => x / 2);
+      if (steps.every((x) => x < 1e-3)) break;
+    }
+    return { ok: true, gains: { kp: p[0], ki: p[1], kd: p[2] }, start: { kp: start.kp, ki: start.ki, kd: start.kd }, value: bestV, startValue, sims };
+  }
+
+  return { horner, polyRoots, polyFromRoots, cdiv, fft, ifft, spectrum, dftPhasors, integrate, conv, ltiResponse, evalH, bode, steadyState, nyquistFull, jury, errMetrics, pidLoopSim, znUltimate, fopdtFit, pidOptimize };
 })();
 
 window.DSP = DSP;

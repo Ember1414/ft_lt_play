@@ -2,6 +2,15 @@
 
 格式参考 Keep a Changelog；版本号 = `package.json` version（页面资源 `?v=` 与侧栏版本同步更新）。
 
+## [7.7.0] — 2026-09-19 · PID 指标寻优
+
+### 新增
+- `DSP.pidOptimize`：坐标下降最小化 ISE/IAE/ITAE（确定性、增益非负、≤300 次
+  仿真上限、继承当前限幅/抗饱和/采样约束）；tests/pidopt.test.mjs 8 项
+- PID 整定向导新增「最优搜索」：指标选择（ISE/IAE/ITAE）+ 寻优前后对照表 +
+  一键应用；浏览器实测 ITAE 170.6→0.47（降幅 99.7%，251 次仿真）
+- 版本 7.7.0 / ?v=7.7
+
 ## [7.6.0] — 2026-09-19 · PID 整定向导（ZN / Cohen–Coon / CHR）
 
 ### 新增

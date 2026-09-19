@@ -45,6 +45,11 @@ App.register('pid', (host) => {
             <button class="btn" id="pid-tune-rc" title="开环阶跃响应拟合 FOPDT 后套公式">反应曲线法（开环两点法）</button>
           </div>
           <div id="pid-tune-out"></div>
+          <div class="row" style="margin:8px 0 4px;align-items:center">
+            <span class="hint" style="margin:0">最优搜索（坐标下降，≤300 次仿真，含当前限幅/滤波约束）：</span>
+            <span id="pid-opt-metric" class="row" style="margin:0;gap:4px"></span>
+            <button class="btn" id="pid-opt-go">按指标寻优</button>
+          </div>
           <div class="hint">应用整定参数会同时设置滑杆（含 Tf=Td/10 微分滤波）并重算。ZN 闭环要求开环相位能滞后到 −180°（如含积分/高阶对象）；反应曲线法要求开环阶跃响应收敛（不含积分对象）。</div>
         </details>
         <div id="pid-rtb"></div>
@@ -343,7 +348,7 @@ App.register('pid', (host) => {
     }
   });
 
-  /* ---------- 整定向导（ZN 临界比例度 / 反应曲线 FOPDT：ZN·CC·CHR） ---------- */
+  /* ---------- 整定向导（ZN 临界比例度 / 反应曲线 FOPDT：ZN·CC·CHR + 指标寻优） ---------- */
   {
     const out = () => $('#pid-tune-out');
     const applyGains = (name, kp, ki, kd) => {
@@ -400,6 +405,35 @@ App.register('pid', (host) => {
         ['CHR 20%', (0.95 * T) / (K * L), 1.357 * T, 0.473 * L]
       ];
       renderRows(`反应曲线法（两点法拟合 FOPDT）：K = ${U.fmt(K, 3)}，T = ${U.fmt(T, 3)}s，L = ${U.fmt(L, 3)}s（纯迟延）。表中 Ki=Kp/Ti、Kd=Kp·Td；应用时自动设 Tf=Td/10。`, rows, '<p class="hint" style="margin-top:4px">ZN 开环：Kp=1.2T/(KL), Ti=2L, Td=0.5L · Cohen–Coon / CHR 按标准公式表。</p>');
+    });
+
+    let optMetric = 'itae';
+    {
+      const mRow = $('#pid-opt-metric');
+      [['ise', 'ISE'], ['iae', 'IAE'], ['itae', 'ITAE']].forEach(([k, label]) => {
+        const c = U.el('button', { class: 'chip' + (k === optMetric ? ' active' : ''), 'data-m': k }, label);
+        c.addEventListener('click', () => {
+          optMetric = k;
+          mRow.querySelectorAll('.chip').forEach((x) => x.classList.toggle('active', x.dataset.m === k));
+        });
+        mRow.append(c);
+      });
+    }
+    $('#pid-opt-go').addEventListener('click', () => {
+      const g = plants[plantKey];
+      const poles = DSP.polyRoots(g.den);
+      let nearest = Infinity;
+      for (const q of poles) { const ar = Math.abs(q.re); if (ar > 1e-9) nearest = Math.min(nearest, ar); }
+      const r = DSP.pidOptimize(g.num, g.den, optMetric, { kp: Kp, ki: Ki, kd: Kd, Tf, dOnM }, {
+        tmax: U.clamp(8 / (nearest || 1), 2, 40), steps: 1500, maxSims: 300,
+        uMax, aw, Tt, Ts
+      });
+      if (!r.ok) { $('#pid-tune-out').innerHTML = `<p class="hint" style="color:var(--warn)">⚠ ${r.note}</p>`; return; }
+      const rows = [
+        ['寻优前（当前）', r.start.kp, r.start.ki, r.start.kd],
+        ['寻优后', r.gains.kp, r.gains.ki, r.gains.kd]
+      ];
+      renderRows(`${optMetric.toUpperCase()} 寻优：${U.fmt(r.startValue, 3)} → ${U.fmt(r.value, 3)}（降幅 ${(100 * (1 - r.value / r.startValue)).toFixed(1)}%，共 ${r.sims} 次仿真；约束随当前限幅/抗饱和/采样设置）`, rows, '<p class="hint" style="margin-top:4px">坐标下降为确定性局部寻优——结果依赖起点，可先套 ZN/CHR 参数再寻优。</p>');
     });
   }
 
