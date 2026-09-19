@@ -46,6 +46,11 @@ App.register('la', (host) => {
         <div class="hint" id="la-note"></div>
         <div id="la-status" class="statbar"></div>
         <div id="la-rtb"></div>
+        <details class="plot-fold" id="la-rocs-fold">
+          <summary>ROC 分析（多重收敛域 · 双边 / 因果 / 反因果）</summary>
+          <div id="la-rocs-out"><p class="hint" style="margin:4px 0">按上方当前 F(s) 的极点实部划分全部可能收敛域。</p></div>
+          <div class="hint">同一 F(s) 可对应多个时域信号（ROC 不同）。仅当 ROC 含虚轴（Re=0）时对应双边稳定信号；最右 ROC 对应因果信号；jω 轴上有极点时不存在含虚轴的 ROC。</div>
+        </details>
         <details class="plot-fold" id="la-props-fold">
           <summary>性质数值验证器（定义积分 vs 符号公式）</summary>
           <div id="la-props-mi" style="margin-top:6px"></div>
@@ -599,6 +604,25 @@ App.register('la', (host) => {
       try { if (window.katex) window.katex.render(r.rhsTex, out.querySelector('.formula-center'), { throwOnError: false }); } catch (e) { }
     });
   }
+
+  /* ---------- 多 ROC 分析面板 ---------- */
+  function renderRocs() {
+    const outEl = $('#la-rocs-out');
+    if (!num || !den) { outEl.innerHTML = '<p class="hint">先在上方输入 F(s)</p>'; return; }
+    const r = TR.rocs(num, den);
+    if (!r.ok) { outEl.innerHTML = '<p class="hint" style="color:var(--danger)">' + r.note + '</p>'; return; }
+    let html = '<p class="hint" style="margin:4px 0">极点：' + r.poles.map((q) => U.fmt(q.re, 3) + (Math.abs(q.im) > 1e-9 ? (q.im > 0 ? '+' : '') + U.fmt(Math.abs(q.im), 3) + 'j' : '')).join('，') + (r.axisPole ? '（含 jω 轴极点）' : '') + '</p>';
+    html += '<table class="tbl" style="max-width:460px"><tr><th>收敛域 ROC</th><th>时域属性</th><th>稳定性</th></tr>';
+    r.regions.forEach((rg) => {
+      const attr = rg.causal ? '因果（右边）' : rg.anti ? '反因果（左边）' : '双边';
+      html += `<tr><td style="font-family:var(--mono)">${rg.rocTex}</td><td>${attr}</td><td style="color:${rg.stable ? 'var(--accent-2)' : 'var(--danger)'}">${rg.stable ? '稳定' : '不稳定'}</td></tr>`;
+    });
+    html += '</table>';
+    if (r.stableRegion) html += '<p class="hint" style="color:var(--accent-2);margin-top:4px">✓ ROC ' + r.stableRegion.rocTex + ' 含虚轴 → 存在稳定的双边信号对应此 F(s)。</p>';
+    else html += '<p class="hint" style="color:var(--warn);margin-top:4px">⚠ 不存在含虚轴的 ROC → 此 F(s) 不对应任何双边稳定信号。</p>';
+    outEl.innerHTML = html;
+  }
+  $('#la-rocs-fold').addEventListener('toggle', () => { if ($('#la-rocs-fold').open) renderRocs(); });
 
   return { title: '拉普拉斯变换', api: { dispose, onTheme: () => { drawSP(); redraw(); }, getState, applyState } };
   function dispose() {
