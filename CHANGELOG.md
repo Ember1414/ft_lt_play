@@ -2,6 +2,16 @@
 
 格式参考 Keep a Changelog；版本号 = `package.json` version（页面资源 `?v=` 与侧栏版本同步更新）。
 
+## [8.6.0] — 2026-09-19 · Worker 化重计算
+
+### 新增
+- `lib/workerpool.js`（window.WP）：Blob Worker + importScripts 数学内核，
+  任务按点路径分发（如 DSP.pidOptimize）；超时终止（默认 30s）、错误回传、
+  环境不支持时自动回退主线程（register 登记回退实现）
+- PID 指标寻优迁移至 Worker 池：按钮计算中状态 + 60s 超时；主线程不再阻塞
+- `tests/workerpool.test.mjs` 7 项（回退路径/错误回传/协议检查）
+- 版本 8.6.0 / ?v=8.6；sw.js 同步 workerpool 资产
+
 ## [8.5.0] — 2026-09-19 · PWA 离线支持
 
 ### 新增

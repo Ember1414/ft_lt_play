@@ -424,16 +424,23 @@ App.register('pid', (host) => {
       const poles = DSP.polyRoots(g.den);
       let nearest = Infinity;
       for (const q of poles) { const ar = Math.abs(q.re); if (ar > 1e-9) nearest = Math.min(nearest, ar); }
-      const r = DSP.pidOptimize(g.num, g.den, optMetric, { kp: Kp, ki: Ki, kd: Kd, Tf, dOnM }, {
+      const btn = $('#pid-opt-go');
+      btn.disabled = true;
+      const restore = () => { btn.disabled = false; btn.textContent = '按指标寻优'; };
+      btn.textContent = '计算中…';
+      // Worker 池执行（不支持时自动回退主线程）；超时 60s 终止
+      WP.run('DSP.pidOptimize', [g.num, g.den, optMetric, { kp: Kp, ki: Ki, kd: Kd, Tf, dOnM }, {
         tmax: U.clamp(8 / (nearest || 1), 2, 40), steps: 1500, maxSims: 300,
         uMax, aw, Tt, Ts
-      });
-      if (!r.ok) { $('#pid-tune-out').innerHTML = `<p class="hint" style="color:var(--warn)">⚠ ${r.note}</p>`; return; }
+      }], { timeout: 60000 }).then((r) => {
+        restore();
+        if (!r.ok) { $('#pid-tune-out').innerHTML = `<p class="hint" style="color:var(--danger)">✗ ${r.error || r.note || '计算失败'}</p>`; return; }
       const rows = [
         ['寻优前（当前）', r.start.kp, r.start.ki, r.start.kd],
         ['寻优后', r.gains.kp, r.gains.ki, r.gains.kd]
       ];
-      renderRows(`${optMetric.toUpperCase()} 寻优：${U.fmt(r.startValue, 3)} → ${U.fmt(r.value, 3)}（降幅 ${(100 * (1 - r.value / r.startValue)).toFixed(1)}%，共 ${r.sims} 次仿真；约束随当前限幅/抗饱和/采样设置）`, rows, '<p class="hint" style="margin-top:4px">坐标下降为确定性局部寻优——结果依赖起点，可先套 ZN/CHR 参数再寻优。</p>');
+        renderRows(`${optMetric.toUpperCase()} 寻优：${U.fmt(r.startValue, 3)} → ${U.fmt(r.value, 3)}（降幅 ${(100 * (1 - r.value / r.startValue)).toFixed(1)}%，共 ${r.sims} 次仿真；约束随当前限幅/抗饱和/采样设置）`, rows, '<p class="hint" style="margin-top:4px">坐标下降为确定性局部寻优——结果依赖起点，可先套 ZN/CHR 参数再寻优。</p>');
+      });
     });
   }
 
