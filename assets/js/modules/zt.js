@@ -28,6 +28,16 @@ App.register('zt', (host) => {
         <div class="hint">多项式用<b>正幂 z</b> 书写（如 <code>z^2-0.25</code>），支持因式 <code>(z-0.5)*(z+0.5)</code>。
           稳定性：全部极点位于<b>单位圆内</b> ⇔ 因果系统稳定；因果 ROC：|z| &gt; 最大极点模。
           与连续域联系：<b>z = e<sup>sT</sup></b>，左半 s 平面 ↔ 单位圆内。</div>
+        <details class="plot-fold" id="zt-sz-fold">
+          <summary>s↔z 映射对比（冲激不变 / ZOH / Tustin 双线性）</summary>
+          <div class="ctrl row" style="margin-top:6px">
+            <input type="text" id="zt-sz-in" placeholder="连续对象 G(s)，如 2/((s+1)*(s+2))" spellcheck="false" style="flex:1">
+            <label class="chip">采样 T <input type="number" id="zt-sz-t" value="0.3" step="any" style="width:64px;background:transparent;border:0;color:var(--accent);font-family:var(--mono)"></label>
+            <button class="btn primary" id="zt-sz-go">对比三种映射</button>
+          </div>
+          <div id="zt-sz-out"></div>
+          <div class="hint">冲激不变：脉冲响应采样相等，高频段有混叠；ZOH：阶跃响应相等，含半拍保持滞后；Tustin 双线性：DC 增益与稳定域边界（虚轴↔单位圆）严格一致，频率轴弯曲 ω_s=(2/T)tan(ωT/2)。三种映射都把 s 左半平面极点映到单位圆内。</div>
+        </details>
         <details class="plot-fold" id="zt-jury-fold">
           <summary>Jury 稳定判据（特征表，不依赖求根）</summary>
           <div class="ctrl row" style="margin-top:6px">
@@ -338,6 +348,37 @@ App.register('zt', (host) => {
   $('#zt-jury-in').addEventListener('keydown', (e) => { if (e.key === 'Enter') renderJury($('#zt-jury-in').value); });
   $('#zt-jury-fold').addEventListener('toggle', () => {
     if ($('#zt-jury-fold').open && !$('#zt-jury-in').value.trim()) { $('#zt-jury-in').value = plainZ(den); renderJury($('#zt-jury-in').value); }
+  });
+
+  /* ---------- s↔z 映射对比面板 ---------- */
+  function renderSZ() {
+    const out = $('#zt-sz-out');
+    const tf = FX_LIB.parseTF($('#zt-sz-in').value, 's');
+    const T = +$('#zt-sz-t').value;
+    if (!tf || !tf.den || !tf.den[0]) { out.innerHTML = '<p style="color:var(--danger)">无法解析 G(s)，示例：2/((s+1)*(s+2))</p>'; return; }
+    if (!isFinite(T) || !(T > 0)) { out.innerHTML = '<p style="color:var(--danger)">采样周期 T 必须为正数</p>'; return; }
+    const sPoles = DSP.polyRoots(tf.den).map(fmtC).join(', ');
+    const rows = [
+      ['冲激不变', BLKSOLVE.sToZ(tf.num, tf.den, T), '脉冲响应采样相等；高频混叠'],
+      ['ZOH 零阶保持', BLKSOLVE.zohDiscretize(tf.num, tf.den, T), '阶跃响应相等；含半拍保持滞后'],
+      ['Tustin 双线性', BLKSOLVE.tustin(tf.num, tf.den, T), 'DC 增益与虚轴↔单位圆严格一致；频率轴弯曲']
+    ];
+    let html = `<p class="hint" style="margin:4px 0">G(s) = <b>${texPolyZ(tf.num)} / ${texPolyZ(tf.den)}</b>，s 极点：${sPoles || '—'}；采样 T = ${U.fmt(T, 3)}s</p>`;
+    for (const [name, r, note] of rows) {
+      if (!r || r.ok === false) {
+        html += `<p class="hint" style="color:var(--danger)">✗ ${name}：${(r && r.note) || '变换失败'}</p>`;
+        continue;
+      }
+      const zp = DSP.polyRoots(r.d).map(fmtC).join(', ');
+      html += `<p style="margin:6px 0 2px"><b>${name}</b>　<span style="font-family:var(--mono)">H(z)=(${texPolyZ(r.n)})/(${texPolyZ(r.d)})</span></p>
+        <p class="hint" style="margin:0 0 4px">z 极点：${zp || '—'}　·　${note}</p>`;
+    }
+    out.innerHTML = html;
+  }
+  $('#zt-sz-go').addEventListener('click', renderSZ);
+  $('#zt-sz-in').addEventListener('keydown', (e) => { if (e.key === 'Enter') renderSZ(); });
+  $('#zt-sz-fold').addEventListener('toggle', () => {
+    if ($('#zt-sz-fold').open && !$('#zt-sz-in').value.trim()) { $('#zt-sz-in').value = '2/((s+1)*(s+2))'; renderSZ(); }
   });
 
   /* ---------- 实验接入：状态捕获 / 回放 / 统一结果工具栏 ---------- */

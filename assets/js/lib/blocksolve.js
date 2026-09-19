@@ -619,9 +619,34 @@ window.BLKSOLVE = (() => {
     return { ok: true, mode: an.mode, z: rt.frac, segs: an.segs, read: deriveZReadout(rt.frac) };
   }
 
+  /* ---------- 双线性变换（Tustin）：s = (2/T)(z−1)/(z+1) ----------
+   * p(S)·(z+1)^n = Σ p_k (2/T)^{n−k} (z−1)^{n−k} (z+1)^k，分子分母同乘消去分式。
+   * 返回 { ok, n, d }（按分母首项归一化）；频率轴弯曲 ω_s = (2/T)tan(ωT/2) 由调用方提示。 */
+  function tustin(num, den, T) {
+    if (!isFinite(T) || !(T > 0)) return { ok: false, note: '采样周期 T 必须为正数' };
+    if (!den.length || Math.abs(den[0]) < 1e-12) return { ok: false, note: '分母首项为 0' };
+    const n = Math.max(num.length, den.length) - 1;
+    const pow = (base, k) => { let r = [1]; for (let i = 0; i < k; i++) r = polyMul(r, base); return r; };
+    const scale = (p, c) => p.map((v) => v * c);
+    const map = (p) => {
+      const pp = p.slice();
+      while (pp.length < n + 1) pp.unshift(0);
+      let acc = [0];
+      for (let k = 0; k <= n; k++) {
+        if (Math.abs(pp[k]) < 1e-15) continue;
+        acc = polyAdd(acc, scale(polyMul(pow([1, -1], n - k), pow([1, 1], k)), Math.pow(2 / T, n - k) * pp[k]));
+      }
+      return acc;
+    };
+    const nz = map(num), dz = map(den);
+    if (!dz.length || Math.abs(dz[0]) < 1e-12) return { ok: false, note: '双线性变换分母退化（分子分母阶次异常）' };
+    const d0 = dz[0];
+    return { ok: true, n: nz.map((v) => v / d0), d: dz.map((v) => v / d0) };
+  }
+
   return {
     pTrim, polyMul, polyAdd, polyDivMod, polyGCD, freduce,
     parseBlockTF, solveTransfer, deriveReadout,
-    sToZ, zohDiscretize, deriveZReadout, analyzeSampled, solveSampled
+    sToZ, zohDiscretize, deriveZReadout, analyzeSampled, solveSampled, tustin
   };
 })();
