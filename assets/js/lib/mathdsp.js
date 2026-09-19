@@ -376,7 +376,90 @@ const DSP = (() => {
     return { ise, iae, itae };
   }
 
-  return { horner, polyRoots, polyFromRoots, cdiv, fft, ifft, spectrum, dftPhasors, integrate, conv, ltiResponse, evalH, bode, steadyState, nyquistFull, jury, errMetrics };
+  /* ---------- PID 闭环时域仿真（含执行器限幅 / 抗饱和 / 微分滤波 / 微分先行 / 采样） ----------
+   * 单位负反馈 r=1：控制器离散更新（Ts>0 为数字 PID，ZOH 保持），对象 RK4 相变量步进。
+   * ctrl: {kp, ki, kd, Tf(微分滤波时间常数,0=关), dOnM(微分先行)}；
+   * opts: {tmax, steps, uMax(执行器限幅,null=无限), aw('off'|'clamp'|'back'), Tt(反算时间常数), Ts(采样周期,0=连续)}
+   * 返回 { ok, t, y, u, e }；对象需严格真分式。 */
+  function pidLoopSim(num, den, ctrl, opts) {
+    opts = opts || {};
+    const kp = +ctrl.kp || 0, ki = +ctrl.ki || 0, kd = +ctrl.kd || 0;
+    const Tf = Math.max(+ctrl.Tf || 0, 0);
+    const dOnM = !!ctrl.dOnM;
+    const uMax = opts.uMax != null && isFinite(opts.uMax) ? Math.abs(opts.uMax) : null;
+    const aw = ['clamp', 'back'].includes(opts.aw) ? opts.aw : 'off';
+    const Tt = +opts.Tt > 0 ? +opts.Tt : 1;
+    const Ts = +opts.Ts > 0 ? +opts.Ts : 0;
+    const tmax = +opts.tmax || 10, steps = Math.min(+opts.steps || 3000, 20000);
+    if (!den || !den[0]) return { ok: false, note: '分母非法' };
+    const n = den.length - 1;
+    if (num.length - 1 >= den.length - 1) return { ok: false, note: '对象需为严格真分式（分子阶次 < 分母阶次）' };
+    const d0 = den[0];
+    const a = den.map((c) => c / d0);                       // [1, a1..an] 自高到低
+    const c = num.slice();
+    while (c.length < den.length) c.unshift(0);
+    for (let i = 0; i < c.length; i++) c[i] /= d0;          // c[0]=0；y=Σ c[i]x_i
+    const dt = tmax / steps;
+    const rf = typeof opts.r === 'function' ? opts.r : (() => { const v = opts.r != null ? +opts.r : 1; return () => v; })();
+    // a = [1, a1, ..., an]（s^n…s^0）；相变量 x1=y：ẋi=x_{i+1}，ẋn = u − Σ_{k=1..n} a[k]·x[n−k]
+    const dv = (x, u) => {
+      const o = new Array(n);
+      for (let i = 0; i < n - 1; i++) o[i] = x[i + 1];
+      let acc = u;
+      for (let k = 1; k <= n; k++) acc -= a[k] * x[n - k];
+      o[n - 1] = acc;
+      return o;
+    };
+    const meas = (x) => { let y = 0; for (let i = 1; i < c.length; i++) y += c[i] * x[i - 1]; return y; };
+    const ctrlEvery = Ts > 0 ? Math.max(1, Math.round(Ts / dt)) : 1;
+    let x = new Array(n).fill(0);
+    let integ = 0, dF = 0, ePrev = 0, yPrev = 0, uHold = 0, first = true, lastCtlI = -1;
+    const t = [], y = [], u = [], e = [];
+    for (let i = 0; i <= steps; i++) {
+      const tv = i * dt;
+      const yv = meas(x);
+      if (i % ctrlEvery === 0) {
+        const rv = rf(tv);
+        const ev = rv - yv;
+        // 微分项：先行用 −Δy，否则 Δe；差分按控制器实际周期 dT（数字 PID = Ts），
+        // 不完全微分一阶滤波（Tf=0 为理想差分微分）
+        const dT = first ? dt : (i - lastCtlI) * dt;
+        const dSrc = first ? 0 : (dOnM ? -(yv - yPrev) : (ev - ePrev));
+        let D = 0;
+        if (kd) D = Tf > 0 ? (Tf * dF + kd * dSrc) / (Tf + dT) : kd * dSrc / dT;
+        dF = D;
+        const uRaw = kp * ev + integ + D;
+        let uSat = uRaw;
+        if (uMax != null) uSat = Math.max(-uMax, Math.min(uMax, uRaw));
+        // 积分（含抗饱和）
+        if (ki) {
+          if (aw === 'clamp' && uMax != null && ((uRaw > uMax && ev > 0) || (uRaw < -uMax && ev < 0))) {
+            /* 条件积分：饱和且误差继续同向 → 本拍不积分 */
+          } else {
+            integ += dT * ki * ev;
+            if (aw === 'back' && uMax != null) integ += dT * (uSat - uRaw) / Tt;
+          }
+        }
+        uHold = uSat;
+        ePrev = ev; yPrev = yv; lastCtlI = i; first = false;
+      }
+      t.push(tv); y.push(yv); u.push(uHold); e.push(rf(tv) - yv);
+      if (i < steps) {
+        // RK4（步内 u 保持）
+        const k1 = dv(x, uHold);
+        const x2 = x.map((v, j) => v + k1[j] * dt / 2);
+        const k2 = dv(x2, uHold);
+        const x3 = x.map((v, j) => v + k2[j] * dt / 2);
+        const k3 = dv(x3, uHold);
+        const x4 = x.map((v, j) => v + k3[j] * dt);
+        const k4 = dv(x4, uHold);
+        for (let j = 0; j < n; j++) x[j] += (dt / 6) * (k1[j] + 2 * k2[j] + 2 * k3[j] + k4[j]);
+      }
+    }
+    return { ok: true, t, y, u, e };
+  }
+
+  return { horner, polyRoots, polyFromRoots, cdiv, fft, ifft, spectrum, dftPhasors, integrate, conv, ltiResponse, evalH, bode, steadyState, nyquistFull, jury, errMetrics, pidLoopSim };
 })();
 
 window.DSP = DSP;

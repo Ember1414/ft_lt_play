@@ -39,6 +39,21 @@ App.register('pid', (host) => {
           <input type="range" id="pid-kd" min="0" max="5" step="0.1" value="0"></div>
         <div class="row" id="pid-recipes" style="margin-bottom:8px"></div>
         <div id="pid-rtb"></div>
+        <details class="plot-fold" id="pid-adv-fold" style="margin:8px 0">
+          <summary>执行器与控制器细节（限幅 / 抗饱和 / 微分滤波 / 微分先行 / 数字 PID）</summary>
+          <div class="ctrl row" style="flex-wrap:wrap">
+            <label class="chip">执行器限幅 uMax <input type="number" id="pid-umax" step="any" placeholder="无限" style="width:70px;background:transparent;border:0;color:var(--accent);font-family:var(--mono)"></label>
+            <span class="hint" style="margin:0">抗饱和</span>
+            <span id="pid-aw-chips" class="row" style="margin:0;gap:4px"></span>
+            <label class="chip" title="反算抗饱和时间常数">Tt <input type="number" id="pid-tt" step="any" value="1" style="width:56px;background:transparent;border:0;color:var(--accent);font-family:var(--mono)"></label>
+          </div>
+          <div class="ctrl row" style="flex-wrap:wrap;margin-top:6px">
+            <label class="chip" title="不完全微分：D 项一阶低通">微分滤波 Tf <input type="number" id="pid-tf" step="any" value="0" style="width:60px;background:transparent;border:0;color:var(--accent);font-family:var(--mono)"></label>
+            <button class="chip" id="pid-donm">微分先行：关</button>
+            <label class="chip" title="控制器离散更新周期（ZOH 保持），0=连续">数字 PID 采样 Ts <input type="number" id="pid-ts" step="any" value="0" style="width:70px;background:transparent;border:0;color:var(--accent);font-family:var(--mono)"></label>
+          </div>
+          <div class="hint">响应曲线来自时域环路仿真（对象 RK4 + 控制器离散更新）；上方 T(s) 与闭环极点仍为理想控制器分析。注意：Kd 较大且无 Tf 时，离散理想微分高频发散——请配合微分滤波使用。</div>
+        </details>
         <div class="hint">单位负反馈闭环 <b>T(s)=C·G/(1+C·G)</b>。经验：Kp 加快响应但增大超调；Ki 消除稳态误差但易振荡；Kd 增大阻尼、抑制超调（对噪声敏感）。试试用「不稳定对象」把它拉回稳定！</div>
       </div>
       <div class="pane">
@@ -174,6 +189,25 @@ App.register('pid', (host) => {
 
   /* ---------- 主计算 ---------- */
   let lastStep = null;   // 最近一次阶跃仿真（CSV 导出用）
+  // 控制器细节（执行器/抗饱和/滤波/先行/采样）
+  let uMax = null, aw = 'off', Tt = 1, Tf = 0, dOnM = false, Ts = 0;
+  {
+    const awRow = $('#pid-aw-chips');
+    [['off', '关'], ['clamp', '条件积分'], ['back', '反算']].forEach(([k, label]) => {
+      const b = U.el('button', { class: 'chip' + (k === aw ? ' active' : ''), 'data-aw': k }, label);
+      b.addEventListener('click', () => {
+        aw = k;
+        awRow.querySelectorAll('.chip').forEach((x) => x.classList.toggle('active', x.dataset.aw === k));
+        solve();
+      });
+      awRow.append(b);
+    });
+    $('#pid-umax').addEventListener('change', (e) => { uMax = e.target.value === '' || !isFinite(+e.target.value) ? null : Math.abs(+e.target.value); solve(); });
+    $('#pid-tt').addEventListener('change', (e) => { Tt = +e.target.value > 0 ? +e.target.value : 1; solve(); });
+    $('#pid-tf').addEventListener('change', (e) => { Tf = Math.max(0, +e.target.value || 0); solve(); });
+    $('#pid-ts').addEventListener('change', (e) => { Ts = Math.max(0, +e.target.value || 0); solve(); });
+    $('#pid-donm').addEventListener('click', (e) => { dOnM = !dOnM; e.target.textContent = '微分先行：' + (dOnM ? '开（对测量值微分）' : '关'); e.target.classList.toggle('active', dOnM); solve(); });
+  }
   function solve() {
     const g = plants[plantKey];
     // Ki≈0 时 Nc 与分母 s 有公因子，先约成真分式（C=Kd·s+Kp），否则闭环会多出虚假极点 s=0
@@ -194,17 +228,21 @@ App.register('pid', (host) => {
 
     let nearest = Infinity;
     poles.forEach((q) => { const ar = Math.abs(q.re); if (ar > 1e-9) nearest = Math.min(nearest, ar); });
-    const tmax = unstable ? 6 : U.clamp(5 / (nearest || 1), 1, 30);
+    const tmax = unstable ? 6 : U.clamp(5 / (nearest || 1), 1, 30) * (uMax != null ? 1.6 : 1);   // 限幅减慢上升，窗口相应加长
     const steps = 3000;
-    const res = DSP.ltiResponse(N, D, (t) => (t >= 0 ? 1 : 0), 0, tmax, steps);
+    // 时域环路仿真（含限幅/抗饱和/滤波/先行/采样），对象为严格真分式
+    const res = DSP.pidLoopSim(g.num, g.den, { kp: Kp, ki: Ki, kd: Kd, Tf, dOnM }, { tmax, steps, uMax, aw, Tt, Ts });
+    if (!res.ok) { $('#pid-metrics').innerHTML = `<span style="color:var(--danger)">仿真失败：${res.note}</span>`; return; }
     lastStep = res;
 
-    const yInf = D[D.length - 1] !== 0 ? N[N.length - 1] / D[D.length - 1] : NaN;
-    drawStep(res, yInf, unstable);
+    const yInfIdeal = D[D.length - 1] !== 0 ? N[N.length - 1] / D[D.length - 1] : NaN;
+    // 有限幅时以仿真末值评估稳态（理想稳态值可能不可达）
+    const yEnd = res.y[res.y.length - 1];
+    const yf = uMax != null ? (isFinite(yEnd) ? yEnd : yInfIdeal) : (isFinite(yInfIdeal) ? yInfIdeal : yEnd);
+    drawStep(res, yf, unstable);
 
     // 性能指标
     const y = res.y, t = res.t;
-    const yf = isFinite(yInf) ? yInf : y[y.length - 1];
     let ymax = -Infinity; for (const v of y) if (isFinite(v)) ymax = Math.max(ymax, v);
     const sigma = Math.abs(yf) > 1e-9 ? Math.max(0, (ymax - yf) / Math.abs(yf) * 100) : NaN;
     let tr = NaN, t10 = null;
@@ -215,7 +253,7 @@ App.register('pid', (host) => {
     // 仅当仿真结束时已在 ±2% 带内，ts 才有意义；整段未进入带内视为未达标（NaN → 显示「—」）
     let ts = NaN;
     const band = 0.02 * Math.abs(yf);
-    const yEnd = y[y.length - 1];
+    const yTail = y[y.length - 1];
     if (isFinite(yEnd) && Math.abs(yEnd - yf) <= band) {
       for (let i = t.length - 1; i >= 0; i--) {
         if (!isFinite(y[i]) || Math.abs(y[i] - yf) > band) { ts = t[Math.min(i + 1, t.length - 1)]; break; }
@@ -254,6 +292,7 @@ App.register('pid', (host) => {
   function getState() {
     const s = { plant: plantKey, kp: Kp, ki: Ki, kd: Kd };
     if (customG) s.g = { expr: customG.numStr };
+    s.adv = { uMax, aw, Tt, Tf, dOnM, Ts };
     return s;
   }
   function applyState(s) {
@@ -266,6 +305,19 @@ App.register('pid', (host) => {
     }
     Kp = +s.kp || 0; Ki = +s.ki || 0; Kd = +s.kd || 0;
     syncSliders();
+    const a = s.adv && typeof s.adv === 'object' ? s.adv : {};
+    uMax = a.uMax != null && isFinite(+a.uMax) ? Math.abs(+a.uMax) : null;
+    aw = ['clamp', 'back'].includes(a.aw) ? a.aw : 'off';
+    Tt = +a.Tt > 0 ? +a.Tt : 1;
+    Tf = Math.max(0, +a.Tf || 0);
+    dOnM = a.dOnM === true;
+    Ts = Math.max(0, +a.Ts || 0);
+    $('#pid-umax').value = uMax != null ? uMax : '';
+    $('#pid-tt').value = Tt; $('#pid-tf').value = Tf; $('#pid-ts').value = Ts;
+    $('#pid-aw-chips').querySelectorAll('.chip').forEach((x) => x.classList.toggle('active', x.dataset.aw === aw));
+    const donm = $('#pid-donm');
+    donm.textContent = '微分先行：' + (dOnM ? '开（对测量值微分）' : '关');
+    donm.classList.toggle('active', dOnM);
     solve();
   }
   RTB.attach($('#pid-rtb'), {
@@ -276,8 +328,8 @@ App.register('pid', (host) => {
       if (!lastStep) return null;
       return {
         name: 'step',
-        header: ['t(s)', 'y(t)'],
-        rows: lastStep.t.map((t, i) => [t.toPrecision(6), lastStep.y[i].toPrecision(6)])
+        header: ['t(s)', 'y(t)', 'u(控制器输出)'],
+        rows: lastStep.t.map((t, i) => [t.toPrecision(6), lastStep.y[i].toPrecision(6), lastStep.u[i].toPrecision(6)])
       };
     }
   });
