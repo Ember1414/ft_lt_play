@@ -46,6 +46,17 @@ App.register('la', (host) => {
         <div class="hint" id="la-note"></div>
         <div id="la-status" class="statbar"></div>
         <div id="la-rtb"></div>
+        <details class="plot-fold" id="la-props-fold">
+          <summary>性质数值验证器（定义积分 vs 符号公式）</summary>
+          <div id="la-props-mi" style="margin-top:6px"></div>
+          <div class="row" id="la-props-chips" style="margin:6px 0;flex-wrap:wrap"></div>
+          <div class="ctrl row" style="flex-wrap:wrap">
+            <label class="chip"><span id="la-props-plabel">tau =</span> <input type="number" id="la-props-param" value="1" step="any" style="width:76px;background:transparent;border:0;color:var(--accent);font-family:var(--mono)"></label>
+            <button class="btn primary" id="la-props-go">数值验证</button>
+          </div>
+          <div id="la-props-out"></div>
+          <div class="hint">在 Re(s) &gt; ROC 的实轴验证点上，比较「变换后时域信号的定义积分」与「符号公式」的值。时移/频移/尺度/微分四条性质的恒等式误差应 &lt; 1e-5。</div>
+        </details>
       </div>
       <div class="pane">
         <h3>s 平面（稳定性区域）</h3>
@@ -547,6 +558,47 @@ App.register('la', (host) => {
       return { name: 'step', header: ['t(s)', 'y(t)'], rows: r.t.map((t, i) => [t.toPrecision(6), r.y[i].toPrecision(6)]) };
     }
   });
+
+  /* ---------- 性质数值验证器 ---------- */
+  {
+    const props = [['shift', '时移 tau'], ['freq', '频移 a'], ['scale', '尺度 a'], ['diff', '微分']];
+    let cur = 'shift';
+    const chips = $('#la-props-chips'), plabel = $('#la-props-plabel');
+    props.forEach(([k, label]) => {
+      const c = U.el('button', { class: 'chip' + (k === cur ? ' active' : ''), 'data-p': k }, label);
+      c.addEventListener('click', () => {
+        cur = k;
+        chips.querySelectorAll('.chip').forEach((x) => x.classList.toggle('active', x.dataset.p === k));
+        plabel.textContent = (k === 'shift' ? 'tau =' : k === 'diff' ? '（无需参数）' : 'a =');
+      });
+      chips.append(c);
+    });
+    const pin = MI.exprInput($('#la-props-mi'), {
+      id: 'la-props-in',
+      placeholder: 'f(t)，如 exp(-2*t)*u(t) + sin(3*t)*u(t)',
+      parse: (str) => (TR.parseTimeCombo(str) ? { verdict: 'ok', message: '已识别信号' } : { verdict: 'err', message: '无法解析：支持 exp(-a*t)u(t)、sin/cos(w*t)u(t)、t^n、u(t)、常数及加减组合' }),
+      examples: [['exp(-2*t)*u(t)', '指数'], ['sin(3*t)*u(t)', '正弦'], ['t^2*u(t)', '斜坡^2']],
+      debounce: 300,
+      autoApply: false
+    });
+    pin.set('exp(-2*t)*u(t)');
+    $('#la-props-go').addEventListener('click', () => {
+      const out = $('#la-props-out');
+      const items = TR.parseTimeCombo(pin.get());
+      if (!items) { out.innerHTML = '<p style="color:var(--danger)">信号无法解析，示例：exp(-2*t)*u(t)</p>'; return; }
+      const r = TR.propVerify(items, cur, +$('#la-props-param').value);
+      if (!r.ok) { out.innerHTML = '<p style="color:var(--danger)">' + r.note + '</p>'; return; }
+      let html = '<p style="margin:6px 0 2px;font-weight:600">' + r.title + '</p>';
+      html += '<div class="formula-center" style="margin:4px 0"></div>';
+      html += '<table class="tbl" style="max-width:480px"><tr><th>验证点</th><th>定义积分</th><th>公式值</th><th>相对误差</th></tr>';
+      r.checks.forEach((c) => {
+        html += `<tr><td>${c.s}</td><td style="font-family:var(--mono)">${U.fmt(c.lhs, 6)}</td><td style="font-family:var(--mono)">${U.fmt(c.rhs, 6)}</td><td style="color:${c.rel < 1e-5 ? 'var(--accent-2)' : 'var(--danger)'}">${c.rel.toExponential(1)}</td></tr>`;
+      });
+      html += '</table><p style="font-weight:600;color:' + (r.passed ? 'var(--accent-2)' : 'var(--danger)') + '">' + (r.passed ? '✓ 恒等式成立' : '✗ 验证未通过') + '</p>';
+      out.innerHTML = html;
+      try { if (window.katex) window.katex.render(r.rhsTex, out.querySelector('.formula-center'), { throwOnError: false }); } catch (e) { }
+    });
+  }
 
   return { title: '拉普拉斯变换', api: { dispose, onTheme: () => { drawSP(); redraw(); }, getState, applyState } };
   function dispose() {
