@@ -117,7 +117,7 @@ const rafQ = [];
 sandbox.window = sandbox;
 vm.createContext(sandbox);
 for (const f of ['assets/js/lib/util.js', 'assets/js/lib/mathdsp.js', 'assets/js/lib/plots.js',
-  'assets/js/lib/fx.js', 'assets/js/lib/blocksolve.js', 'assets/js/lib/transforms.js',
+  'assets/js/lib/fx.js', 'assets/js/lib/blocksolve.js', 'assets/js/lib/project.js', 'assets/js/lib/toolbar.js', 'assets/js/lib/transforms.js',
   'assets/js/lib/mathinput.js', 'assets/js/app.js',
   'assets/js/modules/blockdiag.js']) {
   vm.runInContext(read(f), sandbox, { filename: f });

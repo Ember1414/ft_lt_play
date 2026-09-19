@@ -25,6 +25,7 @@ App.register('fs', (host) => {
         </div>
         <div class="ctrl"><label>笔画形状</label>
           <div class="row" id="fs-shapes"></div>
+          <div id="fs-rtb"></div>
         </div>
         <div class="ctrl" id="fs-custom-wrap" style="display:none">
           <div class="canvas-wrap" style="margin-bottom:8px"><canvas class="draw-canvas" id="fs-drawcv" style="height:170px"></canvas></div>
@@ -701,6 +702,11 @@ App.register('fs', (host) => {
     const cb = $('#fs-circles-toggle');
     if (sv.circles != null && cb.checked !== (sv.circles === true)) { cb.checked = sv.circles === true; cb.dispatchEvent(new Event('change')); }
   }
+  RTB.attach($('#fs-rtb'), {
+    module: 'fs',
+    getState, applyState,
+    canvases: () => ['#fs-circles', '#fs-spec', '#fs-harmonics'].map((q) => $(q)).filter(Boolean)
+  });
   return { title: '傅立叶级数', api: { togglePlay, frame, reset, dispose, onTheme: () => { repaintDraw(); draw(); drawHarmonics(); drawSpec(); }, getState, applyState } };
   function dispose() {
     loop.stop();

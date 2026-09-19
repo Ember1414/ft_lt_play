@@ -33,6 +33,7 @@ App.register('ft', (host) => {
   host.innerHTML = `
     <div class="module">
       <div class="tabs row" style="margin-bottom:14px"></div>
+      <div id="ft-rtb"></div>
       <div id="ft-tab-map"></div>
       <div id="ft-tab-conv" class="hidden"></div>
       <div id="ft-tab-samp" class="hidden"></div>
@@ -588,6 +589,11 @@ App.register('ft', (host) => {
       if (chip) chip.click(); else switchTabFt();
     }
   }
+  RTB.attach(host.querySelector('#ft-rtb'), {
+    module: 'ft',
+    getState, applyState,
+    canvases: () => U.$$('canvas', host)
+  });
   return { title: '傅立叶变换', api: { dispose, onTheme: () => { if (mapCtx && mapCtx.draw) mapCtx.draw(); if (convCtx && convCtx.data && convCtx.drawAll) convCtx.drawAll(); if (sampCtx && sampCtx.drawAll) sampCtx.drawAll(); }, getState, applyState } };
   function dispose() { stopConvAnim(); clearTimeout(ftHashTimer); }
 });

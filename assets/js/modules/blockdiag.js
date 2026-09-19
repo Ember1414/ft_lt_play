@@ -57,6 +57,7 @@ App.register('blk', (host) => {
     <div class="module blk-layout">
       <div class="pane blk-side">
         <h3>元件</h3>
+        <div id="blk-rtb"></div>
         <div class="blk-btnrow">
           <button class="btn primary" id="blk-add-box">＋ 方框</button>
           <button class="btn" id="blk-add-sum">＋ 求和点</button>
@@ -1504,19 +1505,27 @@ App.register('blk', (host) => {
     ro.observe($('#blk-cvwrap'));
   }
 
+  /* ---------- 实验接入：状态捕获 / 回放（复用 blk1 编码与 readHash 重建） ---------- */
+  function blkGetState() { return { state: encodeState() }; }
+  function blkApplyState(sv) {
+    if (!sv || typeof sv !== 'object' || typeof sv.state !== 'string' || !sv.state.startsWith('blk1.')) return;
+    try {
+      history.replaceState(null, '', '#' + sv.state);
+      if (!readHash()) App.toast('框图状态还原失败', 'danger');
+    } catch (e) { App.toast('框图状态还原失败', 'danger'); }
+  }
+  /* 统一结果工具栏（框图整体编码即状态，PNG 导出不适用于 SVG 编辑器） */
+  RTB.attach(host.querySelector('#blk-rtb'), {
+    module: 'blk',
+    getState: blkGetState, applyState: blkApplyState
+  });
+
   return {
     title: '系统框图',
     subtitle: '方框 · 求和点 Σ · 分支点 · 采样开关 · 零阶保持器',
     api: {
-      /* ---------- 实验接入：状态捕获 / 回放（复用 blk1 编码与 readHash 重建） ---------- */
-      getState() { return { state: encodeState() }; },
-      applyState(sv) {
-        if (!sv || typeof sv !== 'object' || typeof sv.state !== 'string' || !sv.state.startsWith('blk1.')) return;
-        try {
-          history.replaceState(null, '', '#' + sv.state);
-          if (!readHash()) App.toast('框图状态还原失败', 'danger');
-        } catch (e) { App.toast('框图状态还原失败', 'danger'); }
-      },
+      getState: blkGetState,
+      applyState: blkApplyState,
       dispose,
       onTheme: () => {
         renderAll();
