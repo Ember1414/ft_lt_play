@@ -2,6 +2,25 @@
 
 格式参考 Keep a Changelog；版本号 = `package.json` version（页面资源 `?v=` 与侧栏版本同步更新）。
 
+## [7.2.0] — 2026-09-19 · 状态空间整章
+
+### 新增
+- **状态空间分析内核**（`assets/js/lib/statespace.js` → `window.SS`，纯函数）：
+  Faddeev–LeVerrier 特征多项式、G(s)=C(sI−A)⁻¹B+D 传递函数转换、
+  能控性/能观性秩判据、Ackermann 极点配置、对偶系统观测器设计（n ≤ 6）
+- **系统分析「状态空间分析」面板**：A/B/C/D 矩阵输入（4 个预设一键填入）、
+  特征值表与稳定性、能控/能观 rank、未约分传函 KaTeX、
+  状态反馈 K 与闭环极点验证、观测器增益 L；
+  矩阵与期望极点纳入实验状态（sys getState/applyState）
+- `tests/statespace.test.mjs`（29 项：FL/秩/传函/Ackermann/观测器数值验证）
+
+### 修复
+- Ackermann 实现（对偶/对称矩阵下「取列」与「取行」混淆的隐患）由
+  期望极点数值验证钉死：双积分器 K=[2,2]、三阶系统闭环特征值逐点对照
+
+### 兼容性
+- statespace.js 为新增独立库，无既有行为变更；系统分析面板折叠时零开销
+
 ## [7.1.0] — 2026-09-19 · Phase 2 第一批
 
 ### 新增

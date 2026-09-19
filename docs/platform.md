@@ -19,6 +19,7 @@ assets/js/lib/
   blocksolve.js  BLKSOLVE 框图求解 / 采样 / s↔z 映射
   transforms.js  TR.  符号变换（拉普拉斯/傅立叶/Z + 反变换）
   odesolve.js    OS.  微分/差分方程求解内核
+  statespace.js  SS.  状态空间内核（特征多项式/能控能观/Ackermann/观测器）
   project.js     PX.  ★ 实验数据模型 + 版本化存储 + 分享 v2（本文件 §3）
   toolbar.js     RTB. ★ 统一结果工具栏（保存/复制/重置/分享/导出）
 assets/js/app.js     App：导航/主题/模型库/★实验控制器 App.exps
@@ -54,7 +55,7 @@ return {
 };
 ```
 
-已接入：`sys`（num/den/chart/params + PNG/CSV）、`zt`（num/den/editMode + PNG/CSV）、
+已接入：`sys`（num/den/chart/params/状态空间矩阵 + PNG/CSV）、`zt`（num/den/editMode + PNG/CSV）、
 `la`（num/den + PNG/CSV）、`pid`（plant/kp/ki/kd + PNG/CSV）、`explore`（tab/expr + PNG）。
 未接入模块不受影响（工作台/控制器对其降级为不可捕获）。
 

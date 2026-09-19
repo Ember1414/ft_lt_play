@@ -22,7 +22,7 @@ http.createServer((req, res) => {
     if (!fp.startsWith(root)) { res.writeHead(403); return res.end('forbidden'); }
     if (fs.existsSync(fp) && fs.statSync(fp).isDirectory()) fp = path.join(fp, 'index.html');
     if (!fs.existsSync(fp)) { res.writeHead(404); return res.end('not found'); }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(fp)] || 'application/octet-stream' });
+    res.writeHead(200, { 'Content-Type': MIME[path.extname(fp)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
     fs.createReadStream(fp).pipe(res);
   } catch (e) { res.writeHead(500); res.end('error'); }
 }).listen(port, () => console.log(`✓ preview: http://localhost:${port}`));

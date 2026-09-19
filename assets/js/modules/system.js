@@ -63,6 +63,26 @@ App.register('sys', (host) => {
           <div class="hint">输入特征方程后自动求根：给出特征根、稳定性、主导极点的 ζ/ωₙ，并绘制自由响应（1/D(s) 的冲激响应）。</div>
         </details>
         <div class="hint">按分数线填写分子 / 分母，支持因式 <code>(s+2)*(s+3)</code>。结构按钮可一键套模板。</div>
+        <details class="plot-fold" id="sys-ss-fold">
+          <summary>状态空间分析（能控性 / 能观性 / 极点配置 / 观测器）</summary>
+          <div class="row" id="sys-ss-presets" style="margin:6px 0;flex-wrap:wrap"></div>
+          <div class="layout right-side" style="gap:10px">
+            <div class="pane" style="padding:0">
+              <div class="ctrl"><label>A（n×n，行用换行或「;」分隔）<span class="val" id="sys-ss-an"></span></label>
+                <textarea id="sys-ss-a" rows="3" spellcheck="false" style="width:100%;font-family:var(--mono);font-size:13px;background:var(--panel-2);color:var(--text);border:1px solid var(--line-2);border-radius:7px;padding:7px"></textarea></div>
+              <div class="ctrl"><label>B（n×1 列）</label><input type="text" id="sys-ss-b" spellcheck="false"></div>
+              <div class="ctrl"><label>C（1×n 行）</label><input type="text" id="sys-ss-c" spellcheck="false"></div>
+              <div class="ctrl"><label>D（前馈，常为 0）</label><input type="text" id="sys-ss-d" value="0" spellcheck="false"></div>
+            </div>
+            <div class="pane" style="padding:0">
+              <div class="ctrl"><label>状态反馈期望极点（逗号分隔，共轭成对）</label><input type="text" id="sys-ss-des" placeholder="-2, -1+2j, -1-2j" spellcheck="false"></div>
+              <div class="ctrl"><label>观测器期望极点</label><input type="text" id="sys-ss-obs" placeholder="-5, -6" spellcheck="false"></div>
+              <button class="btn primary" id="sys-ss-go" style="margin-top:6px">分析状态空间</button>
+            </div>
+          </div>
+          <div id="sys-ss-out" style="margin-top:8px"></div>
+          <div class="hint">ẋ=Ax+Bu，y=Cx+Du。能控性 ⇔ rank[B AB … Aⁿ⁻¹B]=n（Ackermann 配置要求完全能控）；能观性 ⇔ rank[C; CA; …; CAⁿ⁻¹]=n（观测器极点任意配置的前提）。G(s)=C(sI−A)⁻¹B+D 为未约分形式。</div>
+        </details>
       </div>
       <div class="pane">
         <div class="row" id="sys-charts" style="margin-bottom:10px"></div>
@@ -200,7 +220,10 @@ App.register('sys', (host) => {
   /* ---------- 实验接入：状态捕获 / 回放 / 统一结果工具栏 ---------- */
   function getState() {
     const c = tfIn.get();
-    return { num: c.numStr || '1', den: c.denStr || '1', chart, params: { ...paramScope } };
+    return {
+      num: c.numStr || '1', den: c.denStr || '1', chart, params: { ...paramScope },
+      ss: { A: $('#sys-ss-a').value, B: $('#sys-ss-b').value, C: $('#sys-ss-c').value, D: $('#sys-ss-d').value, des: $('#sys-ss-des').value, obs: $('#sys-ss-obs').value }
+    };
   }
   function applyState(s) {
     if (!s || typeof s !== 'object') return;
@@ -208,6 +231,12 @@ App.register('sys', (host) => {
     sweeps = {}; paramSeeds = {};
     tfIn.set(String(s.num || '1'), String(s.den || '1'));
     if (s.chart === 'bode' || s.chart === 'nyquist' || s.chart === 'root') setChart(s.chart);
+    if (s.ss && typeof s.ss === 'object') {
+      $('#sys-ss-a').value = String(s.ss.A || ''); $('#sys-ss-b').value = String(s.ss.B || '');
+      $('#sys-ss-c').value = String(s.ss.C || ''); $('#sys-ss-d').value = String(s.ss.D || '0');
+      $('#sys-ss-des').value = String(s.ss.des || ''); $('#sys-ss-obs').value = String(s.ss.obs || '');
+      renderSS();
+    }
     solve();
   }
   RTB.attach($('#sys-rtb'), {
@@ -1057,6 +1086,121 @@ App.register('sys', (host) => {
   $('#sys-char-fold').addEventListener('toggle', () => {
     if ($('#sys-char-fold').open && !$('#sys-char-in').value.trim()) $('#sys-char-in').value = polyToPlain(den);
   });
+
+  /* ---------- 状态空间分析（SS 内核：能控能观 / Ackermann / 观测器） ---------- */
+  const ssPresets = {
+    二阶系统: { A: '0 1; -2 -1', B: '0; 1', C: '1 0', D: '0', des: '-1+2j, -1-2j', obs: '-5, -6' },
+    双积分器: { A: '0 1; 0 0', B: '0; 1', C: '1 0', D: '0', des: '-2, -2', obs: '-8, -8' },
+    不稳定系统: { A: '0 1; 1 0.3', B: '0; 1', C: '1 0', D: '0', des: '-1+2j, -1-2j', obs: '-6, -6' },
+    三阶耦合: { A: '0 1 0; 0 0 1; -1 -2 -3', B: '0; 0; 1', C: '1 0 0', D: '0', des: '-1, -1+2j, -1-2j', obs: '-5, -6, -7' }
+  };
+  function ssParseMat(text, rows) {
+    // rows=null → 方阵；返回 {ok, M}；支持换行或「;」分行，空白/逗号分列
+    const lines = String(text || '').split(/[\n;]/).map((l) => l.trim()).filter(Boolean);
+    if (!lines.length) return { ok: false, note: '矩阵为空' };
+    const M = lines.map((l) => l.split(/[\s,，]+/).filter(Boolean).map(Number));
+    if (M.some((r) => r.some((v) => !isFinite(v)))) return { ok: false, note: '存在非数值元素' };
+    const w = M[0].length;
+    if (M.some((r) => r.length !== w)) return { ok: false, note: '各行列数不一致' };
+    if (rows != null && (M.length !== rows || w !== rows)) return { ok: false, note: `应为 ${rows}×${rows}` };
+    return { ok: true, M };
+  }
+  function ssParseVec(text, n) {
+    const parts = String(text || '').split(/[\s,，;]+/).filter(Boolean).map(Number);
+    if (!parts.length || parts.some((v) => !isFinite(v))) return null;
+    if (parts.length !== n) return null;
+    return parts;
+  }
+  function ssParsePoles(text) {
+    const out = [];
+    for (const tk of String(text || '').split(/[,，;\s]+/).filter(Boolean)) {
+      const s = tk.toLowerCase();
+      let re = 0, im = 0;
+      if (s === 'j' || s === '+j' || s === '-j') { re = 0; im = s[0] === '-' ? -1 : 1; }
+      else if (/^[+-]?\d*\.?\d+j$/.test(s)) { re = 0; im = parseFloat(s.slice(0, -1)) || 0; }
+      else if (/^([+-]?\d*\.?\d+)([+-]\d*\.?\d*)j$/.test(s)) {
+        const m = s.match(/^([+-]?\d*\.?\d+)([+-]\d*\.?\d*)j$/);
+        re = parseFloat(m[1]); im = m[2] === '+' ? 1 : m[2] === '-' ? -1 : parseFloat(m[2]);
+      } else if (/^[+-]?\d*\.?\d+$/.test(s)) re = parseFloat(s);
+      else return null;
+      out.push({ re, im });
+    }
+    // 共轭配对检查：复数极点必须成对（否则特征多项式出现复系数）
+    for (const p of out) {
+      if (Math.abs(p.im) < 1e-12) continue;
+      const has = out.some((q) => q !== p && Math.abs(q.re - p.re) < 1e-9 && Math.abs(q.im + p.im) < 1e-9);
+      if (!has) return null;
+    }
+    return out;
+  }
+  function renderSS() {
+    const out = $('#sys-ss-out');
+    const A = ssParseMat($('#sys-ss-a').value, null);
+    if (!A.ok) { out.innerHTML = '<p style="color:var(--danger)">A：' + A.note + '，示例：0 1; -2 -1</p>'; return; }
+    const n = A.M.length;
+    $('#sys-ss-an').textContent = '(' + n + '×' + n + ')';
+    const B = ssParseMat($('#sys-ss-b').value, null), Cv = ssParseMat($('#sys-ss-c').value, null), Dv = ssParseMat($('#sys-ss-d').value || '0', null);
+    if (!B.ok || B.M.length !== n || B.M[0].length !== 1) { out.innerHTML = '<p style="color:var(--danger)">B 应为 ' + n + '×1 列，如：0; 1</p>'; return; }
+    if (!Cv.ok || Cv.M.length !== 1 || Cv.M[0].length !== n) { out.innerHTML = '<p style="color:var(--danger)">C 应为 1×' + n + ' 行，如：1 0</p>'; return; }
+    if (!Dv.ok || Dv.M.length !== 1 || Dv.M[0].length !== 1) { out.innerHTML = '<p style="color:var(--danger)">D 应为标量（通常 0）</p>'; return; }
+    let r;
+    try { r = SS.analyze(A.M, B.M, Cv.M, Dv.M); } catch (e) { out.innerHTML = '<p style="color:var(--danger)">分析失败：' + e.message + '</p>'; return; }
+    const fmtR = (q) => U.fmt(q.re, 3) + (Math.abs(q.im) > 1e-9 ? (q.im > 0 ? ' + ' : ' − ') + U.fmt(Math.abs(q.im), 3) + 'j' : '');
+    const poleColor = (q) => (q.re > 1e-9 ? 'var(--danger)' : Math.abs(q.re) <= 1e-9 ? 'var(--warn)' : 'var(--accent-2)');
+    let html = `<div class="statbar" style="padding:8px 0">
+      <div class="stat"><span class="k">阶数 n</span><span class="v">${n}</span></div>
+      <div class="stat"><span class="k">稳定性</span><span class="v" style="color:${r.stable ? 'var(--accent-2)' : 'var(--danger)'}">${r.stable ? '渐近稳定（特征值全在左半平面）' : '不稳定'}</span></div>
+      <div class="stat"><span class="k">能控性</span><span class="v" style="color:${r.controllable ? 'var(--accent-2)' : 'var(--danger)'}">${r.controllable ? '完全能控' : '不完全能控'}（rank ${r.ctrbRank}/${n}）</span></div>
+      <div class="stat"><span class="k">能观性</span><span class="v" style="color:${r.observable ? 'var(--accent-2)' : 'var(--danger)'}">${r.observable ? '完全能观' : '不完全能观'}（rank ${r.obsvRank}/${n}）</span></div>
+    </div>
+    <table class="tbl" style="max-width:420px"><tr><th>特征值</th><th>位置</th></tr>` +
+      r.poles.map((q) => `<tr><td style="font-family:var(--mono)">${fmtR(q)}</td><td style="color:${poleColor(q)}">${q.re > 1e-9 ? '右半平面' : Math.abs(q.re) <= 1e-9 ? '虚轴' : '左半平面'}</td></tr>`).join('') +
+      `</table>
+      <div class="formula-center" style="margin-top:8px"></div>`;
+    out.innerHTML = html;
+    try { if (window.katex) window.katex.render('G(s)=C(sI-A)^{-1}B+D=\\dfrac{' + U.polyTex(r.tf.num) + '}{' + U.polyTex(r.tf.den) + '}', out.querySelector('.formula-center'), { throwOnError: false, displayMode: true }); } catch (e) { }
+    // 极点配置（Ackermann）与观测器（对偶系统）
+    const cfg = [];
+    const desTxt = $('#sys-ss-des').value.trim(), obsTxt = $('#sys-ss-obs').value.trim();
+    if (desTxt) {
+      const des = ssParsePoles(desTxt);
+      if (!des || des.length !== n) cfg.push('<p class="hint" style="color:var(--warn)">期望极点应为 ' + n + ' 个且复数成对，示例：-2, -1±2j</p>');
+      else if (!r.controllable) cfg.push('<p class="hint" style="color:var(--danger)">系统不完全能控，无法任意配置极点</p>');
+      else {
+        const K = SS.acker(A.M, B.M, des);
+        const clA = A.M.map((row, i) => row.map((v, j) => v - K[j] * B.M[i][0]));
+        const clPoles = DSP.polyRoots(SS.charPoly(clA));
+        cfg.push('<p><b>状态反馈 K</b> = <span style="font-family:var(--mono);color:var(--accent)">[' + K.map((v) => U.fmt(v, 3)).join(', ') + ']</span>'
+          + '　闭环特征值：' + clPoles.map(fmtR).join(', ') + ' <span style="color:var(--accent-2)">✓ 已配置到期望位置</span></p>');
+      }
+    }
+    if (obsTxt) {
+      const obs = ssParsePoles(obsTxt);
+      if (!obs || obs.length !== n) cfg.push('<p class="hint" style="color:var(--warn)">观测器极点应为 ' + n + ' 个且复数成对</p>');
+      else if (!r.observable) cfg.push('<p class="hint" style="color:var(--danger)">系统不完全能观，观测器极点无法任意配置</p>');
+      else {
+        const L = SS.acker(SS.transpose(A.M), SS.transpose(Cv.M), obs);
+        cfg.push('<p><b>观测器增益 L</b> = <span style="font-family:var(--mono);color:var(--purple)">[' + L.map((v) => U.fmt(v, 3)).join(', ') + ']<sup>T</sup></span>（Lᶜ = acker(Aᵀ, Cᵀ, 期望极点)）</p>');
+      }
+    }
+    out.insertAdjacentHTML('beforeend', cfg.join(''));
+  }
+  {
+    const fold = $('#sys-ss-fold'), pRow = $('#sys-ss-presets');
+    Object.entries(ssPresets).forEach(([name, p]) => {
+      const c = U.el('button', { class: 'chip' }, name);
+      c.addEventListener('click', () => {
+        $('#sys-ss-a').value = p.A; $('#sys-ss-b').value = p.B; $('#sys-ss-c').value = p.C; $('#sys-ss-d').value = p.D;
+        $('#sys-ss-des').value = p.des; $('#sys-ss-obs').value = p.obs;
+        renderSS();
+      });
+      pRow.append(c);
+    });
+    ['a', 'b', 'c', 'd'].forEach((k) => $('#sys-ss-' + k).addEventListener('input', U.throttle(() => { if (fold.open) renderSS(); }, 400)));
+    ['des', 'obs'].forEach((k) => $('#sys-ss-' + k).addEventListener('input', U.throttle(() => { if (fold.open) renderSS(); }, 400)));
+    $('#sys-ss-go').addEventListener('click', renderSS);
+    fold.addEventListener('toggle', () => { if (fold.open && !$('#sys-ss-a').value.trim()) { const p = ssPresets['二阶系统']; $('#sys-ss-a').value = p.A; $('#sys-ss-b').value = p.B; $('#sys-ss-c').value = p.C; renderSS(); } });
+  }
 
   // 首屏：URL 中带有分享的 H(s)（#hn=..&hd=..）时优先还原
   {
