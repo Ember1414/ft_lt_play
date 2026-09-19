@@ -410,7 +410,8 @@ const DSP = (() => {
       o[n - 1] = acc;
       return o;
     };
-    const meas = (x) => { let y = 0; for (let i = 1; i < c.length; i++) y += c[i] * x[i - 1]; return y; };
+    // y = c[1]·x_{n−1} + … + c[n]·x_1：s^{n−i} 系数配 (n−i+1) 阶导数态 x[n−i]
+    const meas = (x) => { let y = 0; for (let i = 1; i < c.length; i++) y += c[i] * x[n - i]; return y; };
     const ctrlEvery = Ts > 0 ? Math.max(1, Math.round(Ts / dt)) : 1;
     let x = new Array(n).fill(0);
     let integ = 0, dF = 0, ePrev = 0, yPrev = 0, uHold = 0, first = true, lastCtlI = -1;
@@ -459,7 +460,54 @@ const DSP = (() => {
     return { ok: true, t, y, u, e };
   }
 
-  return { horner, polyRoots, polyFromRoots, cdiv, fft, ifft, spectrum, dftPhasors, integrate, conv, ltiResponse, evalH, bode, steadyState, nyquistFull, jury, errMetrics, pidLoopSim };
+  /* ---------- ZN 临界比例度：相位 −180° 穿越点 → Ku/Tu ---------- */
+  function znUltimate(num, den) {
+    let prevPh = null, prevW = null;
+    for (let i = 1; i <= 3000; i++) {
+      const w = Math.pow(10, -2 + (4 * i) / 3000);
+      const h = evalH(num, den, w);
+      let ph = (180 / Math.PI) * Math.atan2(h.im, h.re);
+      while (prevPh != null && ph > prevPh) ph -= 360;   // 展开环绕，保持相位连续下降
+      if (prevPh != null && prevPh > -180 && ph <= -180) {
+        const t = (prevPh + 180) / (prevPh - ph);
+        const wpc = prevW + t * (w - prevW);
+        const h2 = evalH(num, den, wpc);
+        const mag = Math.hypot(h2.re, h2.im);
+        if (mag > 1e-12) return { ok: true, Ku: 1 / mag, Tu: (2 * Math.PI) / wpc, wpc };
+      }
+      prevPh = ph; prevW = w;
+    }
+    return { ok: false, note: '开环相位滞后未达到 −180°：纯 P 恒稳定，无临界增益（如一阶/二阶对象）' };
+  }
+
+  /* ---------- FOPDT 两点法拟合（28.3% / 63.2%）：K、T、L ---------- */
+  function fopdtFit(t, y) {
+    if (!t || !y || t.length < 10) return { ok: false, note: '数据不足' };
+    const y0 = y[0], K = y[y.length - 1] - y0;
+    if (!(Math.abs(K) > 1e-9)) return { ok: false, note: '响应无稳态变化（含积分环节的对象开环阶跃无界，两点法不适用）' };
+    // 稳态驻留检查：末段漂移需远小于总变化（未稳态/无界响应拒绝）
+    const tail = y.slice(Math.floor(y.length * 0.95));
+    const drift = Math.max(...tail) - Math.min(...tail);
+    if (Math.abs(drift) > 0.01 * Math.abs(K)) return { ok: false, note: '响应末段未进入稳态（可能含积分环节或仿真过短）' };
+    const crossing = (f) => {
+      const target = y0 + f * K;
+      const sgn = K > 0 ? 1 : -1;
+      for (let i = 1; i < y.length; i++) {
+        if ((y[i] - target) * sgn >= 0) {
+          const a = y[i - 1] - target, b = y[i] - target;
+          return t[i - 1] + ((t[i] - t[i - 1]) * a) / ((a - b) || 1e-12);
+        }
+      }
+      return null;
+    };
+    const t28 = crossing(0.283), t63 = crossing(0.632);
+    if (t28 == null || t63 == null || !(t63 > t28)) return { ok: false, note: '响应非典型 S 曲线，两点法不适配' };
+    const T = 1.5 * (t63 - t28), L = t63 - T;
+    if (!(T > 1e-9) || L < -0.05 * T) return { ok: false, note: '时间常数/纯迟延拟合退化' };
+    return { ok: true, K, T, L: Math.max(0, L) };
+  }
+
+  return { horner, polyRoots, polyFromRoots, cdiv, fft, ifft, spectrum, dftPhasors, integrate, conv, ltiResponse, evalH, bode, steadyState, nyquistFull, jury, errMetrics, pidLoopSim, znUltimate, fopdtFit };
 })();
 
 window.DSP = DSP;

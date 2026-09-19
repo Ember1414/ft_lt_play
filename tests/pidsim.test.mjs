@@ -43,6 +43,21 @@ const pa = (a, b) => { const n = Math.max(a.length, b.length); const o = new Arr
   ok('PI 控制与闭环传函一致（maxDiff=' + d.toFixed(7) + '）', d < 1e-3);
 }
 
+{
+  // 二阶对象等价（锁死 meas 状态-输出配对：此前一阶对象两种配对等价，险些漏过）
+  const P2 = { num: [1], den: [1, 0.5, 1] };
+  const sim2 = DSP.pidLoopSim(P2.num, P2.den, { kp: 2, ki: 1 }, { tmax: 12, steps: 20000 });
+  const ref2 = DSP.ltiResponse([2, 1], [1, 0.5, 3, 1], (t) => (t >= 0 ? 1 : 0), 0, 12, 20000);
+  let d2 = 0; for (let i = 0; i < ref2.y.length; i++) d2 = Math.max(d2, Math.abs(ref2.y[i] - sim2.y[i]));
+  ok('二阶对象 PI 与闭环传函一致（maxDiff=' + d2.toFixed(6) + '）', d2 < 2e-3);
+  // 带零点对象：G=(s+2)/(s²+3s+2)…
+  const P3 = { num: [1, 2], den: [1, 3, 2] };
+  const sim3 = DSP.pidLoopSim(P3.num, P3.den, { kp: 1 }, { tmax: 10, steps: 5000 });
+  const ref3 = DSP.ltiResponse([1, 2], [1, 4, 4], (t) => (t >= 0 ? 1 : 0), 0, 10, 5000);
+  let d3 = 0; for (let i = 0; i < ref3.y.length; i++) d3 = Math.max(d3, Math.abs(ref3.y[i] - sim3.y[i]));
+  ok('带零点对象 P 与闭环传函一致（maxDiff=' + d3.toFixed(6) + '）', d3 < 1e-3);
+}
+
 /* ---------- ② D 项尾部对照（理想微分直通跳变按闭环慢极点衰减） ---------- */
 {
   const sim = DSP.pidLoopSim(PLANT.num, PLANT.den, { kp: 2, ki: 1, kd: 0.5 }, { tmax: 30, steps: 6000 });

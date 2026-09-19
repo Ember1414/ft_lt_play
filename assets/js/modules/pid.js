@@ -38,6 +38,15 @@ App.register('pid', (host) => {
         <div class="ctrl"><label>微分 Kd <span class="val" id="pid-kdv"></span></label>
           <input type="range" id="pid-kd" min="0" max="5" step="0.1" value="0"></div>
         <div class="row" id="pid-recipes" style="margin-bottom:8px"></div>
+        <details class="plot-fold" id="pid-tune-fold" style="margin:6px 0">
+          <summary>整定向导（Ziegler–Nichols / Cohen–Coon / CHR）</summary>
+          <div class="row" style="margin:6px 0">
+            <button class="btn" id="pid-tune-zn" title="纯 P 闭环找等幅振荡：Ku 与 Tu">临界比例度法（ZN 闭环）</button>
+            <button class="btn" id="pid-tune-rc" title="开环阶跃响应拟合 FOPDT 后套公式">反应曲线法（开环两点法）</button>
+          </div>
+          <div id="pid-tune-out"></div>
+          <div class="hint">应用整定参数会同时设置滑杆（含 Tf=Td/10 微分滤波）并重算。ZN 闭环要求开环相位能滞后到 −180°（如含积分/高阶对象）；反应曲线法要求开环阶跃响应收敛（不含积分对象）。</div>
+        </details>
         <div id="pid-rtb"></div>
         <details class="plot-fold" id="pid-adv-fold" style="margin:8px 0">
           <summary>执行器与控制器细节（限幅 / 抗饱和 / 微分滤波 / 微分先行 / 数字 PID）</summary>
@@ -333,6 +342,66 @@ App.register('pid', (host) => {
       };
     }
   });
+
+  /* ---------- 整定向导（ZN 临界比例度 / 反应曲线 FOPDT：ZN·CC·CHR） ---------- */
+  {
+    const out = () => $('#pid-tune-out');
+    const applyGains = (name, kp, ki, kd) => {
+      Kp = kp; Ki = ki || 0; Kd = kd || 0;
+      if (Kd > 0 && Kp > 0) { Tf = +(Kd / (10 * Kp)).toFixed(4); $('#pid-tf').value = Tf; }   // 经典规则 Tf = Td/10（Td=Kd/Kp）
+      syncSliders();
+      solve();
+      App.toast('已应用 ' + name + '：Kp=' + Kp.toFixed(2) + ' Ki=' + Ki.toFixed(2) + ' Kd=' + Kd.toFixed(2));
+    };
+    const fmt2 = (v) => (v == null ? '—' : U.fmt(v, 3));
+    const renderRows = (title, rows, extra) => {
+      let html = `<p class="hint" style="margin:6px 0 2px">${title}</p><table class="tbl" style="max-width:460px"><tr><th>控制器</th><th>Kp</th><th>Ki</th><th>Kd</th><th></th></tr>`;
+      rows.forEach(([name, kp, ki, kd], i) => {
+        html += `<tr><td>${name}</td><td>${fmt2(kp)}</td><td>${fmt2(ki)}</td><td>${fmt2(kd)}</td><td><button class="chip" data-tune="${i}">应用</button></td></tr>`;
+      });
+      html += '</table>' + (extra || '');
+      out().innerHTML = html;
+      out().querySelectorAll('[data-tune]').forEach((b) => b.addEventListener('click', () => {
+        const [name, kp, ki, kd] = rows[+b.dataset.tune];
+        applyGains(name, kp, ki, kd);
+      }));
+    };
+    $('#pid-tune-zn').addEventListener('click', () => {
+      const g = plants[plantKey];
+      const r = DSP.znUltimate(g.num, g.den);
+      if (!r.ok) { out().innerHTML = `<p class="hint" style="color:var(--warn)">⚠ ${r.note}</p>`; return; }
+      const [Ku, Tu] = [r.Ku, r.Tu];
+      const rows = [
+        ['P', 0.5 * Ku, null, null],
+        ['PI', 0.45 * Ku, (0.45 * Ku) / (r.Tu / 1.2), null],
+        ['PID', 0.6 * Ku, (0.6 * Ku) / (0.5 * Tu), 0.6 * Ku * 0.125 * Tu]
+      ];
+      renderRows(`临界比例度法：Ku = ${U.fmt(Ku, 3)}，Tu = ${U.fmt(Tu, 3)}s（ω_pc = ${U.fmt(r.wpc, 3)} rad/s）。ZN 公式：P 0.5Ku · PI 0.45Ku,Ti=Tu/1.2 · PID 0.6Ku,Ti=0.5Tu,Td=0.125Tu；应用 PID 时自动设 Tf=Td/10。`, rows);
+    });
+    $('#pid-tune-rc').addEventListener('click', () => {
+      const g = plants[plantKey];
+      const poles = DSP.polyRoots(g.den);
+      if (poles.some((q) => q.re > 1e-9)) { out().innerHTML = '<p class="hint" style="color:var(--danger)">开环不稳定，反应曲线法不适用</p>'; return; }
+      let nearest = Infinity;
+      for (const q of poles) { const ar = Math.abs(q.re); if (ar > 1e-9) nearest = Math.min(nearest, ar); }
+      const tmax = U.clamp(8 / (nearest || 1), 2, 80);
+      const open = DSP.ltiResponse(g.num, g.den, (t) => (t >= 0 ? 1 : 0), 0, tmax, 2000);
+      const fit = DSP.fopdtFit(open.t, open.y);
+      if (!fit.ok) { out().innerHTML = `<p class="hint" style="color:var(--warn)">⚠ ${fit.note}</p>`; return; }
+      const { K, T, L } = fit;
+      if (L < 0.01 * T) {
+        out().innerHTML = `<p class="hint" style="margin:6px 0">FOPDT 拟合：K = ${U.fmt(K, 3)}，T = ${U.fmt(T, 3)}s，L ≈ 0（无可辨识纯迟延）。反应曲线类公式在 L→0 时退化（增益发散），此类对象建议用<b>临界比例度法</b>。</p>`;
+        return;
+      }
+      const rows = [
+        ['ZN 开环 PID', (1.2 * T) / (K * L), 2 * L, 0.5 * L],
+        ['Cohen–Coon', (T / (K * L)) * (4 / 3 + L / (4 * T)), (L * (32 + 6 * L / T)) / (13 + 8 * L / T), (4 * L) / (11 + 2 * L / T)],
+        ['CHR 0%', (0.6 * T) / (K * L), T, 0.5 * L],
+        ['CHR 20%', (0.95 * T) / (K * L), 1.357 * T, 0.473 * L]
+      ];
+      renderRows(`反应曲线法（两点法拟合 FOPDT）：K = ${U.fmt(K, 3)}，T = ${U.fmt(T, 3)}s，L = ${U.fmt(L, 3)}s（纯迟延）。表中 Ki=Kp/Ti、Kd=Kp·Td；应用时自动设 Tf=Td/10。`, rows, '<p class="hint" style="margin-top:4px">ZN 开环：Kp=1.2T/(KL), Ti=2L, Td=0.5L · Cohen–Coon / CHR 按标准公式表。</p>');
+    });
+  }
 
   return { title: 'PID 整定', api: { dispose, onTheme: () => { renderG(); solve(); }, getState, applyState } };
   function dispose() { }
