@@ -111,10 +111,10 @@ const DSP = (() => {
     return { re, im };
   }
   function ifft(re, im) {
-    for (let i = 0; i < re.length; i++) im[i] = -im[i];
+    for (let i = 0; i < re.length; i++) im[i] = -im[i];   // 共轭输入
     fft(re, im);
     const n = re.length;
-    for (let i = 0; i < n; i++) { re[i] /= n; im[i] /= n; }
+    for (let i = 0; i < n; i++) { re[i] /= n; im[i] = -im[i] / n; }   // 除以 n 并共轭还原输出
     return { re, im };
   }
 

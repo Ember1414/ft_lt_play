@@ -70,17 +70,38 @@ window.RTB = (() => {
       return !!exp;
     }
 
-    const bar = U.el('div', { class: 'row rtb-bar', role: 'toolbar', 'aria-label': '结果操作', style: 'flex-wrap:wrap;gap:8px;margin:0 0 10px' });
+    const bar = U.el('div', { class: 'row rtb-bar', role: 'toolbar', 'aria-label': '结果操作' });
+    const primary = U.el('div', { class: 'rtb-primary' });
+    const more = U.el('div', { class: 'rtb-more', role: 'group', 'aria-label': '更多操作' });
+    const moreBtn = U.el('button', { class: 'btn rtb-more-toggle', title: '更多操作', 'aria-expanded': 'false', 'aria-label': '更多操作' }, '⋯ 更多');
+    const bd = U.el('div', { class: 'rtb-more-bd' });
+    const moreWrap = U.el('div', { class: 'rtb-morewrap' });
+    const closeMore = () => { moreWrap.classList.remove('open'); moreBtn.setAttribute('aria-expanded', 'false'); };
+    moreBtn.addEventListener('click', () => {
+      const open = !moreWrap.classList.contains('open');
+      moreWrap.classList.toggle('open', open);
+      moreBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    bd.addEventListener('click', closeMore);
+    moreWrap.append(bd, moreBtn, more);
+    bar.append(primary, moreWrap);
     const mk = (label, title, fn) => {
-      const b = U.el('button', { class: 'btn', title }, label);
+      const b = U.el('button', { class: 'btn rtb-act', title }, label);
       b.addEventListener('click', fn);
-      bar.appendChild(b);
+      primary.appendChild(b);
+      return b;
+    };
+    // 次级操作：收进「⋯ 更多」（窄屏为 action-sheet），点击后自动收起；行为/文案与桌面完全一致
+    const mkMore = (label, title, fn) => {
+      const b = U.el('button', { class: 'btn rtb-act', title }, label);
+      b.addEventListener('click', () => { closeMore(); fn(); });
+      more.appendChild(b);
       return b;
     };
 
     mk('💾 保存实验', '保存当前状态到实验（含可恢复快照）', () => { if (ensureExp()) App.exps.saveNow(); });
 
-    mk('⧉ 复制', '复制当前实验为新实验', () => {
+    mkMore('⧉ 复制', '复制当前实验为新实验', () => {
       const cur = App.exps.cur();
       if (!cur) { if (!ensureExp()) return; }
       try {
@@ -89,7 +110,7 @@ window.RTB = (() => {
       } catch (e) { App.toast('复制失败：' + e.message, 'danger'); }
     });
 
-    mk('↺ 重置', '恢复到实验上次保存的状态', () => { if (!App.exps.resetCurrent()) App.toast('没有可恢复的已保存状态', 'danger'); });
+    mkMore('↺ 重置', '恢复到实验上次保存的状态', () => { if (!App.exps.resetCurrent()) App.toast('没有可恢复的已保存状态', 'danger'); });
 
     mk('🔗 分享', '复制版本化实验分享链接（含校验，可还原全部状态）', () => {
       if (!ensureExp()) return;
@@ -98,7 +119,7 @@ window.RTB = (() => {
     });
 
     if (typeof opts.canvases === 'function') {
-      mk('🖼 PNG', '把当前图导出为 PNG 图片', () => {
+      mkMore('🖼 PNG', '把当前图导出为 PNG 图片', () => {
         const canvases = (opts.canvases() || []).filter((c) => c && !c.closest('.hidden'));
         if (!canvases.length) { App.toast('没有可导出的图（先求解并绘图）', 'danger'); return; }
         const base = (App.exps.cur() ? App.exps.cur().name : modName).replace(/[\\/:*?"<>|]/g, '_');
@@ -114,7 +135,7 @@ window.RTB = (() => {
     }
 
     if (typeof opts.csv === 'function') {
-      mk('📊 CSV', '导出当前结果数据（CSV，Excel 可直接打开）', () => {
+      mkMore('📊 CSV', '导出当前结果数据（CSV，Excel 可直接打开）', () => {
         const d = opts.csv();
         if (!d || !d.rows || !d.rows.length) { App.toast('没有可导出的数据（先求解）', 'danger'); return; }
         const esc = (v) => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
@@ -126,7 +147,7 @@ window.RTB = (() => {
       });
     }
 
-    mk('📄 JSON', '导出实验 JSON（含全部模块状态，可再导入）', () => {
+    mkMore('📄 JSON', '导出实验 JSON（含全部模块状态，可再导入）', () => {
       if (!ensureExp()) return;
       const cur = App.exps.cur();
       try {

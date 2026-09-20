@@ -392,6 +392,65 @@ if (mod3) mod3.api.dispose();
   }
 }
 
+/* ================= ⑬ 连线避障：同轴三盒 1→3 应绕行而非直穿中间盒 ================= */
+{
+  const slim3 = {
+    v: 1, T: 0.1,
+    n: [
+      { i: 1, k: 'box', m: 'A', s: '1/(s+1)', x: 200, y: 220, r: 1, o: 0, z: 0 },
+      { i: 2, k: 'box', m: 'B', s: '1/(s+2)', x: 460, y: 220, r: 0, o: 0, z: 0 },
+      { i: 3, k: 'box', m: 'C', s: '1/(s+3)', x: 720, y: 220, r: 0, o: 1, z: 0 }
+    ],
+    e: [[1, 3, 1]], vw: { s: 1, tx: 0, ty: 0 }
+  };
+  sandbox.location.hash = '#blk=blk1.' + btoa(unescape(encodeURIComponent(JSON.stringify(slim3))));
+  let m4 = null, e4 = null;
+  try { m4 = sandbox.App.modules['blk'](new El('div')); runRaf(); } catch (err) { e4 = err; }
+  ok('同轴三盒还原不抛异常', !e4, e4 && e4.message);
+  ok('还原出 3 元件 1 连线', /3 元件 · 1 连线/.test(counts()), counts());
+  // 绕行后连线下移到 y=220+44=264 车道（避开中间盒 197~243 的框体）
+  ok('同轴穿框连线走上/下绕行（含非 220 拐点）', /\b264\b/.test(staticHtml()), (staticHtml().match(/<path d="[^"]+"/) || [''])[0]);
+  if (m4) m4.api.dispose();
+}
+
+/* ================= ⑭ 双击方框进入就地编辑（确定坐标） ================= */
+{
+  const slimE = { v: 1, T: 0.1, n: [{ i: 1, k: 'box', m: 'G', s: '1/(s+1)', x: 300, y: 160, r: 1, o: 1, z: 0 }], e: [], vw: { s: 1, tx: 0, ty: 0 } };
+  sandbox.location.hash = '#blk=blk1.' + btoa(unescape(encodeURIComponent(JSON.stringify(slimE))));
+  const mE = sandbox.App.modules['blk'](new El('div')); runRaf();
+  sandbox.document.body.children = sandbox.document.body.children.filter((c) => c.className !== 'blk-edit');
+  const pe = toScreen(300, 160);
+  svgEl().fire('dblclick', mkEvt({ clientX: pe.x, clientY: pe.y }));
+  const edit = sandbox.document.body.children.find((c) => c.className === 'blk-edit');
+  ok('双击方框弹出就地编辑输入框', !!edit && (edit.children || []).some((c) => c.tagName === 'INPUT'), edit ? 'has' : 'none');
+  mE.api.dispose();
+}
+
+/* ================= ⑮ 反向拉线：从入端口拖到上游输出端 → 方向 源→本 ================= */
+{
+  const slimW = {
+    v: 1, T: 0.1,
+    n: [
+      { i: 1, k: 'box', m: 'A', s: '1/(s+1)', x: 200, y: 160, r: 1, o: 0, z: 0 },
+      { i: 2, k: 'box', m: 'B', s: '1/(s+2)', x: 460, y: 160, r: 0, o: 1, z: 0 }
+    ],
+    e: [], vw: { s: 1, tx: 0, ty: 0 }
+  };
+  sandbox.location.hash = '#blk=blk1.' + btoa(unescape(encodeURIComponent(JSON.stringify(slimW))));
+  const mW = sandbox.App.modules['blk'](new El('div')); runRaf();
+  ok('反向拉线初始 2 元件 0 连线', /2 元件 · 0 连线/.test(counts()), counts());
+  const inB = toScreen(460 - 65, 160);    // box B 左入端口
+  const outA = toScreen(200 + 65, 160);   // box A 右出端口
+  ev('pointerdown', inB.x, inB.y);
+  ev('pointermove', outA.x, outA.y);
+  ev('pointerup', outA.x, outA.y);
+  ok('反向拉线生成连线（2 元件 1 连线）', /2 元件 · 1 连线/.test(counts()), counts());
+  registry['#blk-share'].fire('click', mkEvt({}));
+  const backW = JSON.parse(decodeURIComponent(escape(atob(sandbox.location.hash.slice('#blk=blk1.'.length)))));
+  ok('方向正确：源(A)→本(B) 即 e=[[1,2,1]]', JSON.stringify(backW.e) === '[[1,2,1]]', JSON.stringify(backW.e));
+  mW.api.dispose();
+}
+
 /* ================= 结果输出 ================= */
 console.log('\n通过 ' + pass + ' 项，失败 ' + fails.length + ' 项');
 if (fails.length) {

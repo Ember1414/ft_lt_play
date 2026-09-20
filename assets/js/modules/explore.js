@@ -53,7 +53,7 @@ App.register('explore', (host) => {
       id: 'ex-input',
       placeholder: '例：exp(-2*t)*sin(10*t)*u(t)   或   5/(s^2+0.5*s+1.25)',
       parse: (str) => {
-        const bare = str.replace(/\s+/g, '');
+        const bare = U.normChars(str).replace(/\s+/g, '');
         const isTF = /(^|[^a-zA-Z0-9_])s([^a-zA-Z0-9_]|$)/.test(bare) && bare.includes('/');
         if (isTF) {
           const t = FX_LIB.parseTF(str);
@@ -84,8 +84,8 @@ App.register('explore', (host) => {
     const go = (str0) => {
       const str = (str0 != null ? String(str0) : ex.get()).trim();
       if (!str) return;
-      // 's' 必须是独立变量（而非 sin/abs 的首字母）且含 '/' → 传递函数
-      const bare = str.replace(/\s+/g, '');
+      // 's' 必须是独立变量（而非 sin/abs 的首字母）且含 '/' → 传递函数（先归一化，全角 ｓ／ 同样可判）
+      const bare = U.normChars(str).replace(/\s+/g, '');
       const isTF = /(^|[^a-zA-Z0-9_])s([^a-zA-Z0-9_]|$)/.test(bare) && bare.includes('/');
       const res = box.querySelector('#ex-result');
       let okFlag = false;
@@ -1164,6 +1164,7 @@ App.register('explore', (host) => {
   function pzPlot(cvEl, poles, zeros) {
     pzPolesNow = poles; pzZerosNow = zeros;
     if (!pzPlane || pzPlane.cv !== cvEl) {
+      if (pzPlane) pzPlane.dispose();   // 旧画布已替换：先释放旧实例的全局监听
       // 新结果容器 → 新画布 → 新实例（构造即按新零极点适配视野）
       pzPlane = new FX.ComplexPlane(cvEl, {
         mode: 'jw',
@@ -1206,6 +1207,7 @@ App.register('explore', (host) => {
     if (speechRec) { try { speechRec.onend = null; speechRec.stop(); } catch (e) {} speechRec = null; }
     if (winUpHandler) { window.removeEventListener('pointerup', winUpHandler); winUpHandler = null; }
     if (drawRO) { drawRO.disconnect(); drawRO = null; }
+    if (pzPlane) { pzPlane.dispose(); pzPlane = null; }
     exprRedraw = tfRedraw = drawReset = null;
   }
 });

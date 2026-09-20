@@ -342,7 +342,8 @@ const FX_LIB = (() => {
   }
   function parseTimeExpr(str) {
     if (!window.math) return null;
-    const s0 = String(str || '');
+    // 与其他解析入口一致：先做全角/Unicode 负号/上标/** 归一化（U.normChars），再交给 mathjs
+    const s0 = U.normChars(String(str || ''));
     if (!s0.trim() || s0.length > 300) return null;
     try {
       const node = window.math.parse(s0);

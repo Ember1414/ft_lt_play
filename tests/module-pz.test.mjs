@@ -330,7 +330,6 @@ const ctxLog = (id) => reg(id).getContext()._log;
   const pInputs = sys$('#sys-params')._search('input', []);
   ok('sys 参数行含 z/wn 数值输入', pInputs.filter((i) => i._a['aria-label'] === '参数 z' || i._a['aria-label'] === '参数 wn').length === 2, 'n=' + pInputs.length + ' labels=[' + pInputs.map((i) => i._a['aria-label']).join(',') + ']');
   // 扫掠：wn = 1,2 → 家族表出现
-  console.error('DBG pInputs:', pInputs.map((i) => i._a['aria-label'] + '|v=' + i.value).join(' , '));
   const swIn = pInputs.find((i) => i._a['aria-label'] === 'wn 扫掠列表');
   swIn.value = '1,2';
   swIn.fire('change', mkEvt({ target: swIn }));

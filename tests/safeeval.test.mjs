@@ -58,6 +58,29 @@ ok('safeCalc 拒绝对象/属性访问', throws(() => U.safeCalc('constructor'))
 /* ---------- FX_LIB.parseTimeExpr AST 白名单（无 mathjs 时拒绝路径） ---------- */
 ok('无 mathjs → parseTimeExpr 返回 null', FX_LIB.parseTimeExpr('sin(t)') === null);
 
+/* ---------- FX_LIB.parseTimeExpr 归一化入口（全角/Unicode 负号/上标/** → ASCII 后再交 mathjs） ---------- */
+{
+  let seen = null;
+  sandbox.window.math = {
+    parse: (s) => {
+      seen = s;
+      return { type: 'ConstantNode', value: 1, traverse(cb) { cb(this); }, evaluate() { return 1; } };
+    }
+  };
+  FX_LIB.parseTimeExpr('ｅｘｐ（－２＊ｔ）');   // 全角字母/括号/数字 + 全角负号与乘号
+  ok('parseTimeExpr 全角归一化后交 mathjs', seen === 'exp(-2*t)', JSON.stringify(seen));
+  seen = null;
+  FX_LIB.parseTimeExpr('t**2');
+  ok('parseTimeExpr 归一化 ** 为 ^', seen === 't^2', JSON.stringify(seen));
+  seen = null;
+  FX_LIB.parseTimeExpr('ｓｉｎ（ｔ）');
+  ok('parseTimeExpr 全角函数名归一化', seen === 'sin(t)', JSON.stringify(seen));
+  seen = null;
+  FX_LIB.parseTimeExpr('exp(-2*t)*sin(10*t)*u(t)');   // 合法 ASCII 必须原样不变（守护不回归）
+  ok('parseTimeExpr 保持合法 ASCII 原样', seen === 'exp(-2*t)*sin(10*t)*u(t)', JSON.stringify(seen));
+  delete sandbox.window.math;
+}
+
 console.log(fails.length
   ? `✗ safeeval ${pass} 通过，${fails.length} 失败:\n  ` + fails.join('\n  ')
   : `✓ safeeval ${pass} 项全部通过`);

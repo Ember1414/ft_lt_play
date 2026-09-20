@@ -259,7 +259,8 @@ App.hashFree = () => !App.exps.cur();
     csv: () => null
   });
   const btns = host.querySelectorAll('button');
-  ok('工具栏渲染 6 个操作（无 canvases 时无 PNG）', btns.length === 6, String(btns.length));
+  const acts = btns.filter((b) => (b.className || '').includes('rtb-act'));
+  ok('工具栏 6 个动作 + 1 个更多切换（无 canvases 时无 PNG）', acts.length === 6 && btns.length === 7, 'act=' + acts.length + ' btn=' + btns.length);
   const byTitle = (t) => btns.find((b) => b._a.title === t);
   byTitle('保存当前状态到实验（含可恢复快照）').fire('click', mkEvt({}));
   ok('无实验时保存自动创建并提示', toasts.some((t) => /已保存实验/.test(t.m)) && PX.list().length === 1);

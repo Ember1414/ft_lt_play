@@ -1128,5 +1128,5 @@ App.register('sys', (host) => {
   solve();
 
   return { title: '系统分析', api: { dispose, onTheme: () => { renderChart(); drawTimeStep(); }, getState, applyState } };
-  function dispose() { }
+  function dispose() { tfIn.destroy(); }
 });

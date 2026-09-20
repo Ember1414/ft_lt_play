@@ -407,5 +407,5 @@ App.register('zt', (host) => {
   });
 
   return { title: 'Z 变换', api: { dispose, onTheme: () => { renderAll(); }, getState, applyState } };
-  function dispose() { if (plane) plane.dispose(); }
+  function dispose() { if (plane) plane.dispose(); if (tfIn) tfIn.destroy(); }
 });

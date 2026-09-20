@@ -446,5 +446,5 @@ App.register('pid', (host) => {
   }
 
   return { title: 'PID 整定', api: { dispose, onTheme: () => { renderG(); solve(); }, getState, applyState } };
-  function dispose() { }
+  function dispose() { if (pzPlane) { pzPlane.dispose(); pzPlane = null; } }
 });

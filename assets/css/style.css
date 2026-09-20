@@ -709,7 +709,10 @@ input[type="range"]::-webkit-slider-thumb {
   color: var(--text-dim); font-size: 13px; line-height: 1.8;
 }
 .wb-onboard b { color: var(--text); }
-.rtb-bar { align-items: center; }
+.rtb-bar { align-items: center; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; }
+.rtb-primary, .rtb-more { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.rtb-morewrap { display: inline-flex; align-items: center; }
+.rtb-more-toggle, .rtb-more-bd { display: none; }
 @media (max-width: 900px) {
   .wb-act .chip { min-width: 38px; min-height: 38px; }  /* 触控命中区 ≥44px 含内边距 */
   .wb-tpl-card { min-width: 46%; }
@@ -726,3 +729,37 @@ input[type="range"]::-webkit-slider-thumb {
 .cp-item.active, .cp-item:hover { background: var(--accent-soft); }
 .cp-name { font-weight: 600; }
 .cp-hint { margin-left: auto; font-size: 11.5px; color: var(--text-faint); }
+
+/* 结果工具栏窄屏收纳：主操作直显，次级收进「⋯ 更多」底部 action-sheet（触控命中 ≥44px） */
+@media (max-width: 480px) {
+  .rtb-bar { gap: 6px; }
+  .rtb-primary .btn { min-height: 44px; padding: 8px 12px; }
+  .rtb-more-toggle { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 48px; }
+  .rtb-more {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 996;
+    flex-direction: column; align-items: stretch; gap: 0;
+    background: var(--panel); border-top: 1px solid var(--line-2); border-radius: 14px 14px 0 0;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -6px 24px rgba(0, 0, 0, .35);
+    transform: translateY(105%); transition: transform .22s ease;
+  }
+  .rtb-morewrap.open .rtb-more { transform: translateY(0); }
+  .rtb-more .btn { width: 100%; min-height: 48px; margin: 5px 0; border-radius: 10px; text-align: left; }
+  .rtb-more-bd { position: fixed; inset: 0; z-index: 995; background: rgba(0, 0, 0, .45); }
+  .rtb-morewrap.open .rtb-more-bd { display: block; }
+}
+
+/* 极窄屏（≤480px）：交互控件触控命中区统一 ≥44px、工作台卡片单列、符号键盘横向滚动防遮挡 */
+@media (max-width: 480px) {
+  .btn, .chip { min-height: 44px; }
+  .chip { display: inline-flex; align-items: center; padding: 8px 14px; }
+  .icon-btn { width: 44px; height: 44px; }
+  .pad-key, .kbd .chip.pad-key { min-width: 44px; min-height: 44px; }
+  .blk-cvbtn { min-height: 44px; }
+  .blk-tab { flex: 1 1 auto; min-height: 44px; }
+  .wb-act .chip { min-width: 44px; min-height: 44px; }
+  .wb-tpl-card { min-width: 100%; }   /* 覆盖 900px 的 46%：单列更易读不挤压 */
+  .kbd { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .kbd::-webkit-scrollbar { display: none; }
+  .kbd .chip.pad-key { flex: 0 0 auto; }
+}
