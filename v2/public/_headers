@@ -1,0 +1,18 @@
+# v2 部署安全响应头（Cloudflare Pages；构建时由 Vite 从 public/ 复制到 dist/）
+# v2 为纯静态 local-first 应用：无后端请求，KaTeX 本地打包（无需放行任何 CDN）。
+# 注意：
+# - style-src 需要 'unsafe-inline'：KaTeX 渲染会写内联 style 属性
+# - img-src / worker-src 放行 blob:：导出报告内嵌 dataURL、Blob 下载
+# - connect-src 收紧为 'self'：全站不发任何外部请求
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: microphone=(self), camera=(), geolocation=(), payment=(), usb=()
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'
+
+# 版本化资产（Vite 带内容哈希）长缓存；入口 HTML 不缓存（升级后立刻生效）
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+/index.html
+  Cache-Control: no-cache

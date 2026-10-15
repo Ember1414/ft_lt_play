@@ -50,7 +50,7 @@ App.register('sys', (host) => {
             <button class="btn primary" id="sys-routh-go">生成劳斯表</button>
           </div>
           <div id="sys-routh-out"></div>
-          <div class="hint">劳斯判据：第一列符号变号次数 = 右半平面根数。第一列全同号 → 系统稳定。</div>
+          <div class="hint">劳斯判据：第一列符号变号次数 = 右半平面根数。第一列全同号 → 系统稳定。离散系统请使用 Z 变换模块的 Jury 判据。</div>
         </details>
         <details class="plot-fold" id="sys-char-fold">
           <summary>特征方程分析 D(s) = 0</summary>
@@ -61,6 +61,16 @@ App.register('sys', (host) => {
           </div>
           <div id="sys-char-out"></div>
           <div class="hint">输入特征方程后自动求根：给出特征根、稳定性、主导极点的 ζ/ωₙ，并绘制自由响应（1/D(s) 的冲激响应）。</div>
+        </details>
+        <details class="plot-fold" id="sys-sens-fold">
+          <summary>灵敏度分析 S(s) = 1/(1+L)（单位反馈）</summary>
+          <div id="sys-sens-out"></div>
+          <div class="hint">|S(jω)| 反映闭环输出对对象参数摄动的灵敏度与扰动抑制能力：低频 |S| 越小，跟踪与抗扰越好；峰值 Ms 越大鲁棒性越差（工程边界 Ms ≈ 2，即 6 dB，红色虚线所示）。</div>
+        </details>
+        <details class="plot-fold" id="sys-dyn-fold">
+          <summary>动态误差系数（误差传函 Φe(s) = 1/(1+L) 幂级数展开）</summary>
+          <div id="sys-dyn-out"></div>
+          <div class="hint">稳态误差按输入的时间分量展开：e_ss(t) = k₀·r(t) + k₁·r′(t) + k₂·r″(t) + …。k₀ 即静态位置误差 1/(1+Kp)；型别 1 系统有 k₀=0、k₁=1/Kv；输入含高阶导数分量时需看更高阶系数。</div>
         </details>
         <div class="hint">按分数线填写分子 / 分母，支持因式 <code>(s+2)*(s+3)</code>。结构按钮可一键套模板。</div>
         <details class="plot-fold" id="sys-ss-fold">
@@ -151,11 +161,13 @@ App.register('sys', (host) => {
     ['超前', 's+z', 's+p', { z: 2, p: 0.5 }],
     ['滞后', 's+z', 's+p', { z: 0.5, p: 2 }],
     ['积分', '1', 's', {}],
-    ['PID', 'kd*s^2+kp*s+ki', 's', { kp: 1, ki: 0.5, kd: 0.1 }]
+    // PID 控制器需为真分式才可在此分析：分母补一阶滤波 s*(tf*s+1)
+    // （原模板 kd*s^2+kp*s+ki / s 为非真分式，被真分式门控拒绝 → 点按钮即报“无法解析”）
+    ['PID', 'kd*s^2+kp*s+ki', 's*(tf*s+1)', { kp: 1, ki: 0.5, kd: 0.1, tf: 0.02 }]
   ];
   const sRow = $('#sys-struct');
   structs.forEach(([name, numT, denT, defaults]) => {
-    const c = U.el('button', { class: 'chip' }, name);
+    const c = U.el('button', { class: 'chip', 'data-num': numT, 'data-den': denT, title: '分子 ' + numT + ' / 分母 ' + denT }, name);
     c.addEventListener('click', () => {
       // 插入符号串 + 参数种子值：参数行自动出现，改值即重解
       paramSeeds = Object.assign({}, defaults);
@@ -306,7 +318,9 @@ App.register('sys', (host) => {
     // 主成员（当前值）+ 各参数扫掠成员（逐参数，上限 5）
     const mkMember = (scope) => {
       const full = { pi: Math.PI, e: Math.E, ...scope };
-      const tn = FX_LIB.parseTF(FX_LIB.substituteParams(rawNum || '1', full) + '/(' + FX_LIB.substituteParams(rawDen || '1', full) + ')');
+      // 分子同样要加括号：形如 kd*s^2+kp*s+ki 的模板若裸拼接会出现
+      // 「只在首个 '/' 处切分」的错解（多项式被拆到分母一侧）→ 解析失败或结果错误
+      const tn = FX_LIB.parseTF('(' + FX_LIB.substituteParams(rawNum || '1', full) + ')/(' + FX_LIB.substituteParams(rawDen || '1', full) + ')');
       if (!tn || !tn.den || !tn.den[0] || tn.num.length > tn.den.length) return null;
       return { scope, num: tn.num, den: tn.den };
     };
@@ -351,8 +365,8 @@ App.register('sys', (host) => {
 
   function renderTex() {
     const el = $('#sys-tex'); el.innerHTML = '';
-    try { if (window.katex) window.katex.render('H(s)=\\dfrac{' + polyTex(num) + '}{' + polyTex(den) + '}', el, { throwOnError: false, displayMode: true }); else el.textContent = ''; }
-    catch (e) { }
+    // FX.katex：KaTeX 缺库/渲染失败时降级为可读纯文本（旧实现会留空，用户误以为「解析失败」）
+    try { FX.katex('H(s)=\\dfrac{' + polyTex(num) + '}{' + polyTex(den) + '}', el, { displayMode: true }); } catch (e) { }
   }
   function polyTex(c) { return U.polyTex(c); }
 
@@ -372,6 +386,11 @@ App.register('sys', (host) => {
       cache.nyq = { w, re, im };
     }
     return cache.nyq;
+  }
+  /* 闭环频域指标（单位反馈 T = num/(num+den)）：谐振峰 Mr/ωr 与闭环带宽 ωb，求解后随缓存重算 */
+  function getClosedLoop() {
+    if (!cache.clm) cache.clm = DSP.closedLoopMetrics(num, den);
+    return cache.clm;
   }
   function stripLead(c) {
     const a = c.slice();
@@ -411,6 +430,8 @@ App.register('sys', (host) => {
     renderChart();
     drawTimeStep();
     renderMetrics();
+    if ($('#sys-sens-fold').open) renderSens();
+    if ($('#sys-dyn-fold').open) renderDynErr();
   }
 
   function renderChart() {
@@ -719,6 +740,12 @@ App.register('sys', (host) => {
       return isFinite(magAt) ? -magAt : null;
     })();
     stats.push({ k: '增益裕度 GM', v: gm === Infinity ? '∞ dB' : gm == null ? '—' : U.fmt(gm, 1) + ' dB' });
+    // 闭环频域指标（单位反馈 T = num/(num+den)）：闭环不稳定时无意义 → 「—」
+    const clm = getClosedLoop();
+    stats.push({ k: '闭环带宽 ωb', v: clm.wb != null ? U.fmt(clm.wb) + ' rad/s' : '—' });
+    stats.push({ k: '谐振峰 Mr/ωr', v: clm.Mr != null
+      ? U.fmt(clm.Mr, 2) + ' / ' + (clm.wr != null ? U.fmt(clm.wr) + ' rad/s' : '—')
+      : '—' });
     // 稳态误差与系统型别（单位负反馈）
     const sse = DSP.steadyState(num, den);
     const fmtInf = (v) => !isFinite(v) ? '∞' : U.fmt(v, 3);
@@ -749,8 +776,11 @@ App.register('sys', (host) => {
         return `<tr><td>${swatch}${lbl || '主成员'}</td><td style="color:${stColor}">${st}</td><td>${zwn}</td></tr>`;
       }).join('');
       const box = document.createElement('div');
+      box.className = 'sys-fam-tbl';
       box.innerHTML = '<table class="tbl" style="max-width:520px;margin-top:8px"><tr><th>成员</th><th>稳定性</th><th>主导极点</th></tr>' + rows + '</table>';
-      ($('#sys-metrics').parentElement || $('#sys-metrics')).appendChild(box);
+      const parent = $('#sys-metrics').parentElement || $('#sys-metrics');
+      parent.querySelectorAll('.sys-fam-tbl').forEach((el) => el.remove());
+      parent.appendChild(box);
     }
   }
 
@@ -1004,6 +1034,79 @@ App.register('sys', (host) => {
     if ($('#sys-char-fold').open && !$('#sys-char-in').value.trim()) $('#sys-char-in').value = polyToPlain(den);
   });
 
+  /* ---------- 灵敏度分析 S(s)=1/(1+L)（单位反馈）：|S| dB 曲线 + 峰值 Ms 标注 ---------- */
+  function renderSens() {
+    const out = $('#sys-sens-out');
+    const b = getBode();
+    const smag = [];
+    let lo = Infinity, hi = -Infinity, mi = 0;
+    for (let i = 0; i < b.w.length; i++) {
+      const h = DSP.evalH(num, den, b.w[i]);
+      // |S| = 1/|1+H| → dB：−20log|1+H|；限幅防止 1+H≈0（临界）时坐标被撑爆
+      const sv = Math.max(-100, Math.min(100, -20 * Math.log10(Math.hypot(1 + h.re, h.im) + 1e-12)));
+      smag.push(sv);
+      if (isFinite(sv)) {
+        if (sv < lo) lo = sv;
+        if (sv > hi) { hi = sv; mi = i; }
+      }
+    }
+    if (!isFinite(lo)) { lo = -40; hi = 20; }
+    const MsAbs = Math.pow(10, hi / 20);
+    const msColor = MsAbs > 2.1 ? 'var(--danger)' : MsAbs > 1.5 ? 'var(--warn)' : 'var(--accent-2)';
+    out.innerHTML = `<div class="statbar" style="padding:8px 0">
+      <div class="stat"><span class="k">灵敏度峰值 Ms</span><span class="v" style="color:${msColor}">${U.fmt(hi, 1)} dB（|S|=${U.fmt(MsAbs, 2)}）</span></div>
+      <div class="stat"><span class="k">峰值频率 ω_Ms</span><span class="v">${U.fmt(b.w[mi])} rad/s</span></div>
+    </div>
+    <div class="canvas-wrap" style="height:170px"><canvas class="plot" id="sys-sens-cv"></canvas></div>`;
+    if (FX.enablePlotChrome) FX.enablePlotChrome(out);
+    const p = new FX.Plot($('#sys-sens-cv'), { logX: true, margin: { l: 46, r: 12, t: 10, b: 26 } });
+    const drawSens = () => {
+      let ylo = Infinity, yhi = -Infinity;
+      for (const v of smag) if (isFinite(v)) { ylo = Math.min(ylo, v); yhi = Math.max(yhi, v); }
+      if (!isFinite(ylo)) { ylo = -40; yhi = 20; }
+      if (yhi - ylo < 10) { const mid = (ylo + yhi) / 2; ylo = mid - 10; yhi = mid + 10; }
+      p.setRange(b.w[0], b.w[b.w.length - 1], ylo - 6, yhi + 6);
+      p.clear(); p.grid(null, null); p.axis();
+      p.clip();
+      // Ms = 2（6 dB）工程鲁棒性边界参考线
+      p.line([b.w[0], b.w[b.w.length - 1]], [6.02, 6.02], { color: cv('--cv-danger'), width: 1 });
+      p.line(b.w, smag, { color: cv('--cv-line2'), width: 2, fill: cv('--cv-fill-blue') });
+      p.dots([b.w[mi]], [smag[mi]], { color: cv('--cv-warn'), r: 4 });
+      p.unclip();
+      p.label('Ms=' + U.fmt(hi, 1) + ' dB', p.sx(b.w[mi]) + 8, p.sy(smag[mi]) - 8, { color: cv('--cv-warn'), size: 10 });
+      p.crosshair((w) => 'ω=' + U.fmt(w, 3) + ' rad/s', (v) => v.toFixed(1) + ' dB');
+    };
+    p.onDraw = drawSens;
+    drawSens();
+  }
+
+  /* ---------- 动态误差系数：Φe(s)=den/(den+num) 在 s=0 的幂级数展开（长除法） ---------- */
+  const ERR_SUPS = ['⁰', '¹', '²', '³', '⁴', '⁵'];
+  function renderDynErr() {
+    const out = $('#sys-dyn-out');
+    if (den.length <= num.length) {
+      out.innerHTML = '<p class="hint" style="color:var(--warn)">⚠ L(s) 非严格真分式（相对阶为 0）：Φe(s)=1/(1+L) 在 s→∞ 不为零，幂级数展开不适用。</p>';
+      return;
+    }
+    const r = DSP.errSeries(num, den, 6);
+    if (!r.ok) { out.innerHTML = '<p class="hint" style="color:var(--warn)">⚠ ' + r.note + '</p>'; return; }
+    const rows = r.ks.map((k, i) => {
+      const inp = i === 0 ? 'r(t)（阶跃）' : i === 1 ? 'r′(t)（斜坡）' : i === 2 ? 'r″(t)（抛物线）' : 'r⁽' + ERR_SUPS[i] + '⁾(t)（高阶）';
+      const ess = i === 0 ? '单位阶跃稳态误差 = k₀' : i === 1 ? '单位斜坡稳态误差 = k₁' : i === 2 ? '单位抛物线稳态误差 = k₂' : '对应 r⁽' + ERR_SUPS[i] + '⁾ 分量';
+      return `<tr><td style="font-family:var(--mono)">k<sub>${i}</sub></td><td style="font-family:var(--mono)">${U.fmt(k, 4)}</td><td>${inp}</td><td>${ess}</td></tr>`;
+    }).join('');
+    out.innerHTML = `<table class="tbl" style="max-width:560px">
+      <tr><th>系数</th><th>值</th><th>对应输入分量</th><th>稳态误差项</th></tr>${rows}
+      <tr><td style="font-family:var(--mono)">…</td><td>…</td><td>更高阶导数分量</td><td>级数按 s 幂次无限延续</td></tr>
+    </table>
+    <p class="hint" style="margin-top:6px">e_ss(t) = k₀·r(t) + k₁·r′(t) + k₂·r″(t) + …（Φe 严格真分式 → 级数无限延续；单位幅值输入下各项即对应标准输入的稳态误差）。</p>`;
+  }
+  {
+    const sf = $('#sys-sens-fold'), df = $('#sys-dyn-fold');
+    sf.addEventListener('toggle', () => { if (sf.open) renderSens(); });
+    df.addEventListener('toggle', () => { if (df.open) renderDynErr(); });
+  }
+
   /* ---------- 状态空间分析（SS 内核：能控能观 / Ackermann / 观测器） ---------- */
   const ssPresets = {
     二阶系统: { A: '0 1; -2 -1', B: '0; 1', C: '1 0', D: '0', des: '-1+2j, -1-2j', obs: '-5, -6' },
@@ -1013,7 +1116,8 @@ App.register('sys', (host) => {
   };
   function ssParseMat(text, rows) {
     // rows=null → 方阵；返回 {ok, M}；支持换行或「;」分行，空白/逗号分列
-    const lines = String(text || '').split(/[\n;]/).map((l) => l.trim()).filter(Boolean);
+    // 入口归一化：全角数字/负号/逗号/分号/空格 → 半角（U.normChars），否则全角负号 Number() 得 NaN 被拒
+    const lines = U.normChars(String(text || '')).split(/[\n;]/).map((l) => l.trim()).filter(Boolean);
     if (!lines.length) return { ok: false, note: '矩阵为空' };
     const M = lines.map((l) => l.split(/[\s,，]+/).filter(Boolean).map(Number));
     if (M.some((r) => r.some((v) => !isFinite(v)))) return { ok: false, note: '存在非数值元素' };
@@ -1023,14 +1127,14 @@ App.register('sys', (host) => {
     return { ok: true, M };
   }
   function ssParseVec(text, n) {
-    const parts = String(text || '').split(/[\s,，;]+/).filter(Boolean).map(Number);
+    const parts = U.normChars(String(text || '')).split(/[\s,，;]+/).filter(Boolean).map(Number);
     if (!parts.length || parts.some((v) => !isFinite(v))) return null;
     if (parts.length !== n) return null;
     return parts;
   }
   function ssParsePoles(text) {
     const out = [];
-    for (const tk of String(text || '').split(/[,，;\s]+/).filter(Boolean)) {
+    for (const tk of U.normChars(String(text || '')).split(/[,，;\s]+/).filter(Boolean)) {
       const s = tk.toLowerCase();
       let re = 0, im = 0;
       if (s === 'j' || s === '+j' || s === '-j') { re = 0; im = s[0] === '-' ? -1 : 1; }
@@ -1075,7 +1179,7 @@ App.register('sys', (host) => {
       `</table>
       <div class="formula-center" style="margin-top:8px"></div>`;
     out.innerHTML = html;
-    try { if (window.katex) window.katex.render('G(s)=C(sI-A)^{-1}B+D=\\dfrac{' + U.polyTex(r.tf.num) + '}{' + U.polyTex(r.tf.den) + '}', out.querySelector('.formula-center'), { throwOnError: false, displayMode: true }); } catch (e) { }
+    try { FX.katex('G(s)=C(sI-A)^{-1}B+D=\\dfrac{' + U.polyTex(r.tf.num) + '}{' + U.polyTex(r.tf.den) + '}', out.querySelector('.formula-center'), { displayMode: true }); } catch (e) { }
     // 极点配置（Ackermann）与观测器（对偶系统）
     const cfg = [];
     const desTxt = $('#sys-ss-des').value.trim(), obsTxt = $('#sys-ss-obs').value.trim();

@@ -8,7 +8,30 @@ import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const sandbox = { console, btoa, atob, TextEncoder, TextDecoder };
+/* U 工具：project.js 依赖 U.utf8Encode / U.utf8Decode */
+const utf8Encode = (str) => {
+  let binary = '';
+  for (let i = 0; i < str.length; i++) {
+    let code = str.charCodeAt(i);
+    if (code < 128) { binary += String.fromCharCode(code); }
+    else if (code < 2048) { binary += String.fromCharCode(192 | (code >> 6), 128 | (code & 63)); }
+    else if (code < 0xD800 || code >= 0xE000) { binary += String.fromCharCode(224 | (code >> 12), 128 | ((code >> 6) & 63), 128 | (code & 63)); }
+    else { i++; code = 0x10000 + (((code & 0x3FF) << 10) | (str.charCodeAt(i) & 0x3FF)); binary += String.fromCharCode(240 | (code >> 18), 128 | ((code >> 12) & 63), 128 | ((code >> 6) & 63), 128 | (code & 63)); }
+  }
+  return binary;
+};
+const utf8Decode = (bin) => {
+  let out = '';
+  for (let i = 0; i < bin.length; ) {
+    const c = bin.charCodeAt(i);
+    if (c < 128) { out += String.fromCharCode(c); i++; }
+    else if (c >= 192 && c < 224) { out += String.fromCharCode(((c & 31) << 6) | (bin.charCodeAt(i + 1) & 63)); i += 2; }
+    else if (c >= 224 && c < 240) { out += String.fromCharCode(((c & 15) << 12) | ((bin.charCodeAt(i + 1) & 63) << 6) | (bin.charCodeAt(i + 2) & 63)); i += 3; }
+    else { let u = ((c & 7) << 18) | ((bin.charCodeAt(i + 1) & 63) << 12) | ((bin.charCodeAt(i + 2) & 63) << 6) | (bin.charCodeAt(i + 3) & 63); u -= 0x10000; out += String.fromCharCode(0xD800 + (u >> 10), 0xDC00 + (u & 0x3FF)); i += 4; }
+  }
+  return out;
+};
+const sandbox = { console, btoa, atob, TextEncoder, TextDecoder, U: { utf8Encode, utf8Decode } };
 sandbox.window = sandbox;
 vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync(path.join(root, 'assets/js/lib/project.js'), 'utf8'), sandbox, { filename: 'project.js' });

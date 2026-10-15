@@ -1,0 +1,294 @@
+/* ============================================================
+ * shell.css — 应用外壳（FR-01）+ 统一工作区骨架（FR-09）
+ * + 命令面板 + 移动导航 + 卡片族（模板 / 继续 / 路径 / 快照）
+ * 规则：只引用 tokens.css 令牌；响应式断点 <560 / 560–1024 / >1024。
+ * ============================================================ */
+
+.app { display: flex; min-height: 100vh; }
+
+/* —— 左侧栏（桌面） —— */
+.side {
+  flex: 0 0 224px; display: flex; flex-direction: column; gap: 2px;
+  padding: 10px 8px; background: var(--panel-2);
+  border-right: 1px solid var(--line);
+  position: sticky; top: 0; height: 100vh; overflow-y: auto;
+}
+.app.is-nav-collapsed .side { flex-basis: 56px; }
+.side-head { display: flex; align-items: center; gap: 8px; padding: 4px 6px 10px; }
+.side-brand-mark {
+  display: inline-grid; place-items: center; width: 26px; height: 26px; flex: 0 0 26px;
+  border-radius: var(--r-sm); background: var(--accent); color: #fff; font-weight: var(--w-black);
+}
+.side-brand { font-weight: var(--w-bold); font-size: var(--fs-3); letter-spacing: .2px; white-space: nowrap; }
+.side-collapse { margin-left: auto; color: var(--ink-3); padding: 2px 6px; border-radius: var(--r-sm); }
+.side-collapse:hover { color: var(--accent); background: var(--accent-soft); }
+.app.is-nav-collapsed .side-brand,
+.app.is-nav-collapsed .side-groupname,
+.app.is-nav-collapsed .side-label,
+.app.is-nav-collapsed .side-meta { display: none; }
+.app.is-nav-collapsed .side-item { justify-content: center; }
+
+.side-group { margin-top: 10px; display: flex; flex-direction: column; gap: 1px; }
+.side-groupname {
+  font-size: 11px; letter-spacing: .06em; color: var(--ink-3); font-weight: var(--w-bold);
+  padding: 2px 8px; text-transform: uppercase;
+}
+.side-item {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 6px 9px; border-radius: var(--r-sm);
+  font-size: var(--fs-2); font-weight: var(--w-medium); color: var(--ink-2);
+  text-align: left; transition: background var(--t-fast) var(--ease-out), color var(--t-fast) var(--ease-out);
+}
+.side-item:hover { background: var(--panel); color: var(--ink); }
+.side-item.is-on { background: var(--accent-soft); color: var(--accent); font-weight: var(--w-bold); }
+.side-glyph { width: 18px; text-align: center; font-size: 13px; flex: 0 0 18px; }
+.side-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.side-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--warn); margin-left: auto; flex: 0 0 5px; }
+.side-foot { margin-top: auto; border-top: 1px solid var(--line); padding-top: 8px; display: flex; flex-direction: column; gap: 1px; }
+.side-meta { padding: 6px 9px 2px; font-size: var(--fs-1); color: var(--ink-3); }
+
+/* —— 主列 + 顶栏 —— */
+.app-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; height: 100vh; }
+.top {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: 8px 14px; border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--paper) 90%, transparent);
+  backdrop-filter: blur(8px); z-index: 30;
+}
+.crumbs { display: flex; align-items: center; gap: 7px; font-size: var(--fs-2); min-width: 0; }
+.crumb-link { color: var(--ink-3); }
+.crumb-link:hover { color: var(--accent); }
+.crumb-sep { color: var(--line-2); }
+.crumb-cur { color: var(--ink); font-weight: var(--w-bold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.content { flex: 1 1 auto; overflow: auto; }
+.content > .stack { padding: var(--sp-6) var(--sp-6) var(--sp-8); max-width: 1180px; margin: 0 auto; }
+
+.banner { padding: 7px 14px; font-size: var(--fs-2); border-bottom: 1px solid transparent; }
+.banner-warn { background: var(--warn-soft); color: var(--warn); border-bottom-color: var(--warn-soft); }
+
+.btn-ghost { color: var(--ink-3); padding: 4px 8px; border-radius: var(--r-sm); font-size: var(--fs-4); }
+.btn-ghost:hover { color: var(--accent); background: var(--accent-soft); }
+.only-narrow { display: none; }
+
+/* —— 工作区骨架 —— */
+.ws { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-3); min-height: 100%; }
+.ws-bar {
+  display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
+  padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--r-md);
+  background: var(--panel);
+}
+.ws-title { font-weight: var(--w-bold); font-size: var(--fs-4); }
+.ws-expname { max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-body { flex: 1 1 auto; display: flex; gap: var(--sp-3); align-items: flex-start; }
+.ws-left { flex: 0 0 300px; display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+.ws-main { flex: 1 1 auto; display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+.ws-right { flex: 0 0 264px; display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+.ws-result {
+  position: sticky; bottom: 0; z-index: 20;
+  display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
+  padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  backdrop-filter: blur(8px);
+}
+.ws-metrics { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: stretch; }
+
+/* —— 图表容器（Canvas 背景由 CSS 提供，ctx 只画网格与曲线） —— */
+.chart {
+  position: relative; width: 100%;
+  background: var(--well); border: 1px solid var(--line); border-radius: var(--r-md);
+  overflow: hidden;
+}
+.chart canvas { display: block; cursor: crosshair; touch-action: none; }
+
+/* 卡片小标题（分析区/主区） */
+.card h4, .card-h { font-size: var(--fs-3); font-weight: var(--w-bold); margin: 0 0 var(--sp-2); }
+
+/* 宽内容表格：卡片内横向滚动（系数/极点等长文本列不裁切） */
+.tbl.scroll { display: block; overflow-x: auto; }
+
+/* —— 卡片族 —— */
+.cont-card { display: flex; align-items: center; gap: var(--sp-4); }
+.cont-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.cont-name { font-weight: var(--w-bold); font-size: var(--fs-5); }
+
+.tpl-card {
+  display: flex; flex-direction: column; gap: 4px; text-align: left;
+  padding: var(--sp-4); background: var(--panel);
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  transition: border-color var(--t-fast) var(--ease-out), transform var(--t-fast) var(--ease-out), box-shadow var(--t-fast) var(--ease-out);
+}
+.tpl-card:hover { border-color: var(--accent-line); box-shadow: var(--shadow-1); transform: translateY(-1px); }
+.tpl-card.is-disabled { opacity: .62; }
+.tpl-card.is-disabled:hover { transform: none; border-color: var(--line); box-shadow: none; }
+.tpl-glyph { font-size: 18px; color: var(--accent); }
+.tpl-name { font-weight: var(--w-bold); font-size: var(--fs-3); }
+.tpl-blurb { font-size: var(--fs-2); color: var(--ink-2); }
+.tpl-tool { font-size: var(--fs-1); color: var(--ink-3); margin-top: 4px; }
+
+.path-card { display: flex; flex-direction: column; gap: var(--sp-3); }
+.path-name { font-weight: var(--w-bold); font-size: var(--fs-4); }
+.snap-card { min-width: 180px; display: flex; flex-direction: column; gap: 6px; }
+.snap-label { font-weight: var(--w-medium); }
+
+/* —— 学习路径页 —— */
+.path-block { display: flex; flex-direction: column; gap: var(--sp-3); }
+.path-head {
+  display: flex; align-items: center; gap: var(--sp-3); width: 100%;
+  background: none; border: none; padding: 0; text-align: left; cursor: pointer;
+}
+.path-chev { color: var(--ink-3); font-size: var(--fs-2); }
+.path-title { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.path-prog { font: var(--w-medium) var(--fs-2)/1 var(--font-mono); color: var(--ink-2); white-space: nowrap; }
+.pbar { height: 6px; background: var(--well); border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+.pbar-fill { display: block; height: 100%; background: var(--accent); transition: width var(--t-med) var(--ease-out); }
+.steps { display: flex; flex-direction: column; gap: var(--sp-2); list-style: none; margin: 0; padding: 0; }
+.step {
+  display: flex; align-items: flex-start; gap: var(--sp-3);
+  padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--panel);
+}
+.step.is-done { border-color: var(--ok-line, var(--accent-line)); background: color-mix(in srgb, var(--accent-soft) 60%, transparent); }
+.step-check {
+  width: 26px; height: 26px; flex: 0 0 26px; border-radius: 50%;
+  border: 1px solid var(--line); background: var(--well); color: var(--ink-2);
+  font: var(--w-medium) var(--fs-1)/1 var(--font-mono); cursor: pointer;
+}
+.step-check.is-on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.step-body { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.step-title { font-weight: var(--w-medium); display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.step-tool { font: var(--w-regular) var(--fs-1)/1 var(--font-mono); color: var(--ink-3); }
+.step-actions { display: flex; align-items: center; }
+
+.tbl tr.is-current td { background: var(--accent-soft); }
+
+/* —— 工作区笔记面板（FR-07） —— */
+.ws-notes {
+  display: flex; flex-direction: column; gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-top: 1px solid var(--line); background: var(--panel);
+}
+
+/* —— 演示剧场旁白条（M3）：电影式字幕 + 节奏控制 —— */
+.ws-theater {
+  display: flex; flex-direction: column; gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-top: 1px solid var(--accent-line, var(--line));
+  background: color-mix(in srgb, var(--accent-soft) 55%, var(--panel));
+}
+.ws-theater-caption {
+  font-size: var(--fs-3); line-height: 1.6; color: var(--ink);
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--panel) 80%, transparent);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  animation: capIn 0.45s var(--ease-out) both;
+}
+/* 每节旁白入场过场（元素以 key=step 重建，动画每步重放；reduced-motion 下由全局规则关闭） */
+@keyframes capIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.btn.is-on { border-color: var(--accent-line); color: var(--accent); background: var(--accent-soft); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn.danger { color: var(--danger); border-color: var(--danger-soft); }
+.btn.danger:hover { border-color: var(--danger); }
+
+/* —— 命令面板 —— */
+.cmdk-mask {
+  position: fixed; inset: 0; z-index: 80;
+  background: color-mix(in srgb, var(--ink) 26%, transparent);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 12vh 16px 16px;
+}
+.cmdk {
+  width: min(620px, 100%); overflow: hidden;
+  background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
+  display: flex; flex-direction: column;
+  animation: cmdk-in var(--t) var(--ease-out);
+}
+@keyframes cmdk-in { from { opacity: 0; transform: translateY(-8px) scale(.985); } }
+.cmdk-input {
+  border: none; outline: none; padding: 14px 16px;
+  font: var(--w-medium) var(--fs-4)/1.4 var(--font-sans);
+  color: var(--ink); background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+.cmdk-input::placeholder { color: var(--ink-3); }
+.cmdk-list { max-height: 46vh; overflow-y: auto; padding: 6px; }
+.cmdk-item {
+  display: flex; flex-direction: column; gap: 1px; width: 100%; text-align: left;
+  padding: 8px 10px; border-radius: var(--r-sm);
+}
+.cmdk-item.is-on { background: var(--accent-soft); }
+.cmdk-title { font-size: var(--fs-3); font-weight: var(--w-medium); color: var(--ink); }
+.cmdk-item.is-on .cmdk-title { color: var(--accent); font-weight: var(--w-bold); }
+.cmdk-hint { font-size: var(--fs-1); color: var(--ink-3); }
+.cmdk-empty { padding: 18px; text-align: center; color: var(--ink-3); font-size: var(--fs-2); }
+.cmdk-foot {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 12px; border-top: 1px solid var(--line);
+  font-size: var(--fs-1); color: var(--ink-3);
+}
+.help-card { width: min(560px, 100%); display: flex; flex-direction: column; gap: var(--sp-3); }
+
+/* —— 轻提示 —— */
+.toast {
+  position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+  z-index: 90; padding: 9px 16px; border-radius: var(--r-full);
+  background: var(--ink); color: var(--paper);
+  font-size: var(--fs-2); font-weight: var(--w-medium);
+  box-shadow: var(--shadow-2);
+  animation: toast-in var(--t) var(--ease-out);
+}
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } }
+
+/* —— 移动底部标签栏 —— */
+.tabbar { display: none; }
+
+.nav-mask { display: none; }
+
+/* —— 响应式 —— */
+@media (max-width: 1280px) {
+  .ws-right { flex-basis: 232px; }
+}
+@media (max-width: 1024px) {
+  .only-narrow { display: inline-flex; }
+  /* 窄屏：结果条回到文档流（避免 sticky 遮挡图表），指标横向滚动 */
+  .ws-result { position: static; }
+  .ws-metrics { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; }
+  /* 表格在小屏改为横向滚动容器（避免列被压到逐字换行） */
+  .tbl { display: block; overflow-x: auto; white-space: nowrap; }
+  .side {
+    position: fixed; z-index: 70; width: 232px; flex-basis: 232px;
+    transform: translateX(-104%); transition: transform var(--t) var(--ease-out);
+    box-shadow: var(--shadow-2);
+  }
+  .app.is-mobile-nav .side { transform: none; }
+  .app.is-nav-collapsed .side { flex-basis: 232px; }
+  .app.is-nav-collapsed .side-brand, .app.is-nav-collapsed .side-label,
+  .app.is-nav-collapsed .side-groupname, .app.is-nav-collapsed .side-meta { display: block; }
+  .app.is-nav-collapsed .side-item { justify-content: flex-start; }
+  .nav-mask { display: block; position: fixed; inset: 0; z-index: 60; background: color-mix(in srgb, var(--ink) 30%, transparent); }
+  .app:not(.is-mobile-nav) .nav-mask { display: none; }
+  .ws-body { flex-wrap: wrap; }
+  .ws-left, .ws-right { flex: 1 1 100%; }
+  .tabbar {
+    display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    padding: 4px 6px calc(4px + env(safe-area-inset-bottom));
+    background: color-mix(in srgb, var(--panel) 94%, transparent);
+    backdrop-filter: blur(10px); border-top: 1px solid var(--line);
+  }
+  .tab {
+    flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: 2px;
+    padding: 6px 0; font-size: 11px; color: var(--ink-3); border-radius: var(--r-sm);
+  }
+  .tab.is-on { color: var(--accent); background: var(--accent-soft); }
+  .content { padding-bottom: 68px; }
+  .cmdk-mask { padding: 6vh 10px 10px; }
+}
+@media (max-width: 560px) {
+  .content > .stack { padding: var(--sp-4) var(--sp-3) var(--sp-6); }
+  .hero h1 { font-size: 24px; }
+  .cont-card { flex-direction: column; align-items: flex-start; }
+  .ws-left, .ws-right { flex-basis: 100%; }
+}

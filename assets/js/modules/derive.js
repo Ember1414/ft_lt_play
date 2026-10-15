@@ -100,7 +100,7 @@ App.register('derive', (host) => {
       ]
     },
     laplace: {
-      name: '拉普拉斯变换：e^{-at}u(t) 的定义积分',
+      name: '拉普拉斯变换：$\\mathcal{L}\\{e^{-at}u(t)\\}$ 的定义积分',
       desc: '直接用单边拉普拉斯变换定义推导。',
       steps: [
         { t: '三条定义', body: 'F(s)=\\int_{0^-}^{\\infty} f(t)e^{-st}dt, \\quad s=\\sigma+j\\omega' },
@@ -123,7 +123,7 @@ App.register('derive', (host) => {
       ]
     },
     zsum: {
-      name: 'Z 变换：a^{n}u[n] 的定义求和',
+      name: 'Z 变换：$\\mathcal{Z}\\{a^{n}u[n]\\}$ 的定义求和',
       desc: '单边 Z 变换定义 X(z)=Σ_{n=0}^{∞} x[n] z^{-n}，对指数序列用几何级数求和。',
       steps: [
         { t: '定义代入', body: 'X(z)=\\sum_{n=0}^{\\infty}a^{n}z^{-n}=\\sum_{n=0}^{\\infty}\\left(az^{-1}\\right)^{n}' },
@@ -144,6 +144,17 @@ App.register('derive', (host) => {
       ]
     }
   };
+
+  /* ---------- 混合文本：$...$ 段为 KaTeX 内联数学，其余为纯文本（导航/标题用，避免 LaTeX 源码直出） ---------- */
+  // 返回节点数组，调用方用 append(...nodes) 挂载（不依赖 createDocumentFragment，Node 测试桩友好）
+  function mixedNodes(str) {
+    const nodes = [];
+    String(str).split(/\$([^$]+)\$/g).forEach((part, i) => {
+      if (!part) return;
+      nodes.push(i % 2 ? FX.span(part) : document.createTextNode(part));
+    });
+    return nodes;
+  }
 
   // 步骤标题：支持 tm（KaTeX 内联数学）+ t（纯文本），避免标题里出现 e^(-2t) 之类的代码感写法
   function stepHeadEl(st, i) {
@@ -234,12 +245,12 @@ App.register('derive', (host) => {
           { t: '傅里叶（衰减信号，ROC 含 jω 轴）', desc: '令 s=jω 直接代入。', body: `F(j\\omega)=\\frac{1}{${A}+j\\omega}` }
         ];
         case 'texp': return [
-          { tm: `t^{${N}}e^{-${A}t}u(t)`, t: '：s 域微分性质', desc: `由 L{t^n f(t)}=(-1)^n d^nF/ds^n，对 1/(s+a) 求 ${N} 阶导。`, body: `(-1)^{${N}}\\frac{d^{${N}}}{ds^{${N}}}\\frac{1}{s+${A}}=\\frac{${fact(N)}}{(s+${A})^{${N + 1}}}` },
+          { tm: `t^{${N}}e^{-${A}t}u(t)`, t: '：s 域微分性质', desc: `时域乘 tⁿ 对应 s 域求 n 阶导（每阶多一个负号），本项即对 1/(s+a) 求 ${N} 阶导，过程见下式。`, body: `(-1)^{${N}}\\frac{d^{${N}}}{ds^{${N}}}\\frac{1}{s+${A}}=\\frac{${fact(N)}}{(s+${A})^{${N + 1}}}` },
           { t: '傅里叶', desc: '令 s=jω。', body: `F(j\\omega)=\\frac{${fact(N)}}{(${A}+j\\omega)^{${N + 1}}}` }
         ];
         case 'sin': return [
           { tm: `\\sin(${W}t)u(t)`, t: '：欧拉展开', desc: '正弦拆成一对共轭指数。', body: `\\sin(${W}t)=\\frac{e^{j${W}t}-e^{-j${W}t}}{2j}` },
-          { t: 's 域平移性质', desc: 'L{e^{at}f(t)}=F(s-a)，对 L{u(t)}=1/s 平移。', body: `\\mathcal{L}\\{e^{\\pm j${W}t}u(t)\\}=\\frac{1}{s\\mp j${W}}` },
+          { t: 's 域平移性质', desc: 's 域平移：时域乘指数因子 ⇔ F(s) 平移；对 1/s 平移 ±jW 即得下式。', body: `\\mathcal{L}\\{e^{\\pm j${W}t}u(t)\\}=\\frac{1}{s\\mp j${W}}` },
           { t: '合并', desc: '通分相减。', body: `\\frac{1}{2j}\\left[\\frac{1}{s-j${W}}-\\frac{1}{s+j${W}}\\right]=\\frac{${W}}{s^{2}+${num2tex(it.w * it.w)}}` },
           { t: '傅里叶（含冲激谱线）', desc: '正弦无衰减，频谱在 ±ω₀ 处有冲激谱线。', body: `F(j\\omega)=\\frac{\\pi}{2j}\\left[\\delta(\\omega-${W})-\\delta(\\omega+${W})\\right]` }
         ];
@@ -364,6 +375,12 @@ App.register('derive', (host) => {
     // 初始值 + 首次推导
     dv.set('2*exp(-1*t)*u(t)+sin(5*t)*u(t)');
     runCustom();
+    // 结果工具栏：随 renderCustom 重建（nav 重进 / KaTeX 回填重渲染后工具栏仍在）
+    RTB.attach(content.querySelector('#dv-rtb'), {
+      module: 'derive',
+      getState, applyState,
+      canvases: () => U.$$('canvas', content)
+    });
   }
 
   /* ---------- 渲染 ---------- */
@@ -387,16 +404,25 @@ App.register('derive', (host) => {
   const nav = host.querySelector('#dv-nav');
   const content = host.querySelector('#dv-content');
 
+  let curKey = null;   // 当前展示条目（KaTeX 备用源回填后据此重渲染）
   function renderItem(key) {
+    curKey = key;
     content.innerHTML = '';
     if (key === 'custom') { renderCustom(); return; }
     if (tables[key]) { renderTable(key); return; }
     if (derivations[key]) renderDerivation(key);
   }
+  const navMathLabels = {};   // data-k → 含 $...$ 数学段的标签（KaTeX 备用源回填后重填）
   function navButton(label, key, cls) {
-    const b = U.el('button', { class: 'chip' + (cls ? ' active' : ''), 'data-k': key, style: 'text-align:left' }, label);
+    const b = U.el('button', { class: 'chip' + (cls ? ' active' : ''), 'data-k': key, style: 'text-align:left' });
+    setNavLabel(b, label);
     b.addEventListener('click', () => { nav.querySelectorAll('.chip').forEach((x) => x.classList.remove('active')); b.classList.add('active'); renderItem(key); });
     nav.append(b);
+  }
+  // 标签填充：含 $...$ 段时混排 KaTeX 内联数学，否则纯文本
+  function setNavLabel(b, label) {
+    if (String(label).includes('$')) { navMathLabels[b.dataset.k] = label; b.textContent = ''; b.append(...mixedNodes(label)); }
+    else b.textContent = label;
   }
   // 导航：自定义 + 表格组 + 推导组
   navButton('🧮 输入函数 → 变换推导', 'custom');
@@ -408,9 +434,9 @@ App.register('derive', (host) => {
   navButton('常用 Z 变换对（含 ROC）', 'ztp');
   const g2 = U.el('div', { style: 'color:var(--text-faint);font-size:12px;margin:8px 4px 4px' }, '逐步推导'); nav.append(g2);
   navButton('方波的傅立叶级数', 'square');
-  navButton('L{e^{-at}u(t)} 定义积分', 'laplace');
+  navButton('$\\mathcal{L}\\{e^{-at}u(t)\\}$ 定义积分', 'laplace');
   navButton('矩形 ↔ sinc 变换', 'rect');
-  navButton('Z{a^n u[n]} 定义求和', 'zsum');
+  navButton('$\\mathcal{Z}\\{a^{n}u[n]\\}$ 定义求和', 'zsum');
   navButton('小例子：卷积求响应', 'conv1');
 
   function renderTable(key) {
@@ -447,7 +473,7 @@ App.register('derive', (host) => {
 
   function renderDerivation(key) {
     const d = derivations[key];
-    const h3 = document.createElement('h3'); h3.textContent = d.name; content.append(h3);
+    const h3 = document.createElement('h3'); h3.append(...mixedNodes(d.name)); content.append(h3);
     const p = document.createElement('p'); p.className = 'hint'; p.textContent = d.desc; content.append(p);
     const wrap = document.createElement('div'); wrap.className = 'steps'; content.append(wrap);
     d.steps.forEach((st, i) => {
@@ -485,11 +511,18 @@ App.register('derive', (host) => {
     dvRef.set(sv.expr);
     dvRef.apply();
   }
-  RTB.attach(content.querySelector('#dv-rtb'), {
-    module: 'derive',
-    getState, applyState,
-    canvases: () => U.$$('canvas', content)
-  });
+  /* ---------- KaTeX 备用源回填后重渲染（主源失败时先以兜底文本渲染，库到位即刷新） ---------- */
+  const onLibsReady = () => {
+    if (!window.katex || !curKey) return;
+    nav.querySelectorAll('.chip').forEach((b) => {
+      const lb = navMathLabels[b.dataset.k];
+      if (lb) { b.textContent = ''; b.append(...mixedNodes(lb)); }
+    });
+    const expr = (curKey === 'custom' && dvRef) ? dvRef.get() : null;   // 保留自定义推导输入
+    renderItem(curKey);
+    if (expr != null && dvRef) dvRef.set(expr);
+  };
+  document.addEventListener('libs-ready', onLibsReady);
   return { title: '公式推导', api: { dispose, onTheme: () => { }, getState, applyState } };
-  function dispose() { }
+  function dispose() { document.removeEventListener('libs-ready', onLibsReady); }
 });

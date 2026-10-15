@@ -111,11 +111,13 @@ const DSP = (() => {
     return { re, im };
   }
   function ifft(re, im) {
-    for (let i = 0; i < re.length; i++) im[i] = -im[i];   // 共轭输入
-    fft(re, im);
-    const n = re.length;
-    for (let i = 0; i < n; i++) { re[i] /= n; im[i] = -im[i] / n; }   // 除以 n 并共轭还原输出
-    return { re, im };
+    const reC = re.slice();
+    const imC = im.slice();
+    for (let i = 0; i < imC.length; i++) imC[i] = -imC[i];   // 共轭输入（副本，不修改原数组）
+    fft(reC, imC);
+    const n = reC.length;
+    for (let i = 0; i < n; i++) { reC[i] /= n; imC[i] = -imC[i] / n; }   // 除以 n 并共轭还原输出
+    return { re: reC, im: imC };
   }
 
   // 实数采样序列 -> 单边幅度/相位谱
@@ -174,6 +176,74 @@ const DSP = (() => {
     const out = new Float64Array(a.length + b.length - 1);
     for (let i = 0; i < a.length; i++) for (let j = 0; j < b.length; j++) out[i + j] += a[i] * b[j];
     return Array.from(out);
+  }
+
+  /* ---------- 频域反卷积（ε 正则化）：x̂ = IFFT( Y·conj(H) / (|H|²+ε) ) ----------
+   * y、h 补零至 ≥max(len(y),len(h)) 的 2 的幂做 FFT（y 为完整线性卷积结果时频域除法可精确恢复输入）。
+   * 返回 { x（长度=len(y)）, ok, residual }；残差 = ‖y − conv(x,h)‖/‖y‖（截断到 len(y)），
+   * > 0.1 → ok=false（典型原因：h 频谱有零点、y 非完整卷积结果或噪声过强；正则化抑制爆炸但有偏）。 */
+  function deconv(y, h) {
+    const N = y ? y.length : 0;
+    if (!N || !h || !h.length) return { ok: false, note: '输入序列为空' };
+    const eps = 1e-10;
+    let n = 1; while (n < Math.max(N, h.length)) n <<= 1;
+    const reY = new Float64Array(n), imY = new Float64Array(n);
+    const reH = new Float64Array(n), imH = new Float64Array(n);
+    for (let i = 0; i < N; i++) reY[i] = y[i];
+    for (let i = 0; i < Math.min(h.length, n); i++) reH[i] = h[i];
+    fft(reY, imY); fft(reH, imH);
+    for (let k = 0; k < n; k++) {
+      // Y·conj(H)/(|H|²+ε)：ε→0 的正则化极限，H 零点处不除零爆炸
+      const hr = reH[k], hi = imH[k];
+      const den = hr * hr + hi * hi + eps;
+      const nr = reY[k] * hr + imY[k] * hi;
+      const ni = imY[k] * hr - reY[k] * hi;
+      reY[k] = nr / den; imY[k] = ni / den;
+    }
+    const xf = ifft(reY, imY);
+    const x = Array.from(xf.re.slice(0, N));
+    // 残差回代：线性卷积截断到 len(y) 与观测对比
+    const yh = conv(x, h);
+    let res = 0, ny = 0;
+    for (let i = 0; i < N; i++) { const dv = y[i] - (yh[i] || 0); res += dv * dv; ny += y[i] * y[i]; }
+    const residual = Math.sqrt(res) / Math.max(Math.sqrt(ny), 1e-30);
+    return { x, ok: residual <= 0.1, residual };
+  }
+
+  /* ---------- 谱窗函数：rect | hamming | hanning | blackman（长度 N） ---------- */
+  function window(type, N) {
+    const w = new Array(Math.max(1, N));
+    if (N <= 1) { w[0] = 1; return w; }
+    for (let i = 0; i < N; i++) {
+      const r = (2 * Math.PI * i) / (N - 1);
+      if (type === 'hamming') w[i] = 0.54 - 0.46 * Math.cos(r);
+      else if (type === 'hanning') w[i] = 0.5 - 0.5 * Math.cos(r);
+      else if (type === 'blackman') w[i] = 0.42 - 0.5 * Math.cos(r) + 0.08 * Math.cos(2 * r);
+      else w[i] = 1;
+    }
+    for (let i = 0; i < N; i++) w[i] = Math.min(1, Math.max(0, w[i]));  // 清除浮点尘埃，保证严格 [0,1]
+    return w;
+  }
+
+  /* ---------- Box–Muller 白高斯噪声（n 点，标准差 sigma，缺省 1） ---------- */
+  function gaussNoise(n, sigma) {
+    const sg = sigma == null ? 1 : +sigma;
+    const out = new Array(Math.max(0, n | 0));
+    for (let i = 0; i < out.length; i++) {
+      let u1 = Math.random();
+      if (u1 < 1e-300) u1 = 1e-300;   // 防 log(0)
+      out[i] = sg * Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * Math.random());
+    }
+    return out;
+  }
+
+  /* ---------- 一阶 IIR 低通：y[k] = (1−α)·y[k−1] + α·x[k]（y[−1]=0，直接递推，非卷积） ---------- */
+  function iir1(x, alpha) {
+    const a = Math.min(Math.max(alpha == null ? 0 : +alpha, 0), 1);
+    const y = new Array(x.length);
+    let prev = 0;
+    for (let k = 0; k < x.length; k++) { prev = (1 - a) * prev + a * x[k]; y[k] = prev; }
+    return y;
   }
 
   /* ---------- 状态空间仿真（可控标准型 / RK4） ---------- */
@@ -243,6 +313,73 @@ const DSP = (() => {
       ph.push(p);
     }
     return { w, mag, ph };
+  }
+
+  /* ---------- 闭环频域指标（单位反馈 T(s)=num/(num+den)）：谐振峰 Mr/ωr 与闭环带宽 ωb ----------
+   * Mr = max|T(jω)|，ωr 为峰值频率；ωb 定义为 |T(jωb)| = |T(j0)|/√2 的频率（|T(j0)|=0 时无定义 → null）。
+   * 闭环不稳定（右半平面极点）→ stable:false，指标均为 null（峰值无意义）。
+   * 返回 { ok, stable, Mr, wr, wb, T0 }；对数扫频 2400 点 + 峰值抛物线细化。 */
+  function closedLoopMetrics(num, den) {
+    const np = num.slice();
+    while (np.length < den.length) np.unshift(0);
+    const denCl = den.map((c, i) => c + np[i]);          // 闭环分母 den+num
+    while (denCl.length > 1 && Math.abs(denCl[0]) < 1e-12) denCl.shift();
+    if (!isFinite(denCl[0]) || Math.abs(denCl[0]) < 1e-12) return { ok: false, stable: false, Mr: null, wr: null, wb: null, T0: null, note: '闭环分母退化' };
+    const poles = polyRoots(denCl).filter((q) => isFinite(q.re) && isFinite(q.im));
+    if (poles.some((q) => q.re > 1e-9)) return { ok: true, stable: false, Mr: null, wr: null, wb: null, T0: null };
+    const t0 = Math.abs((num[num.length - 1] || 0) / (denCl[denCl.length - 1] || 1));   // |T(j0)|
+    const N = 2400, ws = [], mags = [];
+    let Mr = 0, mi = 0;
+    for (let i = 0; i < N; i++) {
+      const wv = Math.pow(10, U.lerp(-3, 3, i / (N - 1)));
+      const h = evalH(num, denCl, wv);
+      const mv = Math.hypot(h.re, h.im);
+      ws.push(wv); mags.push(mv);
+      if (mv > Mr) { Mr = mv; mi = i; }
+    }
+    // 峰值三点抛物线细化（对数频域等间距）
+    let wr = ws[mi];
+    if (mi > 0 && mi < N - 1) {
+      const d2 = mags[mi - 1] - 2 * mags[mi] + mags[mi + 1];
+      if (Math.abs(d2) > 1e-15) {
+        const dlt = 0.5 * (mags[mi - 1] - mags[mi + 1]) / d2;
+        wr = Math.pow(10, Math.log10(ws[mi]) + dlt * (Math.log10(ws[mi + 1]) - Math.log10(ws[mi - 1])) / 2);
+        Mr = Math.max(0, mags[mi] - 0.25 * (mags[mi - 1] - mags[mi + 1]) * dlt);
+      }
+    }
+    let wb = null;
+    if (t0 > 1e-9) {
+      const ref = t0 / Math.SQRT2;
+      for (let i = 1; i < N; i++) {
+        if (mags[i] < ref && mags[i - 1] >= ref) {
+          wb = ws[i - 1] + ((mags[i - 1] - ref) / (mags[i - 1] - mags[i])) * (ws[i] - ws[i - 1]);
+          break;
+        }
+      }
+    }
+    return { ok: true, stable: true, Mr, wr, wb, T0: t0 };
+  }
+
+  /* ---------- 动态误差系数：Φe(s)=1/(1+L)=den/(den+num) 在 s=0 的幂级数（长除法展开） ----------
+   * e_ss(t) = k0·r(t) + k1·r′(t) + k2·r″(t) + …；k0 即静态位置误差 1/(1+Kp)，型别 1 系统 k0=0、k1=1/Kv。
+   * 要求 L 严格真分式（相对阶 ≥1）且闭环分母常项 D(0)≠0（原点极点会使展开发散）。
+   * 返回 { ok, ks:[k0…k_{terms-1}] }；Φe 严格真分式 → 级数无限延续。 */
+  function errSeries(num, den, terms = 6) {
+    if (num.length - 1 >= den.length - 1) return { ok: false, note: 'L(s) 需为严格真分式（相对阶 ≥ 1）' };
+    const np = num.slice();
+    while (np.length < den.length) np.unshift(0);
+    const N = den.slice().reverse();                     // Φe 分子 = 开环分母（升幂）
+    const D = den.map((c, i) => c + np[i]).reverse();    // Φe 分母 = den+num（升幂）
+    if (!isFinite(D[0]) || Math.abs(D[0]) < 1e-12) return { ok: false, note: '闭环在原点存在极点（D(0)=0），级数展开发散' };
+    const r = new Array(terms + D.length).fill(0);
+    for (let i = 0; i < N.length && i < r.length; i++) r[i] = N[i];
+    const ks = [];
+    for (let i = 0; i < terms; i++) {
+      const qi = r[i] / D[0];
+      ks.push(qi);
+      if (qi !== 0) for (let j = 0; j < D.length; j++) r[i + j] -= qi * D[j];
+    }
+    return { ok: true, ks };
   }
 
   /* ---------- 稳态误差与系统型别（单位负反馈，开环 L(s)=num/den，互质前提） ---------- */
@@ -330,25 +467,30 @@ const DSP = (() => {
     return { P, N, Z, stable: Z === 0 && minDist > 1e-6 * scale, onCritical: minDist < 1e-6 * scale };
   }
 
-  /* ---------- Jury 稳定判据（离散特征表，实系数自高到低 a0…an，n≥2） ----------
-   * 条件：a0>0、P(1)>0、(−1)ⁿP(−1)>0、|a_n|<a0，以及每行 r₀>|r_last|。
-   * 返回 { ok, stable, conds:[{text,ok}], rows }；用于 z 域稳定性判定的表格化展示。 */
+  /* ---------- Jury 稳定判据（离散特征表，实系数自高到低 a0…an，n≥1） ----------
+   * 条件：a0>0、P(1)>0、(−1)ⁿP(−1)>0、|a_n|<a0（n=1 时即 |a₁|<a₀），以及每行 r₀>|r_last|（n≥2）。
+   * 首项为负：自动乘 −1 归一（判据只依赖根的位置），conds 中注明，不拒绝。
+   * 返回 { ok, stable, conds:[{text,ok}], rows, rhoMax, margin }；
+   * rhoMax = 最大特征根模（polyRoots 交叉验证），margin = 1−rhoMax；原有字段保持不变。 */
   function jury(a) {
     const n = a.length - 1;
-    if (n < 2) return { ok: false, note: '阶数需 ≥ 2' };
-    if (!(a[0] > 0)) return { ok: false, note: '首项系数需为正（可先乘 −1 归一化）' };
+    if (n < 1) return { ok: false, note: '阶数需 ≥ 1' };
     if (a.some((v) => !isFinite(v))) return { ok: false, note: '系数含非有限数值' };
+    if (!a[0]) return { ok: false, note: '首项系数不能为 0' };
+    const neg = a[0] < 0;
+    const p = neg ? a.map((v) => -v) : a;   // 归一化后的系数（整体变号不改变根）
     const fmt = (v) => U.fmt(v, 4);
-    const Pv = (z) => horner(a, { re: z, im: 0 }).re;
+    const Pv = (z) => horner(p, { re: z, im: 0 }).re;
     const conds = [];
     const add = (text, okv) => { conds.push({ text, ok: !!okv }); return okv; };
-    add(`a₀ = ${fmt(a[0])} > 0`, a[0] > 0);
+    if (neg) conds.push({ text: '首项为负，已按 −a 自动归一', ok: true });
+    add(`a₀ = ${fmt(p[0])} > 0`, p[0] > 0);
     add(`P(1) = ${fmt(Pv(1))} > 0`, Pv(1) > 1e-9);
     add(`(−1)ⁿ·P(−1) = ${fmt(Pv(-1) * Math.pow(-1, n))} > 0`, Pv(-1) * Math.pow(-1, n) > 1e-9);
-    add(`|aₙ| = ${fmt(Math.abs(a[n]))} < a₀ = ${fmt(a[0])}`, Math.abs(a[n]) < a[0]);
-    let stable = conds.every((c) => c.ok);
-    const rows = [[a.slice()], [a.slice().reverse()]];
-    let cur = a.slice();
+    add(`|aₙ| = ${fmt(Math.abs(p[n]))} < a₀ = ${fmt(p[0])}`, Math.abs(p[n]) < p[0]);
+    let stable = conds.every((cd) => cd.ok);
+    const rows = [[p.slice()], [p.slice().reverse()]];
+    let cur = p.slice();
     while (cur.length >= 3) {
       const m = cur.length, last = cur[m - 1];
       const nxt = [];
@@ -358,7 +500,13 @@ const DSP = (() => {
       if (!okv) stable = false;
       cur = nxt;
     }
-    return { ok: true, stable, conds, rows };
+    // 最大特征根模与稳定裕度（Durand–Kerner 求根，仅供展示/交叉验证，不影响表格判据本身）
+    let rhoMax = null;
+    try {
+      const roots = polyRoots(p).filter((q) => isFinite(q.re) && isFinite(q.im));
+      if (roots.length) rhoMax = Math.max(...roots.map((q) => Math.hypot(q.re, q.im)));
+    } catch (e) { rhoMax = null; }
+    return { ok: true, stable, conds, rows, rhoMax, margin: rhoMax == null ? null : 1 - rhoMax };
   }
 
   /* ---------- 误差积分指标（ISE/IAE/ITAE），e(t) 采样序列，梯形积分 ---------- */
@@ -376,10 +524,11 @@ const DSP = (() => {
     return { ise, iae, itae };
   }
 
-  /* ---------- PID 闭环时域仿真（含执行器限幅 / 抗饱和 / 微分滤波 / 微分先行 / 采样） ----------
+  /* ---------- PID 闭环时域仿真（含执行器限幅 / 抗饱和 / 微分滤波 / 微分先行 / 采样 / 输入端扰动） ----------
    * 单位负反馈 r=1：控制器离散更新（Ts>0 为数字 PID，ZOH 保持），对象 RK4 相变量步进。
    * ctrl: {kp, ki, kd, Tf(微分滤波时间常数,0=关), dOnM(微分先行)}；
-   * opts: {tmax, steps, uMax(执行器限幅,null=无限), aw('off'|'clamp'|'back'), Tt(反算时间常数), Ts(采样周期,0=连续)}
+   * opts: {tmax, steps, uMax(执行器限幅,null=无限), aw('off'|'clamp'|'back'), Tt(反算时间常数), Ts(采样周期,0=连续),
+   *        dSeq(对象输入端扰动：数组 d[k]（按步索引，越界补 0）或 d(k,t) 函数；对象输入 = u + d；缺省/null=无)}
    * 返回 { ok, t, y, u, e }；对象需严格真分式。 */
   function pidLoopSim(num, den, ctrl, opts) {
     opts = opts || {};
@@ -390,6 +539,10 @@ const DSP = (() => {
     const aw = ['clamp', 'back'].includes(opts.aw) ? opts.aw : 'off';
     const Tt = +opts.Tt > 0 ? +opts.Tt : 1;
     const Ts = +opts.Ts > 0 ? +opts.Ts : 0;
+    // 扰动序列（作用在控制器输出之后的对象输入端）：数组按步索引取值（越界补 0），或 d(k,t) 函数
+    const dSeq = opts.dSeq == null ? null
+      : typeof opts.dSeq === 'function' ? opts.dSeq
+        : Array.isArray(opts.dSeq) ? (k) => (opts.dSeq[k] != null ? +opts.dSeq[k] : 0) : null;
     const tmax = +opts.tmax || 10, steps = Math.min(+opts.steps || 3000, 20000);
     if (!den || !den[0]) return { ok: false, note: '分母非法' };
     const n = den.length - 1;
@@ -419,6 +572,7 @@ const DSP = (() => {
     for (let i = 0; i <= steps; i++) {
       const tv = i * dt;
       const yv = meas(x);
+      const dIn = dSeq ? (+dSeq(i, tv) || 0) : 0;   // 当前步对象输入端扰动
       if (i % ctrlEvery === 0) {
         const rv = rf(tv);
         const ev = rv - yv;
@@ -446,14 +600,14 @@ const DSP = (() => {
       }
       t.push(tv); y.push(yv); u.push(uHold); e.push(rf(tv) - yv);
       if (i < steps) {
-        // RK4（步内 u 保持）
-        const k1 = dv(x, uHold);
+        // RK4（步内 u 保持；对象输入 = uHold + dIn，扰动直接加在对象输入端）
+        const k1 = dv(x, uHold + dIn);
         const x2 = x.map((v, j) => v + k1[j] * dt / 2);
-        const k2 = dv(x2, uHold);
+        const k2 = dv(x2, uHold + dIn);
         const x3 = x.map((v, j) => v + k2[j] * dt / 2);
-        const k3 = dv(x3, uHold);
+        const k3 = dv(x3, uHold + dIn);
         const x4 = x.map((v, j) => v + k3[j] * dt);
-        const k4 = dv(x4, uHold);
+        const k4 = dv(x4, uHold + dIn);
         for (let j = 0; j < n; j++) x[j] += (dt / 6) * (k1[j] + 2 * k2[j] + 2 * k3[j] + k4[j]);
       }
     }
@@ -646,7 +800,7 @@ const DSP = (() => {
     return { branches, poles, zeros, centroid, angles, excess, crossings, brk };
   }
 
-  return { horner, polyRoots, polyFromRoots, cdiv, fft, ifft, spectrum, dftPhasors, integrate, conv, ltiResponse, evalH, bode, steadyState, nyquistFull, jury, errMetrics, pidLoopSim, znUltimate, fopdtFit, pidOptimize, rootLocus };
+  return { horner, polyRoots, polyFromRoots, cdiv, fft, ifft, spectrum, dftPhasors, integrate, conv, deconv, window, gaussNoise, iir1, ltiResponse, evalH, bode, closedLoopMetrics, errSeries, steadyState, nyquistFull, jury, errMetrics, pidLoopSim, znUltimate, fopdtFit, pidOptimize, rootLocus };
 })();
 
 window.DSP = DSP;

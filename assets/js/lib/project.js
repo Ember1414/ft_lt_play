@@ -149,15 +149,14 @@ window.PX = (() => {
     for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
     return (h >>> 0).toString(16).padStart(8, '0');
   }
-  // UTF-8 → base64url：encodeURIComponent 产出 UTF-8 百分号序列，unescape 逐字节映射后 btoa。
-  // 不依赖 TextEncoder/TextDecoder，测试桩与旧环境同样可用；对外是标准 base64url。
+  // UTF-8 → base64url：复用 U.utf8Encode/U.utf8Decode，仅做 base64url 编解码。
   function b64uEnc(str) {
-    return btoa(unescape(encodeURIComponent(str))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    return btoa(U.utf8Encode(str)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   }
   function b64uDec(s) {
     s = s.replace(/-/g, '+').replace(/_/g, '/');
     while (s.length % 4) s += '=';
-    return decodeURIComponent(escape(atob(s)));
+    return U.utf8Decode(atob(s));
   }
   function uid() { return ('e' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7)).slice(0, 20); }
 

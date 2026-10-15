@@ -9,7 +9,8 @@
 window.MI = (() => {
   /* ---------- 纠错词典：解析失败时给出「定位到写法」的提示 ---------- */
   function diagnose(str, variable) {
-    const s = String(str || '').trim();
+    // 归一化后再检：全角括号 （）/运算符 ＋－ → 半角，否则括号配平与末尾运算符漏判
+    const s = U.normChars(String(str || '')).trim();
     if (!s) return null;
     if (/[+\-*/^(]$/.test(s)) return '末尾多了运算符';
     if (/\(\s*\)/.test(s) || /\[\s*\]/.test(s)) return '有空的括号';
@@ -192,6 +193,7 @@ window.MI = (() => {
 
   /* ============================================================
    * exprInput：单行表达式输入（徽标语义由模块 parse 回调给出）
+   *   opts.variable：可选（'s'|'z'），parse 失败时纠错词典据此给出 i→j 提示
    * ============================================================ */
   function exprInput(hostEl, opts = {}) {
     let timer = null;
@@ -216,6 +218,11 @@ window.MI = (() => {
       try { v = opts.parse ? opts.parse(str) : { verdict: 'ok' }; }
       catch (e) { v = { verdict: 'err', message: '解析出错：' + e.message }; }
       v = v || { verdict: 'err', message: '无法解析' };
+      // 解析失败时追加纠错词典提示，给出「有 2 个「(」未闭合」式可行动线索
+      if (v.verdict === 'err' && v.message) {
+        const hint = diagnose(str, opts.variable);
+        if (hint && !String(v.message).includes(hint)) v.message += '（' + hint + '）';
+      }
       setBadge(badge, v.verdict, v.message || '', v.tex);
       return { verdict: v.verdict, result: { str } };
     }
@@ -251,6 +258,8 @@ window.MI = (() => {
       get() { return inp.value.trim(); },
       apply(source) { return doApply(source || 'button'); },
       validate,
+      // 外部手动写徽标（verdict: 'ok'|'warn'|'err'）——结果区错误与徽标同源时使用
+      badge(verdict, message, tex) { if (!destroyed) setBadge(badge, verdict, message || '', tex); },
       destroy() { destroyed = true; clearTimeout(timer); if (wrap.parentElement) wrap.remove(); }
     };
   }

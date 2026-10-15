@@ -1,0 +1,28 @@
+{
+  "name": "ft-lt-play-v2",
+  "version": "2.13.0",
+  "private": true,
+  "type": "module",
+  "description": "信号与控制实验平台 v2 —— 专业级通用工具箱（local-first，Vite + TypeScript + Preact）",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "vite",
+    "check": "tsc --noEmit",
+    "build": "tsc --noEmit && vite build",
+    "parity": "node scripts/parity.mjs",
+    "audit": "node scripts/audit.mjs",
+    "uidata": "node scripts/uidata.mjs",
+    "perf": "node scripts/perf.mjs",
+    "preview": "vite preview --port 5200"
+  },
+  "dependencies": {
+    "katex": "^0.16.22",
+    "preact": "^10.24.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  }
+}

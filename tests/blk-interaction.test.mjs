@@ -146,6 +146,15 @@ const mkEvt = (o) => Object.assign({
   target: { closest: () => null }, setPointerCapture() {}
 }, o);
 const ev = (type, x, y, o) => svgEl().fire(type, mkEvt(Object.assign({ clientX: x, clientY: y }, o)));
+// 桩里 textContent 不从子节点派生，U.el 产生的文本都是 TextNode：递归收集 .data
+const textOf = (el) => el.data != null ? el.data : (el.children || []).reduce((s, c) => s + textOf(c), '');
+// 多实例共享元素 / 定时器：新场景开始前清场，让事件只由最新实例响应（避免交叉污染）
+const freshStage = () => {
+  timers.clear();
+  for (const k in registry) { const el = registry[k]; if (el && el._l) el._l = {}; }
+  sandbox.document.body.children = sandbox.document.body.children
+    .filter((c) => c.className !== 'blk-ctx' && c.className !== 'blk-edit');
+};
 
 /* ================= ① 初始化与符号体系 ================= */
 const mod = sandbox.App.modules['blk'](new El('div'));
@@ -195,7 +204,10 @@ if (menu) {
   const items = menu.children.map((c) => c.textContent);
   ok('菜单含五类新建项', items.length === 5 && items.join('|').includes('求和点') && items.join('|').includes('采样开关') && items.join('|').includes('零阶保持器'), items.join('|'));
   menu.children.find((c) => c.textContent.includes('方框')).fire('click', mkEvt({}));
-  ok('新建元件并自动接上来源（3 元件 3 连线）', /3 元件 · 3 连线/.test(counts()), counts());
+  ok('新建元件并自动接上来源（3 元件 2 连线：按在已连线端口 = 端点改接）', /3 元件 · 2 连线/.test(counts()), counts());
+  registry['#blk-share'].fire('click', mkEvt({}));
+  const back3 = JSON.parse(decodeURIComponent(escape(atob(sandbox.location.hash.slice('#blk=blk1.'.length)))));
+  ok('改接保留负反馈符号与方向（新元件 → Σ）', JSON.stringify(back3.e) === '[[1,2,1],[3,1,0]]', JSON.stringify(back3.e));
 }
 
 /* ================= ④ 结果页签 ================= */
@@ -449,6 +461,193 @@ if (mod3) mod3.api.dispose();
   const backW = JSON.parse(decodeURIComponent(escape(atob(sandbox.location.hash.slice('#blk=blk1.'.length)))));
   ok('方向正确：源(A)→本(B) 即 e=[[1,2,1]]', JSON.stringify(backW.e) === '[[1,2,1]]', JSON.stringify(backW.e));
   mW.api.dispose();
+}
+
+/* ================= ⑯ 连线重连接 + 连线列表 + ± 徽标命中 ================= */
+{
+  freshStage();
+  const slimR = {
+    v: 1, T: 0.1,
+    n: [
+      { i: 1, k: 'box', m: 'A', s: '1/(s+1)', x: 200, y: 160, r: 1, o: 0, z: 0 },
+      { i: 2, k: 'box', m: 'B', s: '1/(s+2)', x: 460, y: 160, r: 0, o: 0, z: 0 },
+      { i: 3, k: 'box', m: 'C', s: '1/(s+3)', x: 720, y: 160, r: 0, o: 0, z: 0 }
+    ],
+    e: [[1, 2, 1]], vw: { s: 1, tx: 0, ty: 0 }
+  };
+  sandbox.location.hash = '#blk=blk1.' + btoa(unescape(encodeURIComponent(JSON.stringify(slimR))));
+  const mR = sandbox.App.modules['blk'](new El('div')); runRaf();
+  ok('重连接场景还原 3 元件 1 连线', /3 元件 · 1 连线/.test(counts()), counts());
+  ok('静态层渲染 ± 徽标（blk-badge 类）', staticHtml().includes('class="blk-badge'));
+
+  // 元件列表新增「连线」小节：A → B + ± 说明
+  const listR = registry['#blk-list'];
+  const headsR = [], namesR = [], itemsR = [];
+  const walkL = (el) => { (el.children || []).forEach((c) => {
+    const cls = c.className || '';
+    if (cls.includes('blk-listhead')) headsR.push(textOf(c));
+    if (cls.includes('blk-itemname')) namesR.push(textOf(c));
+    if ((cls + ' ').includes('blk-item ')) itemsR.push(c);
+    walkL(c);
+  }); };
+  walkL(listR);
+  ok('列表含「连线」小节标题', headsR.includes('连线'), JSON.stringify(headsR));
+  ok('连线列表项显示 A → B', namesR.includes('A → B'), JSON.stringify(namesR));
+  ok('列表为 3 元件行 + 1 连线行', itemsR.length === 4, String(itemsR.length));
+  if (itemsR.length === 4) {
+    itemsR[3].fire('click', mkEvt({}));
+    ok('点选连线行在画布加粗高亮（accent-2 选中色）', staticHtml().includes('stroke="var(--accent-2)" stroke-width="3.2"'));
+    runTimers();
+    ok('高亮为短暂效果（750ms 后还原）', !staticHtml().includes('stroke="var(--accent-2)" stroke-width="3.2"'));
+  }
+
+  // 空闲端口拉新线的手势保持不变（B 出端口无连线占用）
+  const outB = toScreen(525, 160), inC = toScreen(655, 160);
+  ev('pointerdown', outB.x, outB.y);
+  ev('pointermove', inC.x, inC.y);
+  ev('pointerup', inC.x, inC.y);
+  ok('空闲端口正向拉线仍可用（3 元件 2 连线）', /3 元件 · 2 连线/.test(counts()), counts());
+
+  // 重连接：按住 A→B 源头端（A 出端口）→ 原边暂隐 → 落到 C 出端口改接，撤销一步还原
+  const endA = toScreen(265, 160), outC = toScreen(785, 160);
+  ev('pointerdown', endA.x, endA.y);
+  ok('抓住连线端点后原边暂隐（预览接管）', !staticHtml().includes('M 265 160'));
+  ev('pointermove', outC.x, outC.y);
+  ev('pointerup', outC.x, outC.y);
+  ok('端点改接到新端口（3 元件 2 连线）', /3 元件 · 2 连线/.test(counts()), counts());
+  registry['#blk-share'].fire('click', mkEvt({}));
+  const backR = JSON.parse(decodeURIComponent(escape(atob(sandbox.location.hash.slice('#blk=blk1.'.length)))));
+  ok('改接后边集为 B→C 与 C→B', JSON.stringify(backR.e) === '[[2,3,1],[3,2,1]]', JSON.stringify(backR.e));
+  registry['#blk-undo'].fire('click', mkEvt({}));
+  registry['#blk-share'].fire('click', mkEvt({}));
+  const backR2 = JSON.parse(decodeURIComponent(escape(atob(sandbox.location.hash.slice('#blk=blk1.'.length)))));
+  ok('重连接可一步撤销（还原 A→B 与 B→C）', JSON.stringify(backR2.e) === '[[1,2,1],[2,3,1]]', JSON.stringify(backR2.e));
+  ok('撤销后原边恢复渲染', staticHtml().includes('M 265 160'));
+
+  // 重连接落空白 → 新建元件接上（同为一步撤销）
+  const endB = toScreen(395, 160);
+  ev('pointerdown', endB.x, endB.y);
+  sandbox.document.body.children = sandbox.document.body.children.filter((c) => c.className !== 'blk-ctx');
+  ev('pointermove', 40, 380);
+  ev('pointerup', 40, 380);
+  const menuR = sandbox.document.body.children.find((c) => c.className === 'blk-ctx');
+  ok('端点拖到空白弹出新建菜单（5 项）', !!menuR && menuR.children.length === 5, menuR && String(menuR.children.length));
+  if (menuR) menuR.children.find((c) => c.textContent.includes('方框')).fire('click', mkEvt({}));
+  ok('改接新建后为 4 元件 2 连线', /4 元件 · 2 连线/.test(counts()), counts());
+  registry['#blk-share'].fire('click', mkEvt({}));
+  const backR3 = JSON.parse(decodeURIComponent(escape(atob(sandbox.location.hash.slice('#blk=blk1.'.length)))));
+  ok('改接新建的边集为 B→C 与 A→新', JSON.stringify(backR3.e) === '[[2,3,1],[1,4,1]]', JSON.stringify(backR3.e));
+  registry['#blk-undo'].fire('click', mkEvt({}));
+  ok('改接新建可一步撤销（回到 3 元件 2 连线）', /3 元件 · 2 连线/.test(counts()), counts());
+
+  // ± 徽标点击切换符号（点击行为与命中区保留；closest 按选择器区分端子 / 徽标）
+  svgEl().fire('pointerdown', mkEvt({ clientX: 10, clientY: 10, target: { closest: (sel) => sel === '[data-badge]' ? { dataset: { badge: '0' } } : null } }));
+  registry['#blk-share'].fire('click', mkEvt({}));
+  const backR4 = JSON.parse(decodeURIComponent(escape(atob(sandbox.location.hash.slice('#blk=blk1.'.length)))));
+  ok('徽标点击切换符号（e 首项 sign=0）', JSON.stringify(backR4.e) === '[[1,2,0],[2,3,1]]', JSON.stringify(backR4.e));
+  registry['#blk-undo'].fire('click', mkEvt({}));
+  mR.api.dispose();
+}
+
+/* ================= ⑰ 采样周期 T 入快照：Ctrl+Z 可回退 T ================= */
+{
+  freshStage();
+  const slimT = { v: 1, T: 0.1, n: [{ i: 1, k: 'box', m: 'A', s: '1/(s+1)', x: 300, y: 160, r: 1, o: 1, z: 0 }], e: [], vw: { s: 1, tx: 0, ty: 0 } };
+  sandbox.location.hash = '#blk=blk1.' + btoa(unescape(encodeURIComponent(JSON.stringify(slimT))));
+  const mT = sandbox.App.modules['blk'](new El('div')); runRaf();
+  ok('干净结构无引导提示', registry['#blk-guide'].hidden === true, String(registry['#blk-guide'].hidden));
+  registry['#blk-t'].value = '0.25';
+  registry['#blk-t'].fire('change', mkEvt({ target: registry['#blk-t'] }));
+  ok('T 修改生效为 0.25', registry['#blk-t'].value === '0.25', registry['#blk-t'].value);
+  registry['#blk-undo'].fire('click', mkEvt({}));
+  ok('撤销还原采样周期 T（回到 0.1）', registry['#blk-t'].value === '0.1', registry['#blk-t'].value);
+  registry['#blk-redo'].fire('click', mkEvt({}));
+  ok('重做恢复 T=0.25', registry['#blk-t'].value === '0.25', registry['#blk-t'].value);
+  mT.api.dispose();
+}
+
+/* ================= ⑱ 结构检查引导条（无 R / 多 R，不阻断求解） ================= */
+{
+  freshStage();
+  const slimG1 = { v: 1, T: 0.1, n: [
+    { i: 1, k: 'box', m: 'A', s: '1/(s+1)', x: 200, y: 160, r: 0, o: 0, z: 0 },
+    { i: 2, k: 'box', m: 'B', s: '1/(s+2)', x: 460, y: 160, r: 0, o: 1, z: 0 }
+  ], e: [[1, 2, 1]], vw: { s: 1, tx: 0, ty: 0 } };
+  sandbox.location.hash = '#blk=blk1.' + btoa(unescape(encodeURIComponent(JSON.stringify(slimG1))));
+  const mG1 = sandbox.App.modules['blk'](new El('div')); runRaf();
+  const gv = registry['#blk-guide'];
+  ok('无 R 时引导条出现', gv.hidden === false && /未检测到输入端子 R/.test(gv.innerHTML), 'hidden=' + gv.hidden);
+  ok('引导条说明按哪个节点注入', /节点 A/.test(gv.innerHTML), gv.innerHTML.slice(0, 80));
+  ok('引导条不阻断求解（T(s) 仍渲染）', tabHtml().includes('id="blk-tex"'));
+  mG1.api.dispose();
+}
+{
+  freshStage();
+  const slimG2 = { v: 1, T: 0.1, n: [
+    { i: 1, k: 'box', m: 'A', s: '1/(s+1)', x: 200, y: 160, r: 1, o: 0, z: 0 },
+    { i: 2, k: 'box', m: 'B', s: '1/(s+2)', x: 460, y: 160, r: 1, o: 0, z: 0 },
+    { i: 3, k: 'box', m: 'C', s: '1/(s+3)', x: 720, y: 160, r: 0, o: 1, z: 0 }
+  ], e: [[1, 2, 1], [2, 3, 1]], vw: { s: 1, tx: 0, ty: 0 } };
+  sandbox.location.hash = '#blk=blk1.' + btoa(unescape(encodeURIComponent(JSON.stringify(slimG2))));
+  const mG2 = sandbox.App.modules['blk'](new El('div')); runRaf();
+  ok('多 R 时提示多点注入', /检测到 2 个输入端子 R/.test(registry['#blk-guide'].innerHTML), registry['#blk-guide'].innerHTML.slice(0, 80));
+  mG2.api.dispose();
+}
+
+/* ================= ⑲ 触屏长按空白框选 + 组操作 + 空状态引导 ================= */
+{
+  freshStage();
+  sandbox.localStorage.removeItem('blk-marquee-hint');
+  const slimS = { v: 1, T: 0.1, n: [
+    { i: 1, k: 'box', m: 'A', s: '1/(s+1)', x: 200, y: 160, r: 0, o: 0, z: 0 },
+    { i: 2, k: 'box', m: 'B', s: '1/(s+2)', x: 460, y: 160, r: 0, o: 0, z: 0 },
+    { i: 3, k: 'box', m: 'C', s: '1/(s+3)', x: 200, y: 360, r: 0, o: 0, z: 0 },
+    { i: 4, k: 'box', m: 'D', s: '1/(s+4)', x: 460, y: 360, r: 0, o: 0, z: 0 }
+  ], e: [], vw: { s: 1, tx: 0, ty: 0 } };
+  sandbox.location.hash = '#blk=blk1.' + btoa(unescape(encodeURIComponent(JSON.stringify(slimS))));
+  const hostS = new El('div');
+  const mS = sandbox.App.modules['blk'](hostS); runRaf();
+  ok('有元件时空状态引导隐藏', registry['#blk-empty'].hidden === true, String(registry['#blk-empty'].hidden));
+  ok('空状态模板含三步上手文案', /id="blk-empty"/.test(hostS.innerHTML) && /① 点击左侧添加元件/.test(hostS.innerHTML) && /② 从端口拖出连线/.test(hostS.innerHTML) && /③ 自动求解/.test(hostS.innerHTML));
+
+  // 触屏长按空白 → 框选（首次给一次性提示；单指拖空白无长按仍为平移）
+  ev('pointerdown', 60, 60, { pointerType: 'touch', pointerId: 920 });
+  runTimers();
+  ok('首次长按空白提示「松开以选择元件」', /松开以选择元件/.test(registry['#blk-hint'].textContent), registry['#blk-hint'].textContent);
+  ev('pointermove', 520, 430, { pointerType: 'touch', pointerId: 920 });
+  ev('pointerup', 520, 430, { pointerType: 'touch', pointerId: 920 });
+  const inspTxt = [];
+  const walkI = (el) => { (el.children || []).forEach((c) => { if (c.data != null) inspTxt.push(c.data); walkI(c); }); };
+  walkI(registry['#blk-insp']);
+  ok('触屏框选保留 4 个选中元件', inspTxt.join('|').includes('已选中 4 个元件'), inspTxt.join('|').slice(0, 60));
+
+  // 触屏双击元件 → 弹菜单（触屏语义），组选时给整组复制/删除
+  sandbox.document.body.children = sandbox.document.body.children.filter((c) => c.className !== 'blk-ctx');
+  const ptA = toScreen(200, 160);
+  svgEl().fire('dblclick', mkEvt({ clientX: ptA.x, clientY: ptA.y, pointerType: 'touch' }));
+  const gmenu = sandbox.document.body.children.find((c) => c.className === 'blk-ctx');
+  const gl = gmenu ? gmenu.children.map((c) => c.textContent).join('|') : '';
+  ok('触屏双击元件弹出菜单（非就地编辑）', !!gmenu, gl);
+  ok('组选时菜单为整组复制/删除', /复制 4 个元件/.test(gl) && /删除 4 个元件/.test(gl), gl);
+  if (gmenu) gmenu.children.find((c) => c.textContent.includes('删除')).fire('click', mkEvt({}));
+  ok('整组删除后为 0 元件 0 连线', /0 元件 · 0 连线/.test(counts()), counts());
+  ok('清空后出现空状态引导', registry['#blk-empty'].hidden === false, String(registry['#blk-empty'].hidden));
+  registry['#blk-undo'].fire('click', mkEvt({}));
+  ok('撤销恢复 4 元件且空状态隐藏', /4 元件/.test(counts()) && registry['#blk-empty'].hidden === true, counts());
+
+  // 再框选一行（A、B）→ 触屏双击 → 整组复制
+  ev('pointerdown', 60, 60, { pointerType: 'touch', pointerId: 921 });
+  runTimers();
+  ev('pointermove', 520, 250, { pointerType: 'touch', pointerId: 921 });
+  ev('pointerup', 520, 250, { pointerType: 'touch', pointerId: 921 });
+  sandbox.document.body.children = sandbox.document.body.children.filter((c) => c.className !== 'blk-ctx');
+  svgEl().fire('dblclick', mkEvt({ clientX: ptA.x, clientY: ptA.y, pointerType: 'touch' }));
+  const gmenu2 = sandbox.document.body.children.filter((c) => c.className === 'blk-ctx').pop();
+  const gl2 = gmenu2 ? gmenu2.children.map((c) => c.textContent).join('|') : '';
+  ok('框选 2 个元件后组菜单数量正确', /复制 2 个元件/.test(gl2) && /删除 2 个元件/.test(gl2), gl2);
+  if (gmenu2) gmenu2.children.find((c) => c.textContent.includes('复制')).fire('click', mkEvt({}));
+  ok('整组复制 2 个元件（4 → 6）', /6 元件/.test(counts()), counts());
+  mS.api.dispose();
 }
 
 /* ================= 结果输出 ================= */

@@ -1,8 +1,8 @@
 /* ============================================================
  * lib.test.mjs — 核心库回归断言（极简，无框架）
  *   运行：node tests/lib.test.mjs
- *   覆盖：util.js / mathdsp.js / transforms.js 中的纯函数。
- *   这三个库不依赖 DOM，可直接在 Node 中加载执行。
+ *   覆盖：util.js / mathdsp.js / transforms.js / plots.js 中的纯函数。
+ *   这几个库不依赖 DOM（plots.js 仅在运行时触碰 DOM），可在 Node 中加载执行。
  * ============================================================ */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -10,7 +10,7 @@ import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const LIBS = ['assets/js/lib/util.js', 'assets/js/lib/mathdsp.js', 'assets/js/lib/fx.js', 'assets/js/lib/transforms.js'];
+const LIBS = ['assets/js/lib/util.js', 'assets/js/lib/mathdsp.js', 'assets/js/lib/fx.js', 'assets/js/lib/transforms.js', 'assets/js/lib/plots.js'];
 
 // 极简沙箱：只需自引用的 window（各库末尾都写 window.X = X）
 const sandbox = { console };
@@ -130,6 +130,107 @@ function sorted(xs) { return xs.map((c) => c.re).concat().sort((a, b) => a - b);
   ok('substituteParams 二阶模板', t2 && t2.num[0] === 1 && Math.abs(t2.num[1] - 1.5) < 1e-9 && t2.num[2] === 9, JSON.stringify(t2 && t2.num));
   ok('substituteParams 保留未知标识符', FX_LIB.substituteParams('s+z', {}) === 's+z');
   ok('substituteParams 幂等（数值不变）', FX_LIB.parseTF(FX_LIB.substituteParams('1/(s^2+2*s+5)', {})).den[2] === 5);
+}
+
+/* ---------- fx: parseTF 隐式乘法（explore 传函自动路由的解析基础，v1.1 回归锁定） ---------- */
+{
+  const eqNum = (name, t, want) => ok(name, !!t && JSON.stringify(t.num) === JSON.stringify(want), JSON.stringify(t && t.num));
+  eqNum('parseTF (s+1)(s+2)', FX_LIB.parseTF('(s+1)(s+2)'), [1, 3, 2]);
+  eqNum('parseTF (s+1)^2(s+3)', FX_LIB.parseTF('(s+1)^2(s+3)'), [1, 5, 7, 3]);
+  eqNum('parseTF 2(s+1)', FX_LIB.parseTF('2(s+1)'), [2, 2]);
+  eqNum('parseTF s(s+1)(s+2)', FX_LIB.parseTF('s(s+1)(s+2)'), [1, 3, 2, 0]);
+  eqNum('parseTF 2s', FX_LIB.parseTF('2s'), [2, 0]);
+  eqNum('parseTF s^2(s+1)', FX_LIB.parseTF('s^2(s+1)'), [1, 1, 0, 0]);
+  const tfd = FX_LIB.parseTF('1/((s+1)(s+2))');
+  ok('parseTF 分母隐式乘法', !!tfd && JSON.stringify(tfd.den) === JSON.stringify([1, 3, 2]), JSON.stringify(tfd && tfd.den));
+  const tfw = FX_LIB.parseTF('１／(s+1)');   // 全角分数线 ／：入口 normChars 后再切分
+  ok('parseTF 全角分数线', !!tfw && JSON.stringify(tfw.num) === '[1]' && JSON.stringify(tfw.den) === '[1,1]', JSON.stringify(tfw));
+  // den 形状回归（v1.1.2 explore 门控放行依据）：纯多项式输入（无 '/'）→ 分母为非零常数 [1]，
+  // explore 的 tfProperOk 以 den.length===1 && den[0]!==0 放行；分母常数 0 由 parseTF 源头拒绝
+  const tfp1 = FX_LIB.parseTF('(s+1)(s+2)');
+  ok('parseTF (s+1)(s+2) den=[1]', !!tfp1 && JSON.stringify(tfp1.den) === JSON.stringify([1]), JSON.stringify(tfp1 && tfp1.den));
+  const tfp2 = FX_LIB.parseTF('2(s+1)');
+  ok('parseTF 2(s+1) den=[1]', !!tfp2 && JSON.stringify(tfp2.den) === JSON.stringify([1]), JSON.stringify(tfp2 && tfp2.den));
+  ok('parseTF 1/0 拒绝（分母常数 0）', FX_LIB.parseTF('1/0') === null);
+}
+
+/* ---------- fx: parseTimeExpr（内置解析器，零外部依赖） ----------
+ * v1.1.3 起不再依赖 CDN 的 mathjs：Node 沙箱（无任何外部库）即可完整覆盖
+ * 解析 + 求值 + 拒绝路径，也保证「CDN 不可达时交互求解照常工作」。 */
+{
+  const P = (s) => FX_LIB.parseTimeExpr(s);
+  // 交互求解页「示例 chips」全量（用户点得到的案例必须都能解析）
+  const examples = [
+    ['exp(-2*t)*sin(10*t)*u(t)', 0.1, Math.exp(-0.2) * Math.sin(1)],
+    ['sin(2*pi*3*t)', 1 / 12, 1],
+    ['3*sinc(t)', 0, 3],
+    ['rect(t)-rect(t-2)', 0.25, 1],
+    ['exp(-abs(t))', -1, Math.exp(-1)]
+  ];
+  for (const [s, q, want] of examples) {
+    const f = P(s);
+    ok('parseTimeExpr 示例「' + s + '」可解析', typeof f === 'function');
+    ok('parseTimeExpr 示例「' + s + '」求值', f && near(f(q), want, 1e-9), f && String(f(q)));
+  }
+  ok('parseTimeExpr 阶跃 u(t) t<0 为 0', P('u(t)')(-1) === 0 && P('u(t)')(2) === 1);
+  // 语法覆盖：隐式乘法 / 常量 / 归一化 / 科学计数 / 幂结合性 / 多参函数
+  ok('parseTimeExpr 隐式乘法', near(P('2t')(3), 6) && near(P('3(t+1)')(1), 6) && near(P('(t+1)(t-1)')(3), 8));
+  ok('parseTimeExpr 常量 pi/e/tau', near(P('e')(0), Math.E) && near(P('pi')(0), Math.PI) && near(P('tau')(0), 2 * Math.PI));
+  ok('parseTimeExpr 全角归一化', near(P('ｅｘｐ（－２＊ｔ）')(1), Math.exp(-2)));
+  ok('parseTimeExpr ** 归一化为幂', near(P('t**2')(3), 9) && near(P('t^2^3')(2), 256));
+  ok('parseTimeExpr 科学计数不误拆', near(P('1e-3*t')(2), 0.002));
+  ok('parseTimeExpr tri/min/max/ln', near(P('tri(t)')(0.25), 0.75) && near(P('max(0,t)')(-2), 0) && near(P('min(2,t)')(5), 2) && near(P('ln(e)')(0), 1));
+  ok('parseTimeExpr 负指数', near(P('t^-2')(2), 0.25));
+  // 拒绝路径（安全基线：白名单之外一律 null）
+  ok('parseTimeExpr 拒绝非白名单函数', P('require(t)') === null && P('alert(1)') === null);
+  ok('parseTimeExpr 拒绝未知标识符', P('window') === null && P('t+foo') === null);
+  ok('parseTimeExpr 拒绝残缺表达式', P('1+') === null && P('(1+2') === null && P('1+2)') === null);
+  ok('parseTimeExpr 拒绝空串/超长', P('') === null && P('   ') === null && P('1+'.repeat(200) + '1') === null);
+  ok('parseTimeExpr 拒绝深层嵌套', P('('.repeat(40) + 't' + ')'.repeat(40)) === null);
+  ok('parseTimeExpr 拒绝无穷值', P('1/(t-t)') === null);
+}
+
+/* ---------- plots: FX.texToText（KaTeX 缺失时的可读兜底，绝不显示源码） ---------- */
+{
+  const T = sandbox.FX.texToText;
+  // cases 环境（derive 模块分段系数公式）：不得残留 \begin{cases}/&/\\ 字面量
+  const casesIn = 'b_n=\\begin{cases}0& n\\text{ even}\\\\ \\dfrac{4}{n\\pi}& n\\text{ odd}\\end{cases}';
+  const casesOut = T(casesIn);
+  ok('texToText cases 环境无源码残留', !/(begin|end)|\\\\|&/.test(casesOut), casesOut);
+  ok('texToText cases 输出可读', casesOut === 'b_n=｛0，n even；(4)/(nπ)，n odd｝', casesOut);
+  ok('texToText bmatrix 矩阵兜底', T('\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}') === '[ a，b；c，d ]',
+    T('\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}'));
+  ok('texToText 转义花括号 \\{ \\}', T('\\mathcal{L}\\{e^{-at}u(t)\\}') === 'L｛e^-atu(t)｝', T('\\mathcal{L}\\{e^{-at}u(t)\\}'));
+}
+
+/* ---------- plots: FX.katex 非法 LaTeX 预校验（不渲染红色源码，ParseError 走纯文本兜底） ---------- */
+{
+  const fakeEl = () => {
+    const cls = new Set();
+    const attrs = {};
+    return {
+      classList: { add: (c) => cls.add(c), contains: (c) => cls.has(c) }, innerHTML: '', textContent: '',
+      setAttribute: (k, v) => { attrs[k] = String(v); }, getAttribute: (k) => (k in attrs ? attrs[k] : null),
+      removeAttribute: (k) => { delete attrs[k]; }
+    };
+  };
+  sandbox.katex = {   // sandbox.window === sandbox；FX.katex 运行时读 window.katex
+    renderToString: (tex) => { if (String(tex).includes('BAD')) throw new Error('ParseError: BAD'); return '<span>ok</span>'; },
+    render: (tex, el) => { el.innerHTML = 'RENDERED:' + tex; }
+  };
+  const good = fakeEl();
+  sandbox.FX.katex('x^2', good);
+  ok('katex 合法公式正常渲染', good.innerHTML === 'RENDERED:x^2' && !good.classList.contains('tex-fallback'), good.innerHTML);
+  const bad = fakeEl();
+  sandbox.FX.katex('\\frac{BAD}{', bad);
+  ok('katex 非法公式走纯文本兜底', bad.classList.contains('tex-fallback') && bad.textContent === sandbox.FX.texToText('\\frac{BAD}{'), bad.textContent);
+  delete sandbox.katex;   // 清场，不影响其他测试
+  // 无 KaTeX（CDN 不可达）：兜底时记录原 tex（data-tex）→ 备用源就绪（libs-ready）后可就地重排
+  const late = fakeEl();
+  sandbox.FX.katex('H(s)=\\dfrac{1}{s+1}', late, { displayMode: true });
+  ok('无 KaTeX 时降级为可读纯文本', late.classList.contains('tex-fallback') && late.textContent === sandbox.FX.texToText('H(s)=\\dfrac{1}{s+1}'), late.textContent);
+  ok('katex 兜底记录 data-tex 供迟到重排', late.getAttribute('data-tex') === 'H(s)=\\dfrac{1}{s+1}' && late.getAttribute('data-tex-display') === '1',
+    JSON.stringify([late.getAttribute('data-tex'), late.getAttribute('data-tex-display')]));
 }
 
 /* ---------- 结果输出 ---------- */

@@ -2,7 +2,7 @@
  * safeeval.test.mjs — 动态执行移除后的安全求值基线
  *   覆盖：U.safeCalc 白名单算术求值器、TR.parseTimeCombo 内的
  *   频率常量表达式（原 Function 实现路径）、FX_LIB.parseTimeExpr
- *   的 AST 白名单语义（Node 侧无 mathjs，仅验证拒绝路径）。
+ *   内置解析器的白名单语义（Node 侧无任何外部库 → 也验证零依赖可用性）。
  * ============================================================ */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -44,6 +44,16 @@ ok('safeCalc 拒绝超长输入', throws(() => U.safeCalc('1+'.repeat(300) + '1'
 ok('safeCalc 拒绝深层嵌套', throws(() => U.safeCalc('('.repeat(40) + '1' + ')'.repeat(40))));
 ok('safeCalc 拒绝对象/属性访问', throws(() => U.safeCalc('constructor')));
 
+/* ---------- U.safeCalc 隐式乘法与归一化（v1.1 输入系统升级） ---------- */
+ok('safeCalc 隐式乘法 2(3)', near(U.safeCalc('2(3)'), 6));
+ok('safeCalc 隐式乘法 (1+2)(3+4)', near(U.safeCalc('(1+2)(3+4)'), 21));
+ok('safeCalc 隐式乘法 (2)3 / 2(3)(4) / (1)(2)(3)', near(U.safeCalc('(2)3'), 6) && near(U.safeCalc('2(3)(4)'), 24) && near(U.safeCalc('(1)(2)(3)'), 6));
+ok('safeCalc 幂后括号 2^2(3)', near(U.safeCalc('2^2(3)'), 12));
+ok('safeCalc 隐式乘法 2pi', near(U.safeCalc('2pi'), 2 * Math.PI));
+ok('safeCalc 科学计数不受隐式乘法影响', near(U.safeCalc('1e5'), 1e5) && near(U.safeCalc('1E5'), 1e5) && near(U.safeCalc('2e-1'), 0.2) && near(U.safeCalc('1e-3(2)'), 0.002));
+ok('safeCalc 全角数字/括号/π', near(U.safeCalc('２（３）'), 6) && near(U.safeCalc('２π'), 2 * Math.PI, 1e-9));
+ok('safeCalc Unicode 负号', near(U.safeCalc('−2(3)'), -6));
+
 /* ---------- TR.parseTimeCombo（evalW 替换后的行为回归） ---------- */
 {
   const items = TR.parseTimeCombo('sin(2*pi*1*t)');
@@ -55,30 +65,17 @@ ok('safeCalc 拒绝对象/属性访问', throws(() => U.safeCalc('constructor'))
   ok('除零频率写法整体拒绝', TR.parseTimeCombo('sin(1/0*t)') === null);
 }
 
-/* ---------- FX_LIB.parseTimeExpr AST 白名单（无 mathjs 时拒绝路径） ---------- */
-ok('无 mathjs → parseTimeExpr 返回 null', FX_LIB.parseTimeExpr('sin(t)') === null);
-
-/* ---------- FX_LIB.parseTimeExpr 归一化入口（全角/Unicode 负号/上标/** → ASCII 后再交 mathjs） ---------- */
+/* ---------- FX_LIB.parseTimeExpr：内置解析器（零外部依赖，CDN 不可达时同样可用） ---------- */
 {
-  let seen = null;
-  sandbox.window.math = {
-    parse: (s) => {
-      seen = s;
-      return { type: 'ConstantNode', value: 1, traverse(cb) { cb(this); }, evaluate() { return 1; } };
-    }
-  };
-  FX_LIB.parseTimeExpr('ｅｘｐ（－２＊ｔ）');   // 全角字母/括号/数字 + 全角负号与乘号
-  ok('parseTimeExpr 全角归一化后交 mathjs', seen === 'exp(-2*t)', JSON.stringify(seen));
-  seen = null;
-  FX_LIB.parseTimeExpr('t**2');
-  ok('parseTimeExpr 归一化 ** 为 ^', seen === 't^2', JSON.stringify(seen));
-  seen = null;
-  FX_LIB.parseTimeExpr('ｓｉｎ（ｔ）');
-  ok('parseTimeExpr 全角函数名归一化', seen === 'sin(t)', JSON.stringify(seen));
-  seen = null;
-  FX_LIB.parseTimeExpr('exp(-2*t)*sin(10*t)*u(t)');   // 合法 ASCII 必须原样不变（守护不回归）
-  ok('parseTimeExpr 保持合法 ASCII 原样', seen === 'exp(-2*t)*sin(10*t)*u(t)', JSON.stringify(seen));
-  delete sandbox.window.math;
+  const f = FX_LIB.parseTimeExpr('sin(t)');
+  ok('无外部库仍可解析 sin(t)', typeof f === 'function' && near(f(Math.PI / 2), 1, 1e-12));
+  ok('全角字母/括号/负号/乘号归一化后可解析', near(FX_LIB.parseTimeExpr('ｅｘｐ（－２＊ｔ）')(1), Math.exp(-2), 1e-12));
+  ok('** 归一化为 ^', near(FX_LIB.parseTimeExpr('t**2')(3), 9, 1e-12));
+  ok('全角函数名归一化', near(FX_LIB.parseTimeExpr('ｓｉｎ（ｔ）')(Math.PI / 2), 1, 1e-12));
+  ok('合法 ASCII 表达式求值正确', near(FX_LIB.parseTimeExpr('exp(-2*t)*sin(10*t)*u(t)')(0.1), Math.exp(-0.2) * Math.sin(1), 1e-12));
+  // 白名单拒绝路径：不得因去掉 mathjs 而放宽（无 eval/Function，仅白名单函数与常量）
+  ok('非白名单函数拒绝', FX_LIB.parseTimeExpr('require(t)') === null && FX_LIB.parseTimeExpr('fetch(t)') === null);
+  ok('未白名单标识符拒绝', FX_LIB.parseTimeExpr('constructor') === null && FX_LIB.parseTimeExpr('this') === null);
 }
 
 console.log(fails.length

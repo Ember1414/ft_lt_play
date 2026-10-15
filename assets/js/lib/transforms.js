@@ -343,6 +343,7 @@ window.TR = (() => {
     return { ok: true, groups, direct };
   }
   // f(t) 数值：Σ_p Σ_k A_k t^{k−1} e^{pt}/(k−1)!（共轭组自动成对取实）
+  // 注：groups 中每对共轭极点多仅保留正虚部代表（pair=true），成对取实需 ×2（存量问题重修）
   function evalLaplaceGroups(groups, t) {
     let acc = 0;
     for (const g of groups) {
@@ -356,11 +357,11 @@ window.TR = (() => {
         sr += ar * cr - ai * ci;
         si += ar * ci + ai * cr;
       }
-      acc += sr;
+      acc += g.pair ? 2 * sr : sr;
     }
     return acc;
   }
-  // h(n) 数值（n≥1）：Σ_p Σ_k A_k·C(n−1,k−1)·p^{n−k}
+  // h(n) 数值（n≥1）：Σ_p Σ_k A_k·C(n−1,k−1)·p^{n−k}（共轭组同样 ×2，与 texZGroups 一致）
   function evalZGroups(groups, n) {
     if (n < 1) return 0;
     const x = n - 1;
@@ -378,7 +379,7 @@ window.TR = (() => {
         sr += g.A[k - 1].re * c * pr - g.A[k - 1].im * c * pi;
         si += g.A[k - 1].re * c * pi + g.A[k - 1].im * c * pr;
       }
-      acc += sr;
+      acc += g.pair ? 2 * sr : sr;
     }
     return acc;
   }

@@ -15,17 +15,8 @@
 window.BLKSOLVE = (() => {
   /* ================= 多项式与有理函数 ================= */
   const pTrim = (p) => { const a = p.slice(); while (a.length > 1 && Math.abs(a[0]) < 1e-9) a.shift(); return a; };
-  const polyMul = (a, b) => {
-    const o = new Array(a.length + b.length - 1).fill(0);
-    for (let i = 0; i < a.length; i++) for (let j = 0; j < b.length; j++) o[i + j] += a[i] * b[j];
-    return o;
-  };
-  const polyAdd = (a, b) => {
-    const n = Math.max(a.length, b.length), o = new Array(n).fill(0);
-    for (let i = 0; i < a.length; i++) o[n - a.length + i] += a[i];
-    for (let i = 0; i < b.length; i++) o[n - b.length + i] += b[i];
-    return o;
-  };
+  const polyMul = U.polyMul;
+  const polyAdd = U.polyAdd;
   function polyDivMod(A, B) {
     const a = pTrim(A), b = pTrim(B);
     if (a.length < b.length) return { q: [0], r: a };

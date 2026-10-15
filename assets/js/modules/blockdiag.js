@@ -2,8 +2,9 @@
  * blockdiag.js — 系统框图编辑器（自动控制原理）
  *   · 教材符号体系：方框（传函）/ 求和点 Σ（圈上标 ±，点击切换）/ 分支点
  *   · 无限画布：滚轮或双指缩放、拖空白或空格平移、触屏单指平移
- *   · 连线：从任意端口（出/入皆可）拖出，目标端口吸附高亮、方向自动判定；拖到空白处松手可新建元件
- *   · 就地编辑：双击块改传函、双击标签改名；右键（触屏长按）上下文菜单
+ *   · 连线：从任意端口（出/入皆可）拖出，目标端口吸附高亮、方向自动判定；拖到空白处松手可新建元件；
+ *         按住已有连线的端点可直接改接（重连接），Esc 取消、成功才入撤销栈
+ *   · 就地编辑：双击块改传函（触屏双击改为弹出菜单）；右键（触屏长按）上下文菜单；触屏长按空白框选
  *   · 撤销 / 重做、框选与对齐辅助线、输入/输出端子 R(s) / Y(s)
  *   求解内核在 lib/blocksolve.js（纯函数，可单测）
  *
@@ -25,6 +26,7 @@ App.register('blk', (host) => {
   const HIT_NODE = 8;                      // 节点命中外扩（屏幕像素）
   const HIT_MOUSE = 14, HIT_TOUCH = 22;    // 端口命中半径（屏幕像素）
   const LONG_PRESS = 450;                  // 触屏长按阈值（ms）
+  const RECONNECT_R = 16;                  // 连线端点重连接命中半径（屏幕像素）
   const S_MIN = 0.35, S_MAX = 3;
 
   /* ================= 状态 ================= */
@@ -33,7 +35,7 @@ App.register('blk', (host) => {
   let selNodes = new Set(), selEdge = -1;
   let tool = 'select';
   let drag = null;                        // {type:'node'|'wire'|'pan'|'box'}
-  let wire = null;                        // 连线预览 {from, fromPt, cur, target}
+  let wire = null;                        // 连线预览 {from|to, dir, fromPt, cur, target, reconn?}
   let guides = [];
   let lastPointerType = 'mouse';
   let liveHint = '';
@@ -51,6 +53,7 @@ App.register('blk', (host) => {
   // ① 框选时每移动一次都重建检查器（会打断输入框焦点）② 无谓的 DOM/KaTeX 开销
   let structVer = 0, inspSig = '', listSig = '', resSig = '';
   let prevBlocked = false;                 // 上一次渲染是否存在无法避障的连线（none→some 时提示一次）
+  let edgeFlashIdx = -1;                   // 「连线」列表点选后的短暂高亮（画布上加粗描边一次）
   const selKey = () => (selEdge >= 0 ? 'e' + selEdge : 'n' + [...selNodes].sort((a, b) => a - b).join(','));
 
   /* ================= 骨架 ================= */
@@ -119,6 +122,25 @@ App.register('blk', (host) => {
             <button class="blk-cvbtn" id="blk-zoom-in" title="放大">＋</button>
           </div>
           <div class="blk-hintbar" id="blk-hint"></div>
+          <div class="blk-empty" id="blk-empty" hidden>
+            <svg class="blk-empty-art" viewBox="0 0 340 120" aria-hidden="true">
+              <rect x="16" y="34" width="86" height="52" rx="10" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-dasharray="7 5"/>
+              <text x="59" y="65" text-anchor="middle" font-size="12" font-family="var(--mono)" fill="var(--text-dim)">G</text>
+              <path d="M102 60 H 140" stroke="var(--cv-line4)" stroke-width="1.8"/>
+              <polygon points="148,60 139,55.5 139,64.5" fill="var(--cv-line4)"/>
+              <circle cx="180" cy="60" r="24" fill="none" stroke="var(--warn)" stroke-width="1.6" stroke-dasharray="7 5"/>
+              <text x="180" y="67" text-anchor="middle" font-size="19" font-family="Georgia,serif" fill="var(--warn)">Σ</text>
+              <path d="M204 60 H 248" stroke="var(--cv-line4)" stroke-width="1.8" stroke-dasharray="7 5"/>
+              <polygon points="256,60 247,55.5 247,64.5" fill="var(--cv-line4)"/>
+              <rect x="256" y="34" width="68" height="52" rx="10" fill="none" stroke="var(--accent-2)" stroke-width="1.6" stroke-dasharray="7 5"/>
+              <text x="290" y="65" text-anchor="middle" font-size="12" font-family="var(--mono)" fill="var(--text-dim)">Y(s)</text>
+            </svg>
+            <div class="blk-empty-steps">
+              <span class="blk-empty-step"><svg class="ico" aria-hidden="true"><use href="#i-diagram"></use></svg>① 点击左侧添加元件</span>
+              <span class="blk-empty-step"><svg class="ico" aria-hidden="true"><use href="#i-transform"></use></svg>② 从端口拖出连线</span>
+              <span class="blk-empty-step"><svg class="ico" aria-hidden="true"><use href="#i-chart"></use></svg>③ 自动求解</span>
+            </div>
+          </div>
         </div>
         <div class="blk-delrow">
           <button class="btn" id="blk-del">🗑 删除选中</button>
@@ -131,6 +153,7 @@ App.register('blk', (host) => {
         <h3>检查器</h3>
         <div id="blk-insp"></div>
         <h3 style="margin-top:16px">分析结果</h3>
+        <div class="guide-bar" id="blk-guide" hidden></div>
         <div class="blk-tparam" id="blk-tparam" style="display:none">
           <label for="blk-t">采样周期 T</label>
           <input type="number" id="blk-t" step="0.01" min="0.001" max="1000" value="0.1" inputmode="decimal">
@@ -150,7 +173,7 @@ App.register('blk', (host) => {
   const isTouch = () => lastPointerType !== 'mouse';
 
   /* ================= 撤销 / 重做 ================= */
-  const snapshot = () => JSON.stringify({ nodes, edges, seq });
+  const snapshot = () => JSON.stringify({ nodes, edges, seq, T });
   function pushUndo() {
     undoStack.push(snapshot());
     if (undoStack.length > MAX_UNDO) undoStack.shift();
@@ -160,6 +183,7 @@ App.register('blk', (host) => {
   function applySnapshot(str) {
     const d = JSON.parse(str);
     nodes = d.nodes; edges = d.edges; seq = d.seq;
+    if (typeof d.T === 'number' && isFinite(d.T) && d.T > 0) T = Math.min(T_MAX, Math.max(T_MIN, d.T));
     const ids = new Set(nodes.map((n) => n.id));
     selNodes = new Set([...selNodes].filter((id) => ids.has(id)));
     selEdge = -1;
@@ -389,12 +413,15 @@ App.register('blk', (host) => {
     edges.forEach((e, i) => {
       const gm = edgeGeom(i, slotMap);
       if (!gm) return;
+      if (wire && wire.reconn && wire.reconn.idx === i) return;   // 重连接拖动中：原边暂隐，预览线接管
       if (gm.blocked) anyBlocked = true;
       const col = e.sign < 0 ? 'var(--danger)' : 'var(--cv-line4)';
       const on = selEdge === i;
-      parts.push(`<path d="${gm.d}" fill="none" stroke="${col}" stroke-width="${on ? lw + 1.2 : lw}" opacity="${on ? 1 : gm.blocked ? 0.5 : 0.92}" stroke-linejoin="round"${e.sign < 0 ? ' stroke-dasharray="6 4"' : ''}/>`);
-      parts.push(`<polygon points="${arrowOf(gm.pts)}" fill="${col}"/>`);
-      parts.push(`<g data-badge="${i}" style="cursor:pointer">
+      const fl = edgeFlashIdx === i;                              // 「连线」列表点选后的短暂高亮
+      const lc = fl ? 'var(--accent-2)' : col;
+      parts.push(`<path d="${gm.d}" fill="none" stroke="${lc}" stroke-width="${on ? lw + 1.2 : fl ? lw + 1.6 : lw}" opacity="${on || fl ? 1 : gm.blocked ? 0.5 : 0.92}" stroke-linejoin="round"${e.sign < 0 && !fl ? ' stroke-dasharray="6 4"' : ''}"/>`);
+      parts.push(`<polygon points="${arrowOf(gm.pts)}" fill="${lc}"/>`);
+      parts.push(`<g class="blk-badge${on ? ' on' : ''}" data-badge="${i}" style="cursor:pointer">
         <circle cx="${gm.mid.x}" cy="${gm.mid.y}" r="${touch ? 15 : 12}" fill="transparent"/>
         <circle cx="${gm.mid.x}" cy="${gm.mid.y}" r="9" fill="var(--panel)" stroke="${col}" stroke-width="1.5"/>
         <text x="${gm.mid.x}" y="${gm.mid.y + 3.6}" text-anchor="middle" fill="${col}" font-size="11" font-family="var(--mono)" style="pointer-events:none">${e.sign < 0 ? '−' : '+'}</text>
@@ -550,6 +577,35 @@ App.register('blk', (host) => {
     const t = L2 ? Math.min(1, Math.max(0, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2)) : 0;
     return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
   }
+  // 严格元件体（不含端口外扩）：按在元件身上时优先移动元件，不做端点重连接
+  function onStrictBody(p) {
+    for (const nd of nodes) {
+      const c = worldToScreen(nd);
+      const gm = nodeGeom(nd);
+      const hw = (gm.w / 2) * view.s, hh = (gm.h / 2) * view.s;
+      if (nd.kind === 'box' || nd.kind === 'zoh') { if (Math.abs(p.x - c.x) <= hw && Math.abs(p.y - c.y) <= hh) return true; }
+      else if (Math.hypot(p.x - c.x, p.y - c.y) <= hw) return true;
+    }
+    return false;
+  }
+  // 连线端点重连接命中：距某条边端点（出端口 / 入槽位）足够近即视为抓住该端；多端取最近
+  function hitEdgeEnd(p) {
+    const slotMap = assignSlots();
+    let best = null, bestD = RECONNECT_R;
+    for (let i = 0; i < edges.length; i++) {
+      const a = nodeById(edges[i].from), b = nodeById(edges[i].to);
+      if (!a || !b) continue;
+      const ends = [
+        { end: 'from', s: worldToScreen(outPort(a)) },
+        { end: 'to', s: worldToScreen(slotMap.get(i) || inSlots(b)[0]) }
+      ];
+      for (const { end, s } of ends) {
+        const d = Math.hypot(p.x - s.x, p.y - s.y);
+        if (d <= bestD) { bestD = d; best = { idx: i, end }; }
+      }
+    }
+    return best && !onStrictBody(p) ? best : null;
+  }
   function alignSnap(anchor, dp) {
     const tol = 6 / view.s;
     let dx = dp.x, dy = dp.y, gx = null, gy = null, bx = tol, by = tol;
@@ -576,7 +632,8 @@ App.register('blk', (host) => {
     if (pointers.size === 2) {
       const [a, b] = [...pointers.values()];
       pinch = { d: Math.max(20, Math.hypot(a.x - b.x, a.y - b.y)) };
-      drag = null; wire = null; liveHint = ''; renderOverlay(); renderHint();
+      drag = null; wire = null; liveHint = '';
+      renderStatic(); renderOverlay(); renderHint();   // renderStatic：被改接暂隐的原边要恢复
       return;
     }
     const sp = svgPoint(e);
@@ -599,6 +656,9 @@ App.register('blk', (host) => {
       afterChange();
       return;
     }
+    // 重连接：按在已有连线端点附近（且不在元件体上）→ 抓住该端改接，优先于从端口新拉线
+    const reEnd = hitEdgeEnd(sp);
+    if (reEnd) { startReconnect(reEnd, sp); return; }
     const port = hitPort(sp);
     if (port && port.kind === 'out') {
       wire = { dir: 'out', from: port.id, fromPt: port.pt, cur: sp, target: null };
@@ -629,12 +689,32 @@ App.register('blk', (host) => {
     }
     selNodes = new Set(); selEdge = -1;
     renderList(); renderInspector(); renderStatic();
-    if (tool === 'pan' || spaceDown || e.pointerType !== 'mouse' || e.button === 1) {
+    if (tool === 'pan' || spaceDown || e.button === 1) {
       drag = { type: 'pan', last: { x: e.clientX, y: e.clientY } };
+    } else if (e.pointerType !== 'mouse') {
+      // 触屏：先按平移起手，长按 450ms 未移动则转为框选（单指拖空白仍是平移）
+      drag = { type: 'pan', last: { x: e.clientX, y: e.clientY } };
+      startLongPress(e, { kind: 'empty' });
     } else {
       drag = { type: 'box', start: wp, cur: wp };
       renderOverlay();
     }
+  }
+  // 端点重连接：复用连线预览 / 吸附环 / 空白新建逻辑；原边暂隐，成功才改接并入撤销栈
+  function startReconnect(re, sp) {
+    const e0 = edges[re.idx];
+    const a = nodeById(e0.from), b = nodeById(e0.to);
+    if (!a || !b) return;
+    const reconn = { idx: re.idx, sign: e0.sign };
+    if (re.end === 'from') {
+      // 抓住源头端：固定锚是 to 侧（dir='in' 语义，落点须为某元件的出端口）
+      wire = { dir: 'in', to: e0.to, fromPt: outPort(a), cur: sp, target: null, reconn };
+    } else {
+      // 抓住入端：固定锚是 from 侧（dir='out' 语义，落点须为某元件的入端口）
+      wire = { dir: 'out', from: e0.from, fromPt: assignSlots().get(re.idx) || inSlots(b)[0], cur: sp, target: null, reconn };
+    }
+    selNodes = new Set(); selEdge = re.idx;
+    renderList(); renderInspector(); renderStatic(); renderOverlay();
   }
   function onPointerMove(e) {
     if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -722,16 +802,30 @@ App.register('blk', (host) => {
     cancelLongPress();
     if (wire) {
       const t = wire.target, drop = wire.cur, dir = wire.dir || 'out', anchorId = dir === 'in' ? wire.to : wire.from;
+      const re = wire.reconn || null;
       wire = null; liveHint = '';
       renderOverlay(); renderHint();
       if (t) {
-        if (anchorId === t.id) { flash('不能连接到自身'); return; }
-        pushUndo();
+        if (anchorId === t.id) { flash('不能连接到自身'); return; }   // 重连接落回原元件：原边原样保留
+        pushUndo();                                                   // 快照含被改接的原边，撤销即可还原
         const a = dir === 'in' ? t.id : anchorId, b = dir === 'in' ? anchorId : t.id;
+        if (re) { edges.splice(re.idx, 1); selEdge = -1; }            // 成功改接：移除原边（符号保留）
         const existing = edges.findIndex((ed) => ed.from === a && ed.to === b);
         if (existing >= 0) { edges[existing].sign *= -1; flash('该连线已存在，已切换符号'); }
-        else edges.push({ from: a, to: b, sign: 1 });
+        else edges.push({ from: a, to: b, sign: re ? re.sign : 1 });
         afterChange();
+        return;
+      }
+      if (re) {
+        // 重连接松手在空白：新建元件接上后再移除原边（菜单取消则原边保留）；
+        // 快照在 createAt 内入栈，原边尚在 → 撤销可整步还原
+        openCtx({ x: e.clientX, y: e.clientY, items: [
+          { label: '新建求和点 Σ', fn: () => { createAt('sum', drop, anchorId, dir, re.sign); finishReconnect(re); } },
+          { label: '新建分支点', fn: () => { createAt('branch', drop, anchorId, dir, re.sign); finishReconnect(re); } },
+          { label: '新建方框', fn: () => { createAt('box', drop, anchorId, dir, re.sign); finishReconnect(re); } },
+          { label: '新建采样开关', fn: () => { createAt('sample', drop, anchorId, dir, re.sign); finishReconnect(re); } },
+          { label: '新建零阶保持器', fn: () => { createAt('zoh', drop, anchorId, dir, re.sign); finishReconnect(re); } }
+        ] });
         return;
       }
       // 松手在空白处：新建元件并把刚拖出的这条线接上（anchorId 必须传下去，
@@ -745,21 +839,27 @@ App.register('blk', (host) => {
       ] });
       return;
     }
-    if (drag && drag.type === 'box') { drag = null; guides = []; renderOverlay(); return; }
+    if (drag && drag.type === 'box') { drag = null; guides = []; liveHint = ''; renderOverlay(); renderHint(); return; }
     if (drag && drag.type === 'node' && drag.moved) writeHash();
     drag = null; guides = [];
     renderOverlay(); renderList();
   }
-  function createAt(kind, screenPt, connectId, dir) {
+  function createAt(kind, screenPt, connectId, dir, sign) {
     const wp = screenToWorld(screenPt);
     pushUndo();
     const nd = addNode(kind, null, wp.x, wp.y);
     if (connectId != null && connectId !== nd.id) {
-      edges.push(dir === 'in' ? { from: nd.id, to: connectId, sign: 1 } : { from: connectId, to: nd.id, sign: 1 });
+      edges.push(dir === 'in' ? { from: nd.id, to: connectId, sign: sign || 1 } : { from: connectId, to: nd.id, sign: sign || 1 });
     }
     afterChange();
     flash(KIND_LABEL[kind] + '已创建');
     return nd;
+  }
+  // 重连接 + 空白新建：新元件接上后移除被改接的原边（由菜单项在 createAt 之后调用）
+  function finishReconnect(re) {
+    edges.splice(re.idx, 1);
+    selEdge = -1;
+    afterChange();
   }
 
   /* ================= 长按 / 上下文菜单 ================= */
@@ -767,7 +867,26 @@ App.register('blk', (host) => {
     if (e.pointerType === 'mouse') return;
     cancelLongPress();
     const x = e.clientX, y = e.clientY;
-    lpTimer = setTimeout(() => { lpTimer = 0; openCtx(nodeMenu(target, x, y)); }, LONG_PRESS);
+    lpTimer = setTimeout(() => {
+      lpTimer = 0;
+      if (target.kind === 'empty') { beginTouchMarquee(x, y); return; }   // 长按空白 → 框选
+      openCtx(nodeMenu(target, x, y));
+    }, LONG_PRESS);
+  }
+  // 触屏长按空白 → 由平移转为框选；松手保留选中，可整组拖动 / 长按组内元件整组复制删除
+  function beginTouchMarquee(x, y) {
+    if (!drag || drag.type !== 'pan') return;
+    const wp0 = screenToWorld(svgPoint({ clientX: x, clientY: y }));
+    drag = { type: 'box', start: wp0, cur: wp0 };
+    touchMarqueeHintOnce();
+    renderList(); renderInspector(); renderStatic(); renderOverlay();
+  }
+  function touchMarqueeHintOnce() {
+    let seen = false;
+    try { seen = localStorage.getItem('blk-marquee-hint') === '1'; } catch (e) { }
+    if (seen) return;
+    try { localStorage.setItem('blk-marquee-hint', '1'); } catch (e) { }
+    liveHint = '松开以选择元件'; renderHint();
   }
   function cancelLongPress() { if (lpTimer) { clearTimeout(lpTimer); lpTimer = 0; } }
   function nodeMenu(target, x, y) {
@@ -781,13 +900,20 @@ App.register('blk', (host) => {
     const nd = nodeById(target.id);
     if (!nd) return { x, y, items: [] };
     const items = [];
+    const groupSel = selNodes.size > 1 && selNodes.has(nd.id);   // 框选组：长按组内元件调出组操作
+    if (groupSel) {
+      items.push({ label: `复制 ${selNodes.size} 个元件`, fn: groupCopy });
+      items.push({ label: `删除 ${selNodes.size} 个元件`, danger: true, fn: deleteSelection });
+      return { x, y, items };
+    }
     if (nd.kind === 'box') {
       items.push({ label: '编辑传函…', fn: () => beginEdit(nd, 'str') });
       items.push({ label: nd.dom === 'z' ? '取消「已在 z 域」' : '标记为「已在 z 域」', fn: () => { pushUndo(); nd.dom = nd.dom === 'z' ? 's' : 'z'; applyTF(nd); afterChange(); } });
     }
     items.push({ label: '重命名…', fn: () => beginEdit(nd, 'name') });
     const rs = hasSampled() ? 'z' : 's';
-    if (nd.kind === 'sum') items.push({ label: nd.src ? `取消输入 R(${rs})` : `设为输入 R(${rs})`, fn: () => { pushUndo(); nd.src = !nd.src; afterChange(); } });
+    // R/Y 动作与检查器保持一致：任意元件都可设为输入 / 输出端子
+    items.push({ label: nd.src ? `取消输入 R(${rs})` : `设为输入 R(${rs})`, fn: () => { pushUndo(); nd.src = !nd.src; afterChange(); } });
     items.push({ label: nd.out ? `取消输出 Y(${rs})` : `设为输出 Y(${rs})`, fn: () => { pushUndo(); nd.out = !nd.out; afterChange(); } });
     items.push({ label: '复制', fn: () => {
       pushUndo();
@@ -896,6 +1022,26 @@ App.register('blk', (host) => {
   }
   // 是否存在采样元件 / z 域块（决定走 s 域还是 z 域分析）
   const hasSampled = () => nodes.some((n) => n.kind === 'sample' || n.kind === 'zoh' || (n.kind === 'box' && n.dom === 'z'));
+  // 组复制：克隆选区内全部元件（选区内部连线一并克隆），偏移 34px
+  function groupCopy() {
+    pushUndo();
+    const map = new Map(), clones = [];
+    for (const id of selNodes) {
+      const nd = nodeById(id);
+      if (!nd) continue;
+      seq++;
+      const c = JSON.parse(JSON.stringify(nd));
+      c.id = seq; c.name = nd.name + '′'; c.x += 34; c.y += 34;
+      nodes.push(c);
+      map.set(id, seq); clones.push(c.id);
+    }
+    for (const e of edges) {
+      if (map.has(e.from) && map.has(e.to)) edges.push({ from: map.get(e.from), to: map.get(e.to), sign: e.sign });
+    }
+    selNodes = new Set(clones); selEdge = -1;
+    afterChange();
+    flash('已复制 ' + clones.length + ' 个元件');
+  }
   function deleteSelection() {
     if (!selNodes.size && selEdge < 0) { flash('先选中元件或连线'); return; }
     pushUndo();
@@ -951,6 +1097,46 @@ App.register('blk', (host) => {
   }
 
   /* ================= 求解与结果 ================= */
+  // 结构检查引导：与 blocksolve.solveTransfer 的注入 / 汇点规则保持一致 ——
+  // 无 R → 按无入边元件注入（仍无则首个）；多 R → 多点注入；Y 与输入不连通 → 提醒可能恒为 0；
+  // 无 Y 且无汇点 → 求解将报错，提前给出补救指引。只提示，不改变求解行为。
+  function structureHints() {
+    const act = nodes.filter((n) => !n.err && n.f);
+    if (!act.length) return [];
+    const idset = new Set(act.map((n) => n.id));
+    const E = edges.filter((e) => idset.has(e.from) && idset.has(e.to));
+    const hasIn = (id) => E.some((e) => e.to === id);
+    const noIn = act.filter((n) => !hasIn(n.id));
+    const srcs = act.filter((n) => n.src);
+    const outs = act.filter((n) => n.out);
+    const hints = [];
+    if (!srcs.length) {
+      const injs = noIn.length ? noIn : act;
+      hints.push(hasSampled()
+        ? '未检测到输入端子 R：已按无入边元件注入单位输入计算，可在检查器中为任意元件设 R。'
+        : `未检测到输入端子 R：已按节点 ${injs.map((n) => n.name).join('、')} 注入单位输入计算，可在检查器中为任意元件设 R。`);
+    } else if (srcs.length > 1) {
+      hints.push(`检测到 ${srcs.length} 个输入端子 R：已按多点同时注入单位输入计算，通常只需保留一个 R。`);
+    }
+    if (!outs.length) {
+      if (!act.some((n) => !E.some((e) => e.from === n.id))) {
+        hints.push('未检测到输出端子 Y：请把某个元件设为输出 Y(s)，或让信号链末端元件不接出线。');
+      }
+    } else {
+      const inj = srcs.length ? srcs.map((n) => n.id)
+        : (noIn.length ? noIn.map((n) => n.id) : [act[0].id]);
+      const reach = new Set(inj);
+      const q = [...inj];
+      while (q.length) {
+        const c = q.pop();
+        for (const e of E) if (e.from === c && !reach.has(e.to)) { reach.add(e.to); q.push(e.to); }
+      }
+      if (!outs.some((n) => reach.has(n.id))) {
+        hints.push('输出端子 Y 与输入不连通：按当前连线结果可能恒为 0，请检查连线方向或调整 R / Y 端子。');
+      }
+    }
+    return hints;
+  }
   // 有采样元件 / z 域块 → 走 z 域路径（归约 + 求解）；否则完全走原 s 域路径
   function solve() {
     const bad = nodes.filter((n) => n.err).length;
@@ -1006,6 +1192,13 @@ App.register('blk', (host) => {
     const sig = structVer + '|' + resultTab + '|' + T;
     if (sig === resSig) return;
     resSig = sig;
+    // 结构引导条：常驻于结果区顶部，直至结构修正（黄色提示，不阻断求解）
+    const guide = byId('-guide');
+    if (guide) {
+      const hints = structureHints();
+      guide.innerHTML = hints.map((h) => '<div>' + esc(h) + '</div>').join('');
+      guide.hidden = !hints.length;
+    }
     const r = solve();
     if (!r.ok) {
       body.innerHTML = `<div class="blk-note">${esc(r.note)}</div>`
@@ -1340,6 +1533,27 @@ App.register('blk', (host) => {
       });
       list.appendChild(row);
     }
+    // 连线区：点选选中该线，并在画布上短暂加粗高亮
+    list.appendChild(U.el('div', { class: 'blk-listhead' }, '连线'));
+    if (!edges.length) {
+      list.appendChild(U.el('div', { class: 'blk-note' }, '暂无连线：从元件端口拖出即可连接；按住连线端点可改接。'));
+      return;
+    }
+    edges.forEach((e, i) => {
+      const f = nodeById(e.from), t = nodeById(e.to);
+      const row = U.el('div', { class: 'blk-item' + (selEdge === i ? ' sel' : '') });
+      const body = U.el('div', { class: 'blk-itembody' },
+        U.el('div', { class: 'blk-itemname' }, `${f ? f.name : '?'} → ${t ? t.name : '?'}`),
+        U.el('div', { class: 'blk-itemstr' }, e.sign < 0 ? '负反馈（−）' : '正向（+）'));
+      row.append(U.el('span', { class: 'blk-itemicon' }, e.sign < 0 ? '−' : '+'), body);
+      row.addEventListener('click', () => {
+        selNodes = new Set(); selEdge = i;
+        edgeFlashIdx = i;
+        renderList(); renderInspector(); renderStatic();
+        setTimeout(() => { if (edgeFlashIdx === i) { edgeFlashIdx = -1; renderStatic(); } }, 750);
+      });
+      list.appendChild(row);
+    });
   }
 
   /* ================= 状态栏 / 提示 ================= */
@@ -1361,7 +1575,7 @@ App.register('blk', (host) => {
     h.classList.remove('on');
     const small = window.matchMedia('(max-width: 900px)').matches;
     h.textContent = small || isTouch()
-      ? '单指拖元件 · 拖空白平移 · 双指缩放 · 任意端口拖出连线 · 长按打开菜单'
+      ? '单指拖元件 · 拖空白平移 · 长按空白框选 · 双指缩放 · 端口拖出连线 · 长按打开菜单'
       : '拖元件移动 · 拖空白框选 · 滚轮缩放 · 空格拖动平移 · 任意端口拖出连线 · 双击编辑 · 右键菜单';
   }
 
@@ -1370,10 +1584,15 @@ App.register('blk', (host) => {
     structVer++;
     if (selEdge >= edges.length) selEdge = -1;   // 连线被外部删除/重排后索引会失效
     renderList(); renderStatic(); renderOverlay(); renderInspector(); renderResult();
-    renderHint(); updateStatus(); syncHistUI(); syncView();
+    renderHint(); updateStatus(); syncHistUI(); syncView(); syncEmpty();
     if (!keepView) writeHash();
   }
-  function renderAll() { renderStatic(); renderOverlay(); renderInspector(); renderResult(); renderList(); renderHint(); syncView(); }
+  function renderAll() { renderStatic(); renderOverlay(); renderInspector(); renderResult(); renderList(); renderHint(); syncView(); syncEmpty(); }
+  // 空画布引导：无元件时显示三步上手占位（pointer-events:none，不影响画布命中）
+  function syncEmpty() {
+    const el = byId('-empty');
+    if (el) el.hidden = nodes.length > 0;
+  }
 
   /* ================= 分享链接 ================= */
   function encodeState() {
@@ -1384,7 +1603,8 @@ App.register('blk', (host) => {
       e: edges.map((e) => [e.from, e.to, e.sign < 0 ? 0 : 1]),
       vw: { s: +view.s.toFixed(3), tx: Math.round(view.tx), ty: Math.round(view.ty) }
     };
-    return 'blk1.' + btoa(unescape(encodeURIComponent(JSON.stringify(slim))));
+    const json = JSON.stringify(slim);
+    return 'blk1.' + btoa(U.utf8Encode(json));
   }
   function writeHash() {
     clearTimeout(hashTimer);
@@ -1396,7 +1616,8 @@ App.register('blk', (host) => {
     try {
       const raw = new URLSearchParams(location.hash.replace(/^#/, '')).get('blk');
       if (!raw || !raw.startsWith('blk1.')) return false;
-      const slim = JSON.parse(decodeURIComponent(escape(atob(raw.slice(5)))));
+      const rawBin = atob(raw.slice(5));
+      const slim = JSON.parse(U.utf8Decode(rawBin));
       if (!slim || !Array.isArray(slim.n) || !slim.n.length) return false;
       nodes = []; edges = []; seq = 0;
       if (typeof slim.T === 'number' && isFinite(slim.T) && slim.T > 0) T = Math.min(T_MAX, Math.max(T_MIN, slim.T));
@@ -1434,7 +1655,7 @@ App.register('blk', (host) => {
   sEl.addEventListener('pointerup', onPointerUp);
   sEl.addEventListener('pointercancel', (e) => {
     pointers.delete(e.pointerId); pinch = null; wire = null; drag = null; guides = []; liveHint = '';
-    cancelLongPress(); renderOverlay(); renderHint();
+    cancelLongPress(); renderStatic(); renderOverlay(); renderHint();
   });
   sEl.addEventListener('wheel', (e) => {
     e.preventDefault();
@@ -1444,14 +1665,28 @@ App.register('blk', (host) => {
   }, { passive: false });
   sEl.addEventListener('dblclick', (e) => {
     const sp = svgPoint(e);
+    const coarse = e.pointerType === 'touch' || (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
     const nd = hitNode(sp);
+    if (coarse) {
+      // 触屏：双击等价于长按菜单（弹窗键盘比就地编辑更适配移动端）
+      if (nd) {
+        if (!selNodes.has(nd.id)) { selNodes = new Set([nd.id]); selEdge = -1; }
+        renderList(); renderInspector(); renderStatic();
+        openCtx(nodeMenu({ kind: 'node', id: nd.id }, e.clientX, e.clientY));
+      } else {
+        const ei = hitEdge(sp);
+        if (ei >= 0) { selEdge = ei; selNodes = new Set(); renderList(); renderInspector(); renderStatic(); openCtx(nodeMenu({ kind: 'edge', id: ei }, e.clientX, e.clientY)); }
+      }
+      return;
+    }
     if (nd) { selNodes = new Set([nd.id]); renderStatic(); renderInspector(); beginEdit(nd, nd.kind === 'box' ? 'str' : 'name'); }
   });
   sEl.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     const sp = svgPoint(e);
     const nd = hitNode(sp);
-    if (nd) { selNodes = new Set([nd.id]); selEdge = -1; renderList(); renderInspector(); renderStatic(); openCtx(nodeMenu({ kind: 'node', id: nd.id }, e.clientX, e.clientY)); return; }
+    // 右键组内元件：保留框选组（与触屏长按一致，可整组复制 / 删除）
+    if (nd) { if (!selNodes.has(nd.id)) { selNodes = new Set([nd.id]); selEdge = -1; } renderList(); renderInspector(); renderStatic(); openCtx(nodeMenu({ kind: 'node', id: nd.id }, e.clientX, e.clientY)); return; }
     const ei = hitEdge(sp);
     if (ei >= 0) { selEdge = ei; selNodes = new Set(); renderList(); renderInspector(); renderStatic(); openCtx(nodeMenu({ kind: 'edge', id: ei }, e.clientX, e.clientY)); }
   });
@@ -1472,7 +1707,9 @@ App.register('blk', (host) => {
       return;
     }
     if (warn) warn.textContent = '';
-    T = Math.min(T_MAX, Math.max(T_MIN, v));
+    const nv = Math.min(T_MAX, Math.max(T_MIN, v));
+    if (nv !== T) pushUndo();   // T 已入快照：Ctrl+Z 可回退采样周期
+    T = nv;
     e.target.value = String(T);
     afterChange(true);
   });
@@ -1503,6 +1740,7 @@ App.register('blk', (host) => {
     emptyText: '暂无保存的框图',
     onLoad: (m) => {
       if (!m.data || !m.data.hash) return;
+      pushUndo();   // 载入前先快照：模型库载入可整体撤销
       try { history.replaceState(null, '', '#' + m.data.hash); } catch (e) { }
       readHash();
       afterChange(true);

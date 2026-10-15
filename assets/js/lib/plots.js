@@ -21,7 +21,15 @@ const FX = (() => {
       .replace(/\\dfrac\s*{([^{}]*)}\s*{([^{}]*)}/g, '($1)/($2)')
       .replace(/\\frac\s*{([^{}]*)}\s*{([^{}]*)}/g, '($1)/($2)')
       .replace(/\\sqrt\s*{([^{}]*)}/g, '√($1)')
-      .replace(/\\begin\{bmatrix\}/g, '⎡').replace(/\\end\{bmatrix\}/g, '⎤')
+      // 环境与分隔符（必须先于命令剥离，否则会残留 \begin{cases}、&、\\ 字面量）：
+      // 矩阵→[]、分段→｛｝、对齐/数组容器→去掉；行分隔 \\→；、列分隔 &→，、转义花括号 \{ \}→｛｝
+      .replace(/\\begin\{(?:b|B|p|P|v|V)matrix\}/g, '[').replace(/\\end\{(?:b|B|p|P|v|V)matrix\}/g, ']')
+      .replace(/\\begin\{cases\}/g, '｛').replace(/\\end\{cases\}/g, '｝')
+      .replace(/\\begin\{array\}\s*\{[^{}]*\}/g, '').replace(/\\end\{array\}/g, '')
+      .replace(/\\begin\{(?:align(?:ed)?\*?|gathered)\}/g, '').replace(/\\end\{(?:align(?:ed)?\*?|gathered)\}/g, '')
+      .replace(/\\\{/g, '｛').replace(/\\\}/g, '｝')
+      .replace(/\\\\/g, '；')
+      .replace(/&/g, '，')
       .replace(/\^{([^{}]*)}/g, '^$1')
       .replace(/\\text\s*{([^{}]*)}/g, '$1')
       .replace(/\\operatorname\{([^{}]*)\}/g, '$1')
@@ -38,15 +46,43 @@ const FX = (() => {
       .replace(/\\log/g, 'log').replace(/\\ln/g, 'ln').replace(/\\exp/g, 'exp')
       .replace(/\\[a-zA-Z]+/g, '')
       .replace(/[{}]/g, '')
+      .replace(/\s*([，；])\s*/g, '$1')
       .replace(/\s{2,}/g, ' ')
       .trim();
   }
   function katex(tex, el, { displayMode = false } = {}) {
     if (!el) return;
-    if (!window.katex) { el.classList.add('tex-fallback'); el.textContent = texToText(tex); return; }
+    // 降级时把原 tex 记在元素上：KaTeX 迟到（CDN 备用源回填 → libs-ready）后就地重排，
+    // 各模块无需各自实现「重渲染」回调。
+    const fallback = () => {
+      el.classList.add('tex-fallback');
+      // 属性写入做能力检测：部分调用方（测试桩 / 轻量容器）没有 setAttribute
+      if (typeof el.setAttribute === 'function') {
+        el.setAttribute('data-tex', String(tex));
+        if (displayMode) el.setAttribute('data-tex-display', '1');
+        else if (typeof el.removeAttribute === 'function') el.removeAttribute('data-tex-display');
+      }
+      el.textContent = texToText(tex);
+    };
+    if (!window.katex) { fallback(); return; }
     try {
+      // throwOnError:false 会把非法 LaTeX 渲染成红色源码而非抛错 → 先按严格模式预校验，ParseError 走纯文本兜底
+      window.katex.renderToString(String(tex), { throwOnError: true, displayMode });
       window.katex.render(tex, el, { throwOnError: false, displayMode });
-    } catch (e) { el.classList.add('tex-fallback'); el.textContent = texToText(tex); }
+    } catch (e) { fallback(); }
+  }
+  // KaTeX 迟到回填：把先前降级为纯文本的公式就地从 data-tex 重排（一次性）
+  if (typeof document !== 'undefined' && document.addEventListener) {
+    document.addEventListener('libs-ready', () => {
+      if (!window.katex) return;
+      Array.from(document.querySelectorAll('.tex-fallback[data-tex]')).forEach((el) => {
+        const tex = el.getAttribute('data-tex');
+        if (!tex) return;
+        el.classList.remove('tex-fallback');
+        el.textContent = '';
+        katex(tex, el, { displayMode: el.getAttribute('data-tex-display') === '1' });
+      });
+    });
   }
   function span(tex, cls = '') {
     const s = document.createElement('span');
@@ -999,7 +1035,7 @@ const FX = (() => {
     });
   }
 
-  const api = { katex, span, div, Plot, ComplexPlane, niceStep, cvCol, refreshTheme, enablePlotChrome };
+  const api = { katex, span, div, texToText, Plot, ComplexPlane, niceStep, cvCol, refreshTheme, enablePlotChrome };
   api.themeVer = themeVer;
   return api;
 })();

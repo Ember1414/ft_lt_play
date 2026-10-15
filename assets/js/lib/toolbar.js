@@ -14,7 +14,7 @@
  *   无当前实验时，首次保存/导出会以当前模块状态自动创建一个实验。
  * ============================================================ */
 window.RTB = (() => {
-  const MODULE_NAMES = { sys: '系统分析', zt: 'Z 变换', la: '拉普拉斯', pid: 'PID', blk: '系统框图', ft: '傅立叶变换', fs: '傅立叶级数', explore: '交互求解', derive: '公式推导', home: '工作台' };
+  const MODULE_NAMES = U.MODULE_NAMES;
 
   /* ---------- 下载帮助 ---------- */
   function download(name, blob) {

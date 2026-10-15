@@ -270,9 +270,33 @@ window.ODE = (() => {
   }
 
   /* ================= 数据序列粘贴解析 ================= */
+  // 单列：任意分隔的数值序列 → { ok, values }（n = 0..N−1，频谱归一化 ×fs）。
+  // 两列（≥2 行且每行恰 2 列 t y）→ { ok, values, t, dt, Fs }：校验时间严格递增且 Δt 均匀（偏差 ≤1%），
+  // 非均匀报错提示改用均匀采样或单列格式。向后兼容：字段只增不改，单列行为不变。
   function parseDataSeq(str) {
     const s = U.normChars(str).trim();
     if (!s) return { ok: false, note: '没有数据' };
+    const lines = s.split(/\n+/).map((l) => l.trim()).filter((l) => l);
+    if (lines.length >= 2) {
+      const rows = lines.map((l) => l.split(/[,;\s]+/).filter((t) => t));
+      if (rows.every((r) => r.length === 2)) {
+        const ts = [], ys = [];
+        for (const r of rows) {
+          const tv = Number(r[0]), yv = Number(r[1]);
+          if (!isFinite(tv)) return { ok: false, badToken: r[0], note: `无法识别的时间「${r[0]}」（两列格式：第 1 列时间、第 2 列幅值）` };
+          if (!isFinite(yv)) return { ok: false, badToken: r[1], note: `无法识别的数据「${r[1]}」` };
+          ts.push(tv); ys.push(yv);
+        }
+        if (!(ts[ts.length - 1] > ts[0])) return { ok: false, note: '时间轴需严格递增（两列格式：第 1 列时间、第 2 列幅值）' };
+        const dtAvg = (ts[ts.length - 1] - ts[0]) / (ts.length - 1);
+        for (let i = 1; i < ts.length; i++) {
+          if (Math.abs((ts[i] - ts[i - 1]) - dtAvg) > 0.01 * dtAvg) {
+            return { ok: false, note: `时间轴非均匀采样（第 ${i + 1} 行 Δt 偏差 >1%）：请粘贴均匀采样数据，或改用单列（仅幅值）格式` };
+          }
+        }
+        return { ok: true, values: ys, t: ts, dt: dtAvg, Fs: 1 / dtAvg };
+      }
+    }
     const toks = s.split(/[,;、\s]+/).filter((t) => t);
     const values = [];
     for (const t of toks) {

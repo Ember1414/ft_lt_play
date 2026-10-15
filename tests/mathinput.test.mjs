@@ -153,6 +153,9 @@ const MI = sandbox.window.MI, FX_LIB = sandbox.window.FX_LIB, TR = sandbox.windo
   ok('空括号', MI.diagnose('s()', 's') === '有空的括号');
   ok('i 提示用 j', /j/.test(MI.diagnose('0.5i', 's')));
   ok('括号不配对', /未闭合/.test(MI.diagnose('(s+1', 's')));
+  ok('全角括号配平', /未闭合/.test(MI.diagnose('（ｓ＋１', 's')));
+  ok('全角空括号', MI.diagnose('ｓ（）', 's') === '有空的括号');
+  ok('全角末尾运算符', MI.diagnose('ｓ＋', 's') === '末尾多了运算符');
   ok('合法串无提示', MI.diagnose('s^2+2*s+5', 's') === null);
 }
 

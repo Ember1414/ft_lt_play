@@ -392,6 +392,15 @@ const ctxLog = (id) => reg(id).getContext()._log;
   ok('explore 传函求解后极点图创建', !!pl && pl.mode === 'jw' && pl.editable === false);
   ok('explore 指标给出稳定', reg('#ex-metrics').innerHTML.includes('稳定'));
 
+  // 纯多项式传函回归（v1.1.2）：parseTF 得 den=[1]，须通过真分式门控正常渲染，
+  // 不再被 num.length <= den.length 误拒为「无法解析传递函数」
+  ex$('#ex-input').value = '(s+1)(s+2)';
+  ex$('#ex-go').fire('click', mkEvt({}));
+  ok('explore 纯多项式 (s+1)(s+2) 通过门控渲染', !reg('#ex-result').innerHTML.includes('无法解析传递函数'), reg('#ex-result').innerHTML.slice(0, 120));
+  ok('explore 纯多项式极点为空显示 —', reg('#ex-metrics').innerHTML.includes('<span class="k">极点</span><span class="v">—</span>'), reg('#ex-metrics').innerHTML);
+  ok('explore 纯多项式 DC 增益 = 2', reg('#ex-metrics').innerHTML.includes('<span class="v">2</span>'), reg('#ex-metrics').innerHTML);
+  ok('explore 纯多项式极点图仍可用', !!reg('#ex-pz')._fxPlot);
+
   // 静态画布：点击/长按不产生任何编辑副作用，也不抛异常
   let threw = null;
   try {

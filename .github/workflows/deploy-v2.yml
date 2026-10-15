@@ -1,0 +1,64 @@
+name: Deploy v2 (Cloudflare Pages)
+
+# 仅当 v2 相关文件变更时触发；也可在 Actions 页手动运行。
+# 未配置密钥（CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID）时**跳过部署步骤**并给出提示，
+# 保证仓库在不具备部署权限时 CI 依然全绿（部署说明见 docs/v2/部署说明.md）。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'v2/**'
+      - '.github/workflows/deploy-v2.yml'
+  pull_request:
+    paths:
+      - 'v2/**'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: 构建并发布 v2
+    runs-on: ubuntu-latest
+    env:
+      CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    defaults:
+      run:
+        working-directory: v2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: v2/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Type check（发布前闸门）
+        run: npm run check
+      - name: 内核回归网（v1↔v2 对拍 + 闭式真值）
+        run: npm run parity
+      - name: 内核语义/审计断言
+        run: npm run audit
+      - name: Build
+        run: npm run build
+      - name: 构建产物 self-check
+        run: |
+          test -f dist/index.html && echo "index.html ok"
+          test -f dist/_headers && echo "_headers ok"
+          grep -q './assets/' dist/index.html && echo "相对 base ok（可部署到任意子路径）"
+      - name: Deploy to Cloudflare Pages
+        if: env.CF_API_TOKEN != '' && env.CF_ACCOUNT_ID != ''
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ env.CF_API_TOKEN }}
+          accountId: ${{ env.CF_ACCOUNT_ID }}
+          workingDirectory: v2
+          command: pages deploy dist --project-name=ft-lt-play-v2 --branch=${{ github.head_ref || github.ref_name }}
+      - name: 部署地址
+        if: env.CF_API_TOKEN != '' && env.CF_ACCOUNT_ID != ''
+        working-directory: .
+        run: echo "已发布：https://ft-lt-play-v2.pages.dev（分支预览形式见 Cloudflare Pages 控制台）"
+      - name: 未配置密钥 → 跳过部署
+        if: env.CF_API_TOKEN == '' || env.CF_ACCOUNT_ID == ''
+        run: echo "跳过部署：未配置 CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID（见 docs/v2/部署说明.md §2）"

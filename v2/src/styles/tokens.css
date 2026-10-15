@@ -1,0 +1,91 @@
+/* ============================================================
+ * tokens.css — 设计系统令牌 v2（「精密仪器」）
+ * 浅色「纸感」为默认；深色「夜景」由 html[data-theme="dark"] 覆盖。
+ * 契约：组件只允许引用本文件令牌；新增令牌必须先进入《设计系统文档》。
+ * ============================================================ */
+:root {
+  color-scheme: light;
+
+  /* —— 色彩（浅色 · 纸感）—— */
+  --paper: #F6F5F1;
+  --panel: #FFFFFF;
+  --panel-2: #EFEEE9;
+  --well: #FBFAF7;
+  --ink: #1B1F27;
+  --ink-2: #48525F;
+  --ink-3: #7B8492;
+  --line: #E4E2DA;
+  --line-2: #CFCCC0;
+
+  --accent: #2456CC;              /* 主色：焦点 / 主路径 / 选中 */
+  --accent-soft: rgba(36, 86, 204, .09);
+  --accent-line: rgba(36, 86, 204, .28);
+  --accent-2: #0C7C6B;            /* 辅助数据系列（青） */
+  --violet: #6B4FD8;              /* 对比组 B（固定语义） */
+  --ok: #0C7C6B;
+  --warn: #A15C06;
+  --danger: #C7403C;
+  --ok-soft: rgba(12, 124, 107, .10);
+  --warn-soft: rgba(161, 92, 6, .10);
+  --danger-soft: rgba(199, 64, 60, .09);
+
+  /* 图表系列（同量纲同色；深浅主题保持同序） */
+  --series-1: #2456CC;
+  --series-2: #0C7C6B;
+  --series-3: #7550D2;
+  --series-4: #0E7490;
+
+  /* —— 间距 4–48 —— */
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 24px; --sp-6: 32px; --sp-7: 40px; --sp-8: 48px;
+
+  /* —— 圆角 / 阴影 —— */
+  --r-sm: 6px; --r: 8px; --r-md: 10px; --r-lg: 14px; --r-full: 999px;
+  --shadow-1: 0 1px 2px rgba(24, 28, 38, .05), 0 3px 12px rgba(24, 28, 38, .07);
+  --shadow-2: 0 6px 20px rgba(24, 28, 38, .13), 0 16px 48px rgba(24, 28, 38, .12);
+
+  /* —— 字体与字级（层级靠字重与间距，而非字号膨胀）—— */
+  --font-sans: "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "SFMono-Regular", Consolas, "Cascadia Code", "Roboto Mono", ui-monospace, monospace;
+  --fs-1: 12px; --fs-2: 13px; --fs-3: 14px; --fs-4: 15px; --fs-5: 17px; --fs-6: 22px;
+  --w-regular: 400; --w-medium: 500; --w-bold: 650; --w-black: 750;
+
+  /* —— 动效（UI 层微动效；剧场动画见动效系统文档）—— */
+  --t-fast: 120ms; --t: 180ms; --t-slow: 240ms;
+  --ease-out: cubic-bezier(.22, .61, .36, 1);
+  --ease-std: cubic-bezier(.25, .6, .3, 1);
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+
+  --paper: #0B0E14;
+  --panel: #121826;
+  --panel-2: #0E131D;
+  --well: #0D1220;
+  --ink: #E9EDF5;
+  --ink-2: #AAB5C7;
+  --ink-3: #7E8896;
+  --line: #212A3A;
+  --line-2: #2E3A4F;
+
+  --accent: #5B8BFF;
+  --accent-soft: rgba(91, 139, 255, .13);
+  --accent-line: rgba(91, 139, 255, .36);
+  --accent-2: #3ECFB2;
+  --violet: #9C86F0;
+  --ok: #3ECFB2;
+  --warn: #E0A44E;
+  --danger: #F0736C;
+  --ok-soft: rgba(62, 207, 178, .12);
+  --warn-soft: rgba(224, 164, 78, .12);
+  --danger-soft: rgba(240, 115, 108, .12);
+
+  --series-1: #5B8BFF;
+  --series-2: #3ECFB2;
+  --series-3: #9C86F0;
+  --series-4: #4FB8D8;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, .35), 0 4px 14px rgba(0, 0, 0, .3);
+  --shadow-2: 0 8px 30px rgba(0, 0, 0, .45), 0 20px 60px rgba(0, 0, 0, .35);
+}

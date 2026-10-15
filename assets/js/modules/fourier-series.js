@@ -707,7 +707,6 @@ App.register('fs', (host) => {
     getState, applyState,
     canvases: () => ['#fs-circles', '#fs-spec', '#fs-harmonics'].map((q) => $(q)).filter(Boolean)
   });
-  return { title: '傅立叶级数', api: { togglePlay, frame, reset, dispose, onTheme: () => { repaintDraw(); draw(); drawHarmonics(); drawSpec(); }, getState, applyState } };
   function dispose() {
     loop.stop();
     clearTimeout(fsHashTimer);   // 否则 300ms 后仍会改写 hash，覆盖刚打开模块的地址
@@ -716,4 +715,5 @@ App.register('fs', (host) => {
     window.removeEventListener('pointercancel', endFinger);
     window.removeEventListener('flt-play', onPlayEvt);
   }
+  return { title: '傅立叶级数', api: { togglePlay, frame, reset, dispose, onTheme: () => { repaintDraw(); draw(); drawHarmonics(); drawSpec(); }, getState, applyState } };
 });

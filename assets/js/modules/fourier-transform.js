@@ -431,7 +431,13 @@ App.register('ft', (host) => {
     recompute();
     if (FX.enablePlotChrome) FX.enablePlotChrome(box);
   }
-  function redrawConv() { if (convCtx) { convCtx.plots = {}; renderConv(); } }
+  function redrawConv() {
+    if (!convCtx) return;
+    const plots = convCtx.plots;
+    if (plots && plots.fg) { plots.fg.onDraw(); return; }   // 复用已有 Plot 实例，仅重绘——不重建 DOM
+    // 首次进入或 convCtx 尚未就绪：回退到完整渲染
+    renderConv();
+  }
   // 统一的停表入口：取消 rAF、复位播放状态与按钮文字
   function stopConvAnim() {
     if (convRaf) { cancelAnimationFrame(convRaf); convRaf = null; }

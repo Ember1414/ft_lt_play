@@ -15,7 +15,7 @@ window.WB = (() => {
     { id: 'zt-2pole', name: '双极点滤波器', desc: '极点 ±0.5 的频率选择性与冲激响应', module: 'zt', state: { num: '1', den: 'z^2-0.25' } }
   ];
 
-  const MODULE_NAMES = { sys: '系统分析', zt: 'Z 变换', la: '拉普拉斯', pid: 'PID', blk: '系统框图', ft: '傅立叶变换', fs: '傅立叶级数', explore: '交互求解', derive: '公式推导', home: '工作台' };
+  const MODULE_NAMES = U.MODULE_NAMES;
 
   /* ---------- 搜索过滤（name/tags/module 子串，大小写不敏感） ---------- */
   function match(query, item) {

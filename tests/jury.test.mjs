@@ -26,10 +26,21 @@ const ok = (n, c, extra) => { if (c) { pass++; return; } fails.push(n + (extra ?
   ok('z²−2z+0.75（根 1.37/0.63）不稳定', !DSP.jury([1, -2, 0.75]).stable);
   ok('z²−1（根 ±1 临界）不稳定', !DSP.jury([1, 0, -1]).stable);
   ok('z²+1（根 ±j 临界）不稳定', !DSP.jury([1, 0, 1]).stable);
-  ok('n=1 拒绝', !DSP.jury([1, -1]).ok);
-  ok('首项为负拒绝（未归一化）', !DSP.jury([-1, 0, 0.25]).ok);
+  ok('一阶 z−1（根在圆上）可判但不稳定', DSP.jury([1, -1]).ok && !DSP.jury([1, -1]).stable);
+  ok('首项为负自动归一（−z²+0.25 → 稳定 + 注记）', (() => { const j = DSP.jury([-1, 0, 0.25]); return j.ok && j.stable && j.conds.some((x) => /自动归一/.test(x.text)); })());
   const r3 = DSP.jury([1, -0.5, 0.25, -0.125]);
   ok('三阶案例返回表格', r3.ok && r3.rows.length >= 2 && r3.conds.length >= 4);
+}
+
+/* ---------- 一阶系统与增强字段（v1.1） ---------- */
+{
+  const r1 = DSP.jury([1, 0.5]);   // z+0.5 → 根 −0.5
+  ok('一阶稳定 z+0.5（ρmax≈0.5）', r1.ok && r1.stable && r1.rhoMax != null && Math.abs(r1.rhoMax - 0.5) < 1e-6 && Math.abs(r1.margin - 0.5) < 1e-6, JSON.stringify(r1.rhoMax));
+  const r1b = DSP.jury([1, 2]);    // z+2 → 根 −2
+  ok('一阶不稳定 z+2（ρmax>1，裕度为负）', r1b.ok && !r1b.stable && r1b.rhoMax != null && r1b.rhoMax > 1 && r1b.margin < 0, JSON.stringify(r1b.rhoMax));
+  ok('首项为负一阶 −z−0.5 → 归一后稳定', (() => { const j = DSP.jury([-1, -0.5]); return j.ok && j.stable && j.conds.some((x) => /自动归一/.test(x.text)); })());
+  const r4 = DSP.jury([1, -0.5, 0.25, -0.125]);   // (z²+0.25)(z−0.5) → ρmax=0.5
+  ok('返回含 rhoMax/margin 且 margin=1−rhoMax', r4.ok && r4.rhoMax != null && isFinite(r4.margin) && Math.abs(r4.rhoMax - 0.5) < 1e-6 && Math.abs(r4.margin - (1 - r4.rhoMax)) < 1e-9, JSON.stringify([r4.rhoMax, r4.margin]));
 }
 
 /* ---------- 随机多项式交叉验证（与 polyRoots 一致） ---------- */

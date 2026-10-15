@@ -223,6 +223,47 @@ const App = sandbox.window.App;
   ok('保存后 chips 刷新', host.textContent.includes('我的系统') || host._search('.chip', []).length >= 1);
 }
 
+/* ================= ⑤ sys 预设 / 结构案例「点得动、解得出」（v1.1.3 回归） =================
+ * 回归背景：① 结构按钮「PID」模板 kd*s^2+kp*s+ki / s 为非真分式，点一次即报
+ * 「无法解析分子/分母」；② 分子未加括号，含 '+' 的分子与分母拼接后按首个 '/' 切分会错解；
+ * ③ KaTeX 缺失（CDN 不可达）时公式区被写成空串，用户看到空白误判为「解析失败」。 */
+{
+  const sysHost = new El('div');
+  const sysMi = new El('div'); sysMi._a.id = 'sys-mi'; sysMi.id = 'sys-mi';
+  sysHost.appendChild(sysMi);
+  const sysMod = sandbox.App.modules['sys'](sysHost);
+  const label = (c) => (c.children[0] && c.children[0].textContent) || c.textContent;
+  const clickRow = (id) => {
+    const bad = [];
+    let n = 0;
+    for (const c of reg(id).children) {
+      c.fire('click', mkEvt({}));
+      n++;
+      if (/无法解析|解析失败/.test(reg('#sys-tex').innerHTML)) bad.push(label(c));
+    }
+    return { n, bad };
+  };
+  const pre = clickRow('#sys-presets');
+  ok('sys 预设案例渲染', pre.n >= 8, String(pre.n));
+  ok('sys 预设案例全部可解析', pre.bad.length === 0, pre.bad.join(', '));
+  const st = clickRow('#sys-struct');
+  ok('sys 结构案例渲染', st.n >= 6, String(st.n));
+  ok('sys 结构案例全部可解析（含 PID 真分式模板）', st.bad.length === 0, st.bad.join(', '));
+  // PID 结构：分子 kd*s^2+kp*s+ki / 分母 s*(tf*s+1)，种子 kp=1 ki=0.5 kd=0.1 tf=0.02
+  // （真分式：num 3 项 ≤ den 3 项），分母展开为 tf*s^2+s
+  const pidChip = reg('#sys-struct').children.find((c) => label(c) === 'PID');
+  ok('PID 结构按钮存在', !!pidChip);
+  if (pidChip) {
+    pidChip.fire('click', mkEvt({}));
+    ok('PID 结构可解析出指标', /DC 增益/.test(reg('#sys-metrics').innerHTML) && !/无法解析/.test(reg('#sys-tex').innerHTML), reg('#sys-tex').innerHTML.slice(0, 80));
+    const names = reg('#sys-params')._search('.chip', []).map((c) => c.textContent);
+    ok('PID 结构参数行给出 kd/kp/ki/tf 四个符号参数', ['kd', 'kp', 'ki', 'tf'].every((k) => names.includes(k)), JSON.stringify(names));
+  }
+  // 无 KaTeX（CDN 不可达）：公式区必须是可读纯文本（旧实现被写成空串）
+  ok('无 KaTeX 时公式降级为可读文本而非留空', /H\(s\)=/.test(reg('#sys-tex').textContent), JSON.stringify(reg('#sys-tex').textContent.slice(0, 60)));
+  try { sysMod.api.dispose(); } catch (e) { }
+}
+
 /* ================= 结果输出 ================= */
 console.log('\n通过 ' + pass + ' 项，失败 ' + fails.length + ' 项');
 if (fails.length) {

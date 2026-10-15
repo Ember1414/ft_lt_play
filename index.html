@@ -1,19 +1,52 @@
-﻿<!DOCTYPE html>
+﻿﻿﻿﻿﻿﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>信号与控制实验平台 · 傅立叶 / 拉普拉斯 / Z / 系统分析</title>
   <meta name="description" content="面向学生、教师和工程师的信号与控制实验平台：实验工作台、版本化实验存储、分享与导出，傅立叶级数/变换、拉普拉斯、Z 变换、系统分析、PID 整定、系统框图。" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23141a26'/%3E%3Ccircle cx='24' cy='32' r='16' fill='none' stroke='%235b9bff' stroke-width='3'/%3E%3Ccircle cx='24' cy='32' r='8' fill='none' stroke='%23b48cff' stroke-width='2.5'/%3E%3Cpath d='M40 32 q4 -10 8 0 t8 0' fill='none' stroke='%2337d0a0' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fastly.jsdelivr.net" crossorigin />
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
   <link rel="manifest" href="manifest.webmanifest" />
-  <meta name="theme-color" content="#0b0e14" />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.css" integrity="sha384-zh0CIslj+VczCZtlzBcjt5ppRcsAmDnRem7ESsYwWwg3m/OaJ2l4x7YBZl9Kxxib" crossorigin="anonymous" />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/inter@5.0.19/index.css" integrity="sha384-6QsiPFEuz7gYJPDZq103sCr5aKoBCbqAXJq1fEUzeUHeJmXFTMGzGuUmfP4j5w5b" crossorigin="anonymous" />
-  <link rel="stylesheet" href="assets/css/style.css?v=9.1" />
+  <!-- theme-color 由 app.js 随主题切换实时更新（浅色默认 #f4f2ec / 深色 #0b0e14） -->
+  <meta name="theme-color" content="#f4f2ec" />
+  <!-- iOS 添加到主屏幕：全屏 standalone、状态栏透传、图标标题（SVG icon 不作为 apple-touch-icon，兼容性不足） -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="信号与控制实验平台" />
+  <!-- 公式排版 / 字体：主源走 fastly.jsdelivr（国内可达性更好，字体与 CSS 同源以免字体被单点阻断）；
+       失败时由 app.js 按 cdn.jsdelivr → unpkg → cdnjs 顺序补载 CSS+JS -->
+  <link rel="stylesheet" href="https://fastly.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.css" integrity="sha384-zh0CIslj+VczCZtlzBcjt5ppRcsAmDnRem7ESsYwWwg3m/OaJ2l4x7YBZl9Kxxib" crossorigin="anonymous" />
+  <link rel="stylesheet" href="https://fastly.jsdelivr.net/npm/@fontsource-variable/ibm-plex-sans@5.2.8/index.css" integrity="sha256-wQxb4g2gRxBKY3d99PtDDwZa2M5l4m5P9pVYtBq/vlk=" crossorigin="anonymous" />
+  <link rel="stylesheet" href="assets/css/style.css?v=1.1.3" />
 </head>
 <body>
+  <!-- ============================================================
+       SVG 图标库（symbol sprite，24×24 网格，stroke=currentColor 1.8px 圆头）
+       用法：<svg class="nav-ico|ico|tab-ico"><use href="#i-xxx"/></svg>
+       ============================================================ -->
+  <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M4 11.5 12 4l8 7.5"/><path d="M6 10v10h12V10"/><path d="M10 20v-5.5h4V20"/></symbol>
+    <symbol id="i-wave" viewBox="0 0 24 24"><path d="M2 12q5-13 10 0t10 0"/></symbol>
+    <symbol id="i-transform" viewBox="0 0 24 24"><path d="M7 8.5h10"/><path d="m14 5.5 3 3-3 3"/><path d="M17 15.5H7"/><path d="m10 12.5-3 3 3 3"/></symbol>
+    <symbol id="i-splane" viewBox="0 0 24 24"><path d="M7 3v18h14"/><path d="m11.5 8.5 4 4m0-4-4 4"/></symbol>
+    <symbol id="i-zplane" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="m9.5 9.5 5 5m0-5-5 5"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 4v16h16"/><path d="M6.5 16.5c5.5 0 5-9.5 11-10"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M6 4v5.5m0 4.9V20M12 4v9.5m0 4.1V20M18 4v1.5m0 4.3V20"/><circle cx="6" cy="12" r="2.1"/><circle cx="12" cy="16" r="2.1"/><circle cx="18" cy="8" r="2.1"/></symbol>
+    <symbol id="i-diagram" viewBox="0 0 24 24"><rect x="3" y="8.5" width="6.5" height="7" rx="1.2"/><rect x="14.5" y="8.5" width="6.5" height="7" rx="1.2"/><path d="M9.5 12h4.4"/><path d="m12.7 10.7 1.4 1.3-1.4 1.3"/></symbol>
+    <symbol id="i-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="m15.2 8.8-1.9 4.5-4.5 1.9 1.9-4.5z"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.3m0 14.4v2.3M2.5 12h2.3m14.4 0h2.3M5.3 5.3l1.6 1.6m10.2 10.2 1.6 1.6M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.6 14.6A8.6 8.6 0 1 1 9.4 3.4a7.1 7.1 0 0 0 11.2 11.2z"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9.4 9.6a2.6 2.6 0 1 1 3.7 2.4c-.8.4-1.1.9-1.1 1.7v.4"/><path d="M12 17.2h.01"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6.5 6.5 11 11m0-11-11 11"/></symbol>
+    <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 3.5v11"/><path d="m8 7 4-4 4 4"/><path d="M18.5 12.5v6a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-6"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="2.8" width="6" height="11.4" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"/><path d="M12 18v3.2"/></symbol>
+  </svg>
+
   <div id="app">
     <!-- 侧边导航 -->
     <aside id="sidebar">
@@ -23,62 +56,65 @@
       </div>
       <nav id="nav" aria-label="主导航">
         <button class="nav-item" data-module="home" data-group="工作台">
-          <span class="nav-icon">⌂</span>
+          <svg class="nav-ico" aria-hidden="true"><use href="#i-home"/></svg>
           <span class="nav-label">工作台</span>
         </button>
-        <div class="nav-group">学习 · 信号与变换</div>
-        <button class="nav-item" data-module="fs" data-group="学习 · 信号与变换">
-          <span class="nav-icon">◍</span>
+        <div class="nav-group">信号与变换</div>
+        <button class="nav-item" data-module="fs" data-group="信号与变换">
+          <svg class="nav-ico" aria-hidden="true"><use href="#i-wave"/></svg>
           <span class="nav-label">傅立叶级数</span>
         </button>
-        <button class="nav-item" data-module="ft" data-group="学习 · 信号与变换">
-          <span class="nav-icon">⇄</span>
+        <button class="nav-item" data-module="ft" data-group="信号与变换">
+          <svg class="nav-ico" aria-hidden="true"><use href="#i-transform"/></svg>
           <span class="nav-label">傅立叶变换</span>
         </button>
-        <button class="nav-item" data-module="la" data-group="学习 · 信号与变换">
-          <span class="nav-icon">σ+iω</span>
+        <button class="nav-item" data-module="la" data-group="信号与变换">
+          <svg class="nav-ico" aria-hidden="true"><use href="#i-splane"/></svg>
           <span class="nav-label">拉普拉斯变换</span>
         </button>
-        <button class="nav-item" data-module="zt" data-group="学习 · 信号与变换">
-          <span class="nav-icon">z⁻¹</span>
+        <button class="nav-item" data-module="zt" data-group="信号与变换">
+          <svg class="nav-ico" aria-hidden="true"><use href="#i-zplane"/></svg>
           <span class="nav-label">Z 变换</span>
         </button>
-        <div class="nav-group">分析 · 控制系统</div>
-        <button class="nav-item" data-module="sys" data-group="分析 · 控制系统">
-          <span class="nav-icon">➤</span>
+        <div class="nav-group">系统与控制</div>
+        <button class="nav-item" data-module="sys" data-group="系统与控制">
+          <svg class="nav-ico" aria-hidden="true"><use href="#i-chart"/></svg>
           <span class="nav-label">系统分析</span>
         </button>
-        <button class="nav-item" data-module="pid" data-group="分析 · 控制系统">
-          <span class="nav-icon">⊕</span>
+        <button class="nav-item" data-module="pid" data-group="系统与控制">
+          <svg class="nav-ico" aria-hidden="true"><use href="#i-sliders"/></svg>
           <span class="nav-label">PID 整定</span>
         </button>
-        <button class="nav-item" data-module="blk" data-group="分析 · 控制系统">
-          <span class="nav-icon">▣</span>
+        <button class="nav-item" data-module="blk" data-group="系统与控制">
+          <svg class="nav-ico" aria-hidden="true"><use href="#i-diagram"/></svg>
           <span class="nav-label">系统框图</span>
         </button>
-        <div class="nav-group">工具 · 求解与推导</div>
-        <button class="nav-item" data-module="explore" data-group="工具 · 求解与推导">
-          <span class="nav-icon">✎</span>
+        <div class="nav-group">工具与参考</div>
+        <button class="nav-item" data-module="explore" data-group="工具与参考">
+          <svg class="nav-ico" aria-hidden="true"><use href="#i-compass"/></svg>
           <span class="nav-label">交互求解</span>
         </button>
-        <button class="nav-item" data-module="derive" data-group="工具 · 求解与推导">
-          <span class="nav-icon">∑</span>
+        <button class="nav-item" data-module="derive" data-group="工具与参考">
+          <svg class="nav-ico" aria-hidden="true"><use href="#i-book"/></svg>
           <span class="nav-label">公式推导</span>
         </button>
       </nav>
       <div class="sidebar-foot">
-        <a href="#" id="about-trigger">帮助 / 使用说明</a>
-        <span class="version">v4.1 · 纯前端</span>
+        <a href="#" id="about-trigger"><svg class="ico ico-sm" aria-hidden="true"><use href="#i-help"/></svg>帮助 / 使用说明</a>
+        <span class="version">v1.1.3 · 纯前端</span>
       </div>
     </aside>
 
     <!-- 主体 -->
     <main id="main">
       <header id="topbar">
-        <button class="icon-btn" id="btn-menu" title="打开导航菜单" aria-label="打开导航菜单">☰</button>
+        <button class="icon-btn" id="btn-menu" title="打开全部模块" aria-label="打开全部模块"><svg class="ico" aria-hidden="true"><use href="#i-menu"/></svg></button>
         <div class="module-title" id="module-title"></div>
         <div class="topbar-actions">
-          <button class="icon-btn" id="btn-theme" title="切换主题">☀️</button>
+          <button class="icon-btn" id="btn-theme" title="切换主题" aria-label="切换主题">
+            <svg class="ico ico-sun" aria-hidden="true"><use href="#i-sun"/></svg>
+            <svg class="ico ico-moon" aria-hidden="true"><use href="#i-moon"/></svg>
+          </button>
         </div>
       </header>
       <section id="content" class="content">
@@ -93,59 +129,110 @@
     </main>
   </div>
 
+  <!-- 移动端底部分类标签栏（≤900px 显示；chips 行展示当前分类的模块） -->
+  <nav id="tabbar" aria-label="模块分类">
+    <button class="tab-item" data-cat="home">
+      <svg class="tab-ico" aria-hidden="true"><use href="#i-home"/></svg>
+      <span class="tab-label">工作台</span>
+    </button>
+    <button class="tab-item" data-cat="sig">
+      <svg class="tab-ico" aria-hidden="true"><use href="#i-wave"/></svg>
+      <span class="tab-label">信号变换</span>
+    </button>
+    <button class="tab-item" data-cat="ctrl">
+      <svg class="tab-ico" aria-hidden="true"><use href="#i-diagram"/></svg>
+      <span class="tab-label">系统控制</span>
+    </button>
+    <button class="tab-item" data-cat="tools">
+      <svg class="tab-ico" aria-hidden="true"><use href="#i-book"/></svg>
+      <span class="tab-label">工具参考</span>
+    </button>
+  </nav>
+  <div id="tab-chips" class="hidden" role="group" aria-label="分类内模块"></div>
+
   <!-- 移动端侧边栏遮罩 -->
   <div id="sidebar-mask" class="hidden"></div>
 
-  <!-- 帮助弹窗 -->
+  <!-- 帮助弹窗（分组 + 迷你目录） -->
   <div id="about-mask" class="mask hidden">
-    <div class="dialog" style="max-width:600px;max-height:86vh;overflow:auto">
-      <h3>帮助 · 如何使用</h3>
-      <ul style="line-height:1.7">
-        <li><b>工作台</b>：平台入口。「快速开始」任一模板即创建<b>实验</b>并打开对应模块；实验自动保存在浏览器本地（不上传），支持搜索 / 收藏 / 重命名 / 复制 / 快照恢复 / JSON 导出导入 / 版本化分享码（PX1.…，含数据校验）。</li>
-        <li><b>结果工具栏</b>：系统分析与 Z 变换模块顶部一排共用操作——<b>💾 保存实验</b>（打快照）· ⧉ 复制 · ↺ 重置到上次保存 · 🔗 分享（版本化链接）· 🖼 PNG · 📊 CSV · 📄 JSON 导出。</li>
-        <li><b>导航分组</b>：工作台 → 学习（信号与变换：傅立叶级数/傅立叶变换/拉普拉斯/Z 变换）→ 分析（控制系统：系统分析/PID 整定/系统框图）→ 工具（交互求解/公式推导）。顶栏显示当前分组。</li>
-        <li><b>通用图表操作</b>：所有图表随窗口自动适配尺寸，滚轮缩放、拖拽平移、双击复位、悬停读数（手机：双指捏合缩放、单指平移）。折叠面板点标题展开。手机端 ☰ 打开侧边栏；快捷键：<code>空格</code> 播放/暂停 · <code>R</code> 重置 · <code>F</code> 逐帧 · <code>T</code> 切主题 · <code>1–9</code> 切模块 · <code>Esc</code> 关闭弹层；<code>Ctrl+K</code> 命令面板（搜索模块/实验/模板）。</li>
-        <li><b>傅立叶级数</b>：圆套圈动画（预设/手绘形状）；谐波叠加支持 <b>2D/3D 瀑布</b>切换——3D 视图拖动仅旋转、滚轮/捏合缩放、双击复位，向下滑动不会误移动坐标。<b>🔗 分享</b> / <b>📷 PNG</b>。</li>
-        <li><b>傅立叶变换</b>：常见函数时域↔频域联动；卷积定理动画（播放速度可调）；<b>采样与重建</b>页签演示奈奎斯特判据、混叠与零阶保持/线性/sinc 重建（重建波形与采样点严格对齐）。</li>
-        <li><b>拉普拉斯变换</b>：预设/手动 H(s)（符号键盘 + 输入即自动应用 + 实时阶跃预览）/零极点/s 平面点选，ROC 与稳定性联动，留数法解析解对照。s 平面为等比例坐标，支持触屏（单指平移、双指捏合缩放、长按菜单）。</li>
-        <li><b>Z 变换</b>（新）：z 域传函 H(z)，z 平面零极点与单位圆稳定性判据、ROC、频率响应 H(e^{jω})、冲激/阶跃响应递推；配套公式推导（公式推导页含 Z 性质表/变换对/推导步骤）。z 平面支持触屏（单指平移、双指捏合缩放、长按菜单增删零极点）。</li>
-        <li><b>模型库</b>：各模块的 <b>💾 保存</b> 可把当前传函 / 框图存入本地模型库（浏览器 localStorage，最多 20 个），「我的模型」chips 一键回载；系统分析支持<b>符号参数</b>（如 (s+z)/(s+p)，自动生成参数框与扫掠列表，画一族曲线对比）；框图可「↗ 系统分析」、系统分析可「↗ 框图 / ↗ 求解」一键交接。</li>
-        <li><b>系统分析</b>：波特图/奈奎斯特图/根轨迹（适用于任意开环 L(s)：× 极点起点 · ○ 零点终点 · 虚线渐近线 · ◇ 实轴分离/汇合点 · 金点虚轴穿越 K*；<b>K 滑杆</b>拖动即查看该增益下的闭环极点与稳定性）；PM/GM 裕度；劳斯判据面板；<b>特征方程分析</b>（输入 D(s)=0 自动求根、判稳、给出 ζ/ωₙ 与自由响应曲线）。</li>
-        <li><b>PID 整定</b>：闭环仿真，调 Kp/Ki/Kd 看响应指标与闭环极点。</li>
-        <li><b>系统框图</b>：教材符号体系——<b>方框</b>（传函）、<b>求和点 Σ</b>（圈上标 ±，点击即切换正/负反馈）、<b>分支点</b>。从端口拖出连线，拖到空白处松手可直接新建元件；<b>无限画布</b>（滚轮或双指缩放、拖空白平移、空格拖动）、框选与对齐辅助线、<b>撤销/重做</b>、双击就地编辑、右键（触屏长按）菜单、输入/输出端子 R(s)/Y(s)。自动合成 T(s)、闭环极点与稳定性、单位阶跃响应，并用「分享」生成可还原的链接。手机端单列堆叠、触控优先。</li>
-        <li><b>交互求解</b>：表达式自动识别（时域/传函）、实时识别徽标、符号键盘、历史记录、分享链接、手绘画圈、语音输入；符号变换含 f(t)→F(s) / F(s)→f(t) / f(t)→F(jω) / <b>F(s)→X(z)（冲激不变法，采样周期 T 可调）</b> / x(n)→X(z) / X(z)→x(n)。<b>方程求解页签</b>：输入微分方程（如 y''+3y'+2y=u(t)，支持 y2/y[[2]] 写法）或差分方程（y[n+2]−1.5y[n+1]+0.5y[n]=u[n]）与初值，自动给出全解 = 零输入 + 零状态的解析式、响应曲线与数值互证；「数据序列」模式粘贴一列数即可看序列与频谱。</li>
-        <li><b>公式推导</b>：性质表（傅立叶/拉普拉斯/Z）与变换对（含 ROC）、逐步推导（含 Z{aⁿu[n]}）、<b>输入函数→变换推导</b>（输入 f(t) 自动逐项推导 + 数值验证）；左栏 A+/A− 可放大公式。</li>
-      </ul>
+    <div class="dialog dialog-help">
+      <div class="help-head">
+        <h3>帮助 · 如何使用</h3>
+        <button class="icon-btn" id="about-x" title="关闭" aria-label="关闭帮助"><svg class="ico" aria-hidden="true"><use href="#i-close"/></svg></button>
+      </div>
+      <div class="help-body">
+        <nav id="about-toc" class="help-toc" aria-label="帮助目录">
+          <button data-target="ab-start">快速上手</button>
+          <button data-target="ab-sig">信号与变换</button>
+          <button data-target="ab-ctrl">系统与控制</button>
+          <button data-target="ab-tools">工具与参考</button>
+        </nav>
+        <div class="help-secs">
+          <section id="ab-start" class="help-sec">
+            <h4>快速上手</h4>
+            <ul>
+              <li><b>工作台</b>：平台入口。「快速开始」任一模板即创建<b>实验</b>并打开对应模块；实验自动保存在浏览器本地（不上传），支持搜索 / 收藏 / 重命名 / 复制 / 快照恢复 / JSON 导出导入 / 版本化分享码（PX1.…，含数据校验）。</li>
+              <li><b>结果工具栏</b>：系统分析与 Z 变换模块顶部一排共用操作——<b>💾 保存实验</b>（打快照）· ⧉ 复制 · ↺ 重置到上次保存 · 🔗 分享（版本化链接）· 🖼 PNG · 📊 CSV · 📄 JSON 导出。</li>
+              <li><b>导航分组</b>：工作台 → 信号与变换（傅立叶级数/傅立叶变换/拉普拉斯/Z 变换）→ 系统与控制（系统分析/PID 整定/系统框图）→ 工具与参考（交互求解/公式推导）。顶栏以「分组 / 模块」面包屑显示当前位置；手机端用底部标签栏切换分类，☰ 打开完整模块索引。</li>
+              <li><b>通用图表操作</b>：所有图表随窗口自动适配尺寸，滚轮缩放、拖拽平移、双击复位、悬停读数（手机：双指捏合缩放、单指平移）。折叠面板点标题展开。手机端底部标签栏切换分类、☰ 打开全部模块；快捷键：<code>空格</code> 播放/暂停 · <code>R</code> 重置 · <code>F</code> 逐帧 · <code>T</code> 切主题 · <code>1–9</code> 切模块 · <code>Esc</code> 关闭弹层；<code>Ctrl+K</code> 命令面板（搜索模块/实验/模板）。</li>
+            </ul>
+          </section>
+          <section id="ab-sig" class="help-sec">
+            <h4>信号与变换</h4>
+            <ul>
+              <li><b>傅立叶级数</b>：圆套圈动画（预设/手绘形状）；谐波叠加支持 <b>2D/3D 瀑布</b>切换——3D 视图拖动仅旋转、滚轮/捏合缩放、双击复位，向下滑动不会误移动坐标。<b>🔗 分享</b> / <b>📷 PNG</b>。</li>
+              <li><b>傅立叶变换</b>：常见函数时域↔频域联动；卷积定理动画（播放速度可调）；<b>采样与重建</b>页签演示奈奎斯特判据、混叠与零阶保持/线性/sinc 重建（重建波形与采样点严格对齐）。</li>
+              <li><b>拉普拉斯变换</b>：预设/手动 H(s)（符号键盘 + 输入即自动应用 + 实时阶跃预览）/零极点/s 平面点选，ROC 与稳定性联动，留数法解析解对照。s 平面为等比例坐标，支持触屏（单指平移、双指捏合缩放、长按菜单）。</li>
+              <li><b>Z 变换</b>（新）：z 域传函 H(z)，z 平面零极点与单位圆稳定性判据、ROC、频率响应 H(e^{jω})、冲激/阶跃响应递推；配套公式推导（公式推导页含 Z 性质表/变换对/推导步骤）。z 平面支持触屏（单指平移、双指捏合缩放、长按菜单增删零极点）。</li>
+            </ul>
+          </section>
+          <section id="ab-ctrl" class="help-sec">
+            <h4>系统与控制</h4>
+            <ul>
+              <li><b>系统分析</b>：波特图/奈奎斯特图/根轨迹（适用于任意开环 L(s)：× 极点起点 · ○ 零点终点 · 虚线渐近线 · ◇ 实轴分离/汇合点 · 金点虚轴穿越 K*；<b>K 滑杆</b>拖动即查看该增益下的闭环极点与稳定性）；PM/GM 裕度；劳斯判据面板；<b>特征方程分析</b>（输入 D(s)=0 自动求根、判稳、给出 ζ/ωₙ 与自由响应曲线）。</li>
+              <li><b>PID 整定</b>：闭环仿真，调 Kp/Ki/Kd 看响应指标与闭环极点。</li>
+              <li><b>系统框图</b>：教材符号体系——<b>方框</b>（传函）、<b>求和点 Σ</b>（圈上标 ±，点击即切换正/负反馈）、<b>分支点</b>。从端口拖出连线，拖到空白处松手可直接新建元件；<b>无限画布</b>（滚轮或双指缩放、拖空白平移、空格拖动）、框选与对齐辅助线、<b>撤销/重做</b>、双击就地编辑、右键（触屏长按）菜单、输入/输出端子 R(s)/Y(s)。自动合成 T(s)、闭环极点与稳定性、单位阶跃响应，并用「分享」生成可还原的链接。手机端单列堆叠、触控优先。</li>
+            </ul>
+          </section>
+          <section id="ab-tools" class="help-sec">
+            <h4>工具与参考</h4>
+            <ul>
+              <li><b>模型库</b>：各模块的 <b>💾 保存</b> 可把当前传函 / 框图存入本地模型库（浏览器 localStorage，最多 20 个），「我的模型」chips 一键回载；系统分析支持<b>符号参数</b>（如 (s+z)/(s+p)，自动生成参数框与扫掠列表，画一族曲线对比）；框图可「↗ 系统分析」、系统分析可「↗ 框图 / ↗ 求解」一键交接。</li>
+              <li><b>交互求解</b>：表达式自动识别（时域/传函）、实时识别徽标、符号键盘、历史记录、分享链接、手绘画圈、语音输入；符号变换含 f(t)→F(s) / F(s)→f(t) / f(t)→F(jω) / <b>F(s)→X(z)（冲激不变法，采样周期 T 可调）</b> / x(n)→X(z) / X(z)→x(n)。<b>方程求解页签</b>：输入微分方程（如 y''+3y'+2y=u(t)，支持 y2/y[[2]] 写法）或差分方程（y[n+2]−1.5y[n+1]+0.5y[n]=u[n]）与初值，自动给出全解 = 零输入 + 零状态的解析式、响应曲线与数值互证；「数据序列」模式粘贴一列数即可看序列与频谱。</li>
+              <li><b>公式推导</b>：性质表（傅立叶/拉普拉斯/Z）与变换对（含 ROC）、逐步推导（含 Z{aⁿu[n]}）、<b>输入函数→变换推导</b>（输入 f(t) 自动逐项推导 + 数值验证）；左栏 A+/A− 可放大公式。</li>
+            </ul>
+          </section>
+        </div>
+      </div>
       <p class="muted">无服务端、无上传，全部在浏览器本地计算。部署于 Cloudflare Pages。</p>
       <button id="about-close" class="btn primary">知道了</button>
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.js" integrity="sha384-Rma6DA2IPUwhNxmrB/7S3Tno0YY7sFu9WSYMCuulLhIqYSGZ2gKCJWIqhBWqMQfh" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/mathjs@12.4.3/lib/browser/math.js" integrity="sha384-eRvug5nAz1Ce4MdQpmfBEag3T0vTjY2aMZWjsPxIwIcs+jD8DWANdVbP4wJxxNB6" crossorigin="anonymous"></script>
-  <script src="assets/js/lib/util.js?v=9.1"></script>
-  <script src="assets/js/lib/mathdsp.js?v=9.1"></script>
-  <script src="assets/js/lib/plots.js?v=9.1"></script>
-  <script src="assets/js/lib/fx.js?v=9.1"></script>
-  <script src="assets/js/lib/mathinput.js?v=9.1"></script>
-  <script src="assets/js/lib/blocksolve.js?v=9.1"></script>
-  <script src="assets/js/lib/transforms.js?v=9.1"></script>
-  <script src="assets/js/lib/odesolve.js?v=9.1"></script>
-  <script src="assets/js/lib/statespace.js?v=9.1"></script>
-  <script src="assets/js/lib/project.js?v=9.1"></script>
-  <script src="assets/js/lib/toolbar.js?v=9.1"></script>
-  <script src="assets/js/lib/palette.js?v=9.1"></script>
-  <script src="assets/js/lib/workerpool.js?v=9.1"></script>
-  <script src="assets/js/app.js?v=9.1"></script>
-  <script src="assets/js/modules/workbench.js?v=9.1"></script>
-  <script src="assets/js/modules/fourier-series.js?v=9.1"></script>
-  <script src="assets/js/modules/fourier-transform.js?v=9.1"></script>
-  <script src="assets/js/modules/laplace.js?v=9.1"></script>
-  <script src="assets/js/modules/system.js?v=9.1"></script>
-  <script src="assets/js/modules/pid.js?v=9.1"></script>
-  <script src="assets/js/modules/zt.js?v=9.1"></script>
-  <script src="assets/js/modules/blockdiag.js?v=9.1"></script>
-  <script src="assets/js/modules/derive.js?v=9.1"></script>
-  <script src="assets/js/modules/explore.js?v=9.1"></script>
+  <script src="https://fastly.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.js" integrity="sha384-Rma6DA2IPUwhNxmrB/7S3Tno0YY7sFu9WSYMCuulLhIqYSGZ2gKCJWIqhBWqMQfh" crossorigin="anonymous"></script>
+  <script src="assets/js/lib/util.js?v=1.1.3"></script>
+  <script src="assets/js/lib/mathdsp.js?v=1.1.3"></script>
+  <script src="assets/js/lib/plots.js?v=1.1.3"></script>
+  <script src="assets/js/lib/fx.js?v=1.1.3"></script>
+  <script src="assets/js/lib/mathinput.js?v=1.1.3"></script>
+  <script src="assets/js/lib/blocksolve.js?v=1.1.3"></script>
+  <script src="assets/js/lib/transforms.js?v=1.1.3"></script>
+  <script src="assets/js/lib/odesolve.js?v=1.1.3"></script>
+  <script src="assets/js/lib/statespace.js?v=1.1.3"></script>
+  <script src="assets/js/lib/project.js?v=1.1.3"></script>
+  <script src="assets/js/lib/toolbar.js?v=1.1.3"></script>
+  <script src="assets/js/lib/palette.js?v=1.1.3"></script>
+  <script src="assets/js/lib/workerpool.js?v=1.1.3"></script>
+  <script src="assets/js/app.js?v=1.1.3"></script>
+  <script src="assets/js/modules/workbench.js?v=1.1.3"></script>
+  <script src="assets/js/modules/fourier-series.js?v=1.1.3"></script>
+  <script src="assets/js/modules/fourier-transform.js?v=1.1.3"></script>
+  <script src="assets/js/modules/laplace.js?v=1.1.3"></script>
+  <script src="assets/js/modules/system.js?v=1.1.3"></script>
+  <script src="assets/js/modules/pid.js?v=1.1.3"></script>
+  <script src="assets/js/modules/zt.js?v=1.1.3"></script>
+  <script src="assets/js/modules/blockdiag.js?v=1.1.3"></script>
+  <script src="assets/js/modules/derive.js?v=1.1.3"></script>
+  <script src="assets/js/modules/explore.js?v=1.1.3"></script>
 </body>
 </html>

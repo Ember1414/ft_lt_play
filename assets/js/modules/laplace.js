@@ -601,7 +601,7 @@ App.register('la', (host) => {
       });
       html += '</table><p style="font-weight:600;color:' + (r.passed ? 'var(--accent-2)' : 'var(--danger)') + '">' + (r.passed ? '✓ 恒等式成立' : '✗ 验证未通过') + '</p>';
       out.innerHTML = html;
-      try { if (window.katex) window.katex.render(r.rhsTex, out.querySelector('.formula-center'), { throwOnError: false }); } catch (e) { }
+      try { FX.katex(r.rhsTex, out.querySelector('.formula-center')); } catch (e) { }
     });
   }
 
@@ -624,9 +624,9 @@ App.register('la', (host) => {
   }
   $('#la-rocs-fold').addEventListener('toggle', () => { if ($('#la-rocs-fold').open) renderRocs(); });
 
-  return { title: '拉普拉斯变换', api: { dispose, onTheme: () => { drawSP(); redraw(); }, getState, applyState } };
   function dispose() {
     if (spPlane) spPlane.dispose();
     tfIn.destroy();
   }
+  return { title: '拉普拉斯变换', api: { dispose, onTheme: () => { drawSP(); redraw(); }, getState, applyState } };
 });

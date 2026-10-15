@@ -68,6 +68,23 @@ App.register('pid', (host) => {
           </div>
           <div class="hint">响应曲线来自时域环路仿真（对象 RK4 + 控制器离散更新）；上方 T(s) 与闭环极点仍为理想控制器分析。注意：Kd 较大且无 Tf 时，离散理想微分高频发散——请配合微分滤波使用。</div>
         </details>
+        <details class="plot-fold" id="pid-dist-fold" style="margin:8px 0">
+          <summary>扰动分析（对象输入端扰动 d(t) 的抑制）</summary>
+          <div class="ctrl row" style="flex-wrap:wrap;margin-top:6px">
+            <span class="hint" style="margin:0">扰动类型</span>
+            <span id="pid-dist-type" class="row" style="margin:0;gap:4px"></span>
+            <label class="chip">幅值 A <input type="number" id="pid-dist-amp" step="any" value="1" style="width:56px;background:transparent;border:0;color:var(--accent);font-family:var(--mono)"></label>
+            <button class="btn" id="pid-dist-go">仿真扰动响应</button>
+          </div>
+          <div class="statbar" id="pid-dist-stats"></div>
+          <div class="canvas-wrap" style="height:210px"><canvas class="plot" id="pid-dist-cv"></canvas></div>
+          <div class="legend">
+            <span><span class="sw" style="background:#5b9bff"></span>y：含扰动</span>
+            <span><span class="sw" style="background:#4c5874"></span>y₀：无扰动</span>
+            <span><span class="sw" style="background:var(--cv-warn)"></span>偏差 y_d = y − y₀</span>
+          </div>
+          <div class="hint">扰动 d(t) 在对象输入端进入：Y_d(s)/D(s) = G/(1+C·G)。偏差由两次仿真（含 / 不含扰动）相减得到（线性叠加）。阶跃扰动的稳态偏差：Ki≠0 或对象含积分 → 0；纯 P 控制残留 −A·G(0)/(1+C(0)G(0))；斜坡扰动需要更高型别才能消除。</div>
+        </details>
         <div class="hint">单位负反馈闭环 <b>T(s)=C·G/(1+C·G)</b>。经验：Kp 加快响应但增大超调；Ki 消除稳态误差但易振荡；Kd 增大阻尼、抑制超调（对噪声敏感）。试试用「不稳定对象」把它拉回稳定！</div>
       </div>
       <div class="pane">
@@ -78,7 +95,7 @@ App.register('pid', (host) => {
         <div class="legend">
           <span><span class="sw" style="background:#5b9bff"></span>输出 y(t)</span>
           <span><span class="sw" style="background:#4c5874"></span>稳态值 y∞</span>
-          <span><span class="sw" style="background:#ffb454"></span>超调峰</span>
+          <span><span class="sw" style="background:var(--cv-warn)"></span>误差 e(t)</span>
         </div>
       </div>
       <details class="pane full plot-fold">
@@ -173,6 +190,7 @@ App.register('pid', (host) => {
     const p = stepPlot;
     let lo = Infinity, hi = -Infinity;
     for (const v of res.y) if (isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+    for (const v of res.e) if (isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); }   // 误差曲线参与定标
     if (!isFinite(lo)) { lo = 0; hi = 1; }
     if (hi - lo < 0.2) { hi = lo + 0.5; }
     lo = Math.min(lo, 0) - (hi - lo) * 0.08; hi += (hi - lo) * 0.1;
@@ -183,6 +201,7 @@ App.register('pid', (host) => {
     p.line([res.t[0], res.t[res.t.length - 1]], [1, 1], { color: cv('--cv-tick'), width: 1 });
     if (isFinite(yInf)) p.line([res.t[0], res.t[res.t.length - 1]], [yInf, yInf], { color: cv('--cv-chain'), width: 1 });
     p.line(res.t, res.y, { color: unstable ? cv('--cv-danger') : cv('--cv-line1'), width: 2.2 });
+    p.line(res.t, res.e, { color: cv('--cv-warn'), width: 1.4 });   // 误差 e(t) = r − y 叠加
     p.unclip();
     p.crosshair((t) => 't=' + U.fmt(t, 3), (y) => 'y=' + U.fmt(y, 4));
   }
@@ -221,6 +240,73 @@ App.register('pid', (host) => {
     $('#pid-tf').addEventListener('change', (e) => { Tf = Math.max(0, +e.target.value || 0); solve(); });
     $('#pid-ts').addEventListener('change', (e) => { Ts = Math.max(0, +e.target.value || 0); solve(); });
     $('#pid-donm').addEventListener('click', (e) => { dOnM = !dOnM; e.target.textContent = '微分先行：' + (dOnM ? '开（对测量值微分）' : '关'); e.target.classList.toggle('active', dOnM); solve(); });
+  }
+
+  /* ---------- 扰动分析（d(t) 加在对象输入端：Y_d/D = G/(1+CG)；两次仿真相减取偏差） ---------- */
+  let distPlot = null, distType = 'step';
+  {
+    const dRow = $('#pid-dist-type');
+    [['step', '阶跃'], ['ramp', '斜坡']].forEach(([k, label]) => {
+      const c = U.el('button', { class: 'chip' + (k === distType ? ' active' : ''), 'data-dt': k }, label);
+      c.addEventListener('click', () => {
+        distType = k;
+        dRow.querySelectorAll('.chip').forEach((x) => x.classList.toggle('active', x.dataset.dt === k));
+        runDist();
+      });
+      dRow.append(c);
+    });
+    $('#pid-dist-amp').addEventListener('change', () => { if ($('#pid-dist-fold').open) runDist(); });
+    $('#pid-dist-go').addEventListener('click', runDist);
+    $('#pid-dist-fold').addEventListener('toggle', () => { if ($('#pid-dist-fold').open) runDist(); });
+  }
+  function runDist() {
+    const g = plants[plantKey];
+    const poles = DSP.polyRoots(g.den);
+    let nearest = Infinity;
+    poles.forEach((q) => { const ar = Math.abs(q.re); if (ar > 1e-9) nearest = Math.min(nearest, ar); });
+    const tmax = poles.some((q) => q.re > 1e-9) ? 6 : U.clamp(5 / (nearest || 1), 1, 30) * (uMax != null ? 1.6 : 1);
+    const ctrl = { kp: Kp, ki: Ki, kd: Kd, Tf, dOnM };
+    const opts = { tmax, steps: 2000, uMax, aw, Tt, Ts };
+    const base = DSP.pidLoopSim(g.num, g.den, ctrl, opts);
+    const statsEl = $('#pid-dist-stats');
+    if (!base.ok) { statsEl.innerHTML = `<span style="color:var(--danger)">仿真失败：${base.note}</span>`; return; }
+    const A = isFinite(+$('#pid-dist-amp').value) ? +$('#pid-dist-amp').value : 1;
+    const dSeq = base.t.map((tv) => (distType === 'ramp' ? A * tv : A));
+    const withD = DSP.pidLoopSim(g.num, g.den, ctrl, { ...opts, dSeq });
+    if (!withD.ok) { statsEl.innerHTML = `<span style="color:var(--danger)">仿真失败：${withD.note}</span>`; return; }
+    drawDist(base, withD);
+    // 稳态输出偏差：仿真末段（后 3%）均值；峰值偏差全程最大
+    const yd = withD.y.map((v, i) => v - base.y[i]);
+    const tailN = Math.max(1, Math.floor(yd.length * 0.03));
+    let acc = 0, okTail = true, pk = 0;
+    for (let i = 0; i < yd.length; i++) {
+      if (!isFinite(yd[i])) { okTail = false; continue; }
+      pk = Math.max(pk, Math.abs(yd[i]));
+      if (i >= yd.length - tailN) acc += yd[i];
+    }
+    const essd = okTail ? acc / tailN : NaN;
+    statsEl.innerHTML = `
+      <div class="stat"><span class="k">扰动 d(t)</span><span class="v">${distType === 'step' ? '阶跃' : '斜坡'} A=${U.fmt(A, 2)}</span></div>
+      <div class="stat"><span class="k">稳态输出偏差 e_ss,d</span><span class="v" style="color:${isFinite(essd) && Math.abs(essd) < 0.01 ? 'var(--accent-2)' : 'var(--warn)'}">${isFinite(essd) ? U.fmt(essd, 4) : '—'}</span></div>
+      <div class="stat"><span class="k">峰值偏差 |y_d|max</span><span class="v">${isFinite(pk) ? U.fmt(pk, 3) : '—'}</span></div>`;
+  }
+  function drawDist(base, withD) {
+    if (!distPlot) { distPlot = new FX.Plot($('#pid-dist-cv'), { margin: { l: 48, r: 14, t: 12, b: 28 } }); distPlot.onDraw = () => runDist(); }
+    const p = distPlot;
+    const yd = withD.y.map((v, i) => v - base.y[i]);
+    let lo = Infinity, hi = -Infinity;
+    for (const arr of [withD.y, base.y, yd]) for (const v of arr) if (isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+    if (!isFinite(lo)) { lo = -1; hi = 1; }
+    if (hi - lo < 0.2) hi = lo + 0.5;
+    lo = Math.min(lo, 0) - (hi - lo) * 0.08; hi += (hi - lo) * 0.1;
+    p.setRange(withD.t[0], withD.t[withD.t.length - 1], lo, hi);
+    p.clear(); p.grid(); p.axis(true);
+    p.clip();
+    p.line(base.t, base.y, { color: cv('--cv-tick'), width: 1.4 });
+    p.line(withD.t, yd, { color: cv('--cv-warn'), width: 1.6 });
+    p.line(withD.t, withD.y, { color: cv('--cv-line1'), width: 2.2 });
+    p.unclip();
+    p.crosshair((t) => 't=' + U.fmt(t, 3), (y) => 'y=' + U.fmt(y, 4));
   }
   function solve() {
     const g = plants[plantKey];
@@ -290,6 +376,7 @@ App.register('pid', (host) => {
 
     drawPoles(poles);
     $('#pid-poles').textContent = '闭环极点：' + poles.map(fmtC).join('，');
+    if ($('#pid-dist-fold').open) runDist();
   }
 
   renderG();

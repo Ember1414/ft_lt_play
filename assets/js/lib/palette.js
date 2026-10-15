@@ -4,7 +4,7 @@
  *   动作经回调注入（openModule/openExperiment/createExperiment），便于测试。
  * ============================================================ */
 window.CP = (() => {
-  const MODULE_NAMES = { sys: '系统分析', zt: 'Z 变换', la: '拉普拉斯', pid: 'PID', blk: '系统框图', ft: '傅立叶变换', fs: '傅立叶级数', explore: '交互求解', derive: '公式推导', home: '工作台' };
+  const MODULE_NAMES = U.MODULE_NAMES;
   let actions = { openModule: (k) => App.open(k), openExperiment: (id) => App.exps.openById(id), createExperiment: (t) => App.exps.createAndOpen({ name: t.name, module: t.module, state: t.state, tags: ['模板'] }) };
   const setActions = (a) => { actions = { ...actions, ...a }; };
 

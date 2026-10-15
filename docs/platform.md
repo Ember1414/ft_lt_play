@@ -1,7 +1,7 @@
 # 平台架构与数据契约
 
-- 版本：v7.0（对应 `index.html` 资源 `?v=7.0`、侧栏 v3.7）
-- 状态：Phase 0（工程与安全基线）✅ 已完成；Phase 1（平台骨架 + 第一个端到端实验闭环）✅ 已完成（试点模块：系统分析 sys、Z 变换 zt）
+- 版本：v1.1.0（对应 `index.html` 资源 `?v=1.1`、侧栏 v1.1.0、sw.js VER `fltp-1.1.0`；9.x → 1.0.0 产品化重命名，1.1.0 误差分析 / 数据处理批次）
+- 状态：工程/安全基线、实验闭环、PWA/Worker/SRI 均已完成；v1.0.0 完成全新设计系统（浅色默认 + 深色双主题、SVG 图标）与信息架构重组（四大分类 + 移动端底部标签栏）；v1.1.0 新增误差分析（闭环带宽/谐振峰、灵敏度 |S(jω)|、动态误差系数、PID 扰动分析、误差曲线叠加）与数据处理升级（反卷积、谱窗与泄漏对比、滤波预设+加噪、两列采样率、归一化互相关、相位/dB 谱），输入层支持隐式乘法与全角/π 归一化全覆盖
 - 上游设计：`docs/superpowers/specs/2026-09-19-upgrade-roadmap.md`（模块深度批次）、`2026-09-19-input-layer-design.md`（输入层，已实现）
 
 ---
@@ -55,8 +55,7 @@ return {
 };
 ```
 
-已接入：`sys`（num/den/chart/params/状态空间矩阵 + PNG/CSV）、`zt`（num/den/editMode + PNG/CSV）、
-`la`（num/den + PNG/CSV）、`pid`（plant/kp/ki/kd + PNG/CSV）、`explore`（tab/expr + PNG）。
+已接入（8.1.0 起 **10/10 模块全覆盖**）：sys、zt、la、pid、explore、ft、fs、blk、derive + home（工作台）。
 未接入模块不受影响（工作台/控制器对其降级为不可捕获）。
 
 ### hash 路由约定
@@ -93,17 +92,17 @@ return {
 | 项 | 现状 |
 | --- | --- |
 | 动态执行 | 已删除 `transforms.js` 的 `Function()`；`U.safeCalc` 白名单求值器接管常量算术；`scripts/lint.mjs` L1 规则防回归 |
-| mathjs | 仅 `FX_LIB.parseTimeExpr` 使用；已加 AST 白名单（节点类型/函数/符号/运算符）+ 300 字符/2000 节点上限 |
+| 表达式解析 | 全部自实现、零外部库：`FX_LIB.parseTimeExpr` 内置递归下降解析器（白名单函数/常量表，无 `eval`/`Function`）+ 300 字符/32 层嵌套上限；1.1.3 起已移除 mathjs（CDN 不可达时交互求解照常可用） |
 | innerHTML | 静态模板可用；用户输入统一走 textContent/KaTeX render/`U.el`；lint 对「innerHTML+`${}` 插值」出警告清单人工复核 |
 | 分享数据 | 见 §3 校验与校验和 |
-| CDN | jsDelivr 主源 + app.js 动态加载 unpkg 备用源 + 可理解失败提示；已移除 document.write 内联脚本 |
-| CSP/响应头 | `_headers`：CSP（script 无 unsafe-inline）、X-Content-Type-Options、Referrer-Policy、Permissions-Policy、X-Frame-Options |
+| CDN | jsDelivr 主源 + app.js 按 unpkg → fastly.jsdelivr → cdnjs 顺序补载（CSS+JS）；失败只提示一次（可关闭角标），缺 KaTeX 时公式降级纯文本；已移除 document.write 内联脚本 |
+| CSP/响应头 | `_headers`：CSP（script 无 unsafe-inline；**worker-src 'self' blob:** 放行 Blob Worker，否则根轨迹/PID 寻优被拦截）、X-Content-Type-Options、Referrer-Policy、Permissions-Policy、X-Frame-Options |
 | 数据外发 | 无任何网络上传（connect-src 'self'）；local-first |
 
 ## 5. 工程流程
 
 ```bash
-npm test        # 顺序跑 tests/*.test.mjs（13 个脚本）
+npm test        # 顺序跑 tests/*.test.mjs（30 个脚本）
 npm run check   # node --check 全部源码
 npm run lint    # 静态安全审计 + index.html 引用/版本一致性 + localStorage 键登记
 npm run format  # 保守格式化（行尾空白/EOF；大重排版暂缓以免噪声 diff）
@@ -114,14 +113,18 @@ npm run verify  # check + lint + test + build
 
 CI：`.github/workflows/ci.yml`（push/PR → verify 全链）。部署：Cloudflare Pages 静态直传仓库根（`_headers` 随部署生效）。
 
-## 6. 尚未完成（如实清单）
+## 6. 已知限制与后续方向（如实清单）
 
-- 实验撤销/重做目前以「快照恢复」形式存在（工作台 🕘），尚无输入级 undo 栈。
-- 命令面板（Ctrl+K 统一搜索）未做；工作台内搜索已覆盖实验与模板。
-- getState/applyState 仅 sys/zt 接入；la/explore/pid/blk/ft/fs/derive 待接入。
-- Web Worker 化、PWA/离线、IndexedDB、i18n 资源层、axe 可访问性自动化、Playwright E2E：Phase 2–4。
-- SRI 未启用（需逐 hash 校验 CDN 资源，避免误锁导致全站公式失效，单列一个批次做）。
-- KaTeX/mathjs 自托管（去除 CDN 依赖）待 PWA 批次一起评估。
+已完成（详见 CHANGELOG 对应版本）：实验闭环 10/10 模块（8.0/8.1.0）、命令面板 Ctrl+K（8.2.0）、PWA 离线（8.5.0）、Worker 池根轨迹与 PID 寻优（8.6/8.7.0）、SRI（8.9.0）、v1.0.0 设计系统与信息架构重构、v1.1.0 误差分析（闭环频域指标 / 灵敏度 / 动态误差系数 / 扰动分析）与数据处理升级（反卷积 / 窗函数 / 滤波加噪 / 两列采样率 / 归一化互相关 / 相位 dB 谱）＋输入隐式乘法与全角/π 归一化下沉、朱丽判据一阶与负首项支持（含稳定裕度显示）。
+
+当前限制 / 后续方向：
+
+- **ES module 迁移**：仍为 classic script 顺序加载 + 全局命名空间（`U./DSP./FX./MI./PX./RTB./App.`），未改 ES modules（见 upgrade-roadmap）。
+- **Worker 池扩展**：仅根轨迹与 PID 寻优接入 workerpool；DFT 相量链、状态空间大矩阵等重计算仍在主线程。
+- **系统分析离散页签**：z 域系统函数 / 离散稳定判据 / 离散响应整章缺失（roadmap 2b 未做）。
+- **傅立叶级数分段/解析输入**：仍为预设形状 + 手绘，三角系数解析公式与任意周期信号未接。
+- 实验级撤销/重做仍以「快照恢复」形式存在（框图模块已有画布内 undo/redo，其余模块无输入级 undo 栈）。
+- KaTeX 自托管（去 CDN）、i18n 资源层、axe 可访问性自动化、Playwright E2E：未排期。
 
 ## 7. 发布检查清单
 

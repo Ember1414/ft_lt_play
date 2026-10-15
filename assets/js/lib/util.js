@@ -92,10 +92,21 @@ const U = (() => {
   };
 
   // 白名单算术求值器（替代 Function/eval 执行用户常量表达式，如 sin(π*2*t) 的括号内）
-  // 语法：数字 · + - * / ^ % · 括号 · 一元 ± · 常量 pi/e；其余一律抛错。
+  // 语法：数字 · + - * / ^ % · 括号 · 一元 ± · 常量 pi/e · 隐式乘法（2(3)、(1+2)(3+4)、2pi）；其余一律抛错。
   // 深度限制防超长嵌套括号打爆调用栈。
   const safeCalc = (src) => {
-    const s = String(src == null ? '' : src).replace(/\s+/g, '');
+    // 入口归一化：全角数字/括号/运算符、Unicode 负号、上标、** → ASCII（π 不在 normChars 内，单独映射，同 transforms.js）
+    // 隐式乘法补全（本求值器无函数名、无常量名以外的标识符，规则安全）：
+    //   )( → )*( · 数字( → 数字*( · )数字 → )*数字 · 数字+字母 → 数字*字母（2pi → 2*pi）。
+    //   字母类排除 e/E：保护科学计数 1e-3 / 1E5 不被拆坏。
+    //   顺序：先 )( 后 )数字——避免 (2)(3)4 被 )数字 规则先拆坏括号配对。
+    const s = U.normChars(String(src == null ? '' : src))
+      .replace(/π/g, 'pi')
+      .replace(/\s+/g, '')
+      .replace(/\)\(/g, ')*(')
+      .replace(/(\d)\(/g, '$1*(')
+      .replace(/\)(\d)/g, ')*$1')
+      .replace(/(\d)([a-df-z])/g, '$1*$2');
     if (!s || s.length > 200) throw new Error('表达式为空或过长');
     let i = 0, depth = 0;
     const peek = () => s[i];
@@ -147,7 +158,48 @@ const U = (() => {
     return v;
   };
 
-  return { $, $$, clamp, lerp, mapRange, el, html, loop, throttle, fmt, toDb, angle, mag, cadd, cscale, cmul, cexp, polar, fitRange, shuffle, polyTex, normChars, safeCalc };
+  // 多项式运算（全局共享，避免 fx.js / blocksolve.js 重复定义）
+  const polyMul = (a, b) => {
+    const out = new Array(a.length + b.length - 1).fill(0);
+    for (let i = 0; i < a.length; i++) for (let j = 0; j < b.length; j++) out[i + j] += a[i] * b[j];
+    return out;
+  };
+  const polyAdd = (a, b) => {
+    const n = Math.max(a.length, b.length);
+    const out = new Array(n).fill(0);
+    for (let i = 0; i < a.length; i++) out[n - a.length + i] += a[i];
+    for (let i = 0; i < b.length; i++) out[n - b.length + i] += b[i];
+    return out;
+  };
+
+  // UTF-8 编解码：纯 JS 实现，兼容 Node.js 测试沙箱（无 TextEncoder/TextDecoder）
+  const utf8Encode = (str) => {
+    let binary = '';
+    for (let i = 0; i < str.length; i++) {
+      let code = str.charCodeAt(i);
+      if (code < 128) { binary += String.fromCharCode(code); }
+      else if (code < 2048) { binary += String.fromCharCode(192 | (code >> 6), 128 | (code & 63)); }
+      else if (code < 0xD800 || code >= 0xE000) { binary += String.fromCharCode(224 | (code >> 12), 128 | ((code >> 6) & 63), 128 | (code & 63)); }
+      else { i++; code = 0x10000 + (((code & 0x3FF) << 10) | (str.charCodeAt(i) & 0x3FF)); binary += String.fromCharCode(240 | (code >> 18), 128 | ((code >> 12) & 63), 128 | ((code >> 6) & 63), 128 | (code & 63)); }
+    }
+    return binary;
+  };
+  const utf8Decode = (bin) => {
+    let out = '';
+    for (let i = 0; i < bin.length; ) {
+      const c = bin.charCodeAt(i);
+      if (c < 128) { out += String.fromCharCode(c); i++; }
+      else if (c >= 192 && c < 224) { out += String.fromCharCode(((c & 31) << 6) | (bin.charCodeAt(i + 1) & 63)); i += 2; }
+      else if (c >= 224 && c < 240) { out += String.fromCharCode(((c & 15) << 12) | ((bin.charCodeAt(i + 1) & 63) << 6) | (bin.charCodeAt(i + 2) & 63)); i += 3; }
+      else { let u = ((c & 7) << 18) | ((bin.charCodeAt(i + 1) & 63) << 12) | ((bin.charCodeAt(i + 2) & 63) << 6) | (bin.charCodeAt(i + 3) & 63); u -= 0x10000; out += String.fromCharCode(0xD800 + (u >> 10), 0xDC00 + (u & 0x3FF)); i += 4; }
+    }
+    return out;
+  };
+
+  // 模块中文名映射（全局共享，避免多处重复定义）
+  const MODULE_NAMES = { sys: '系统分析', zt: 'Z 变换', la: '拉普拉斯', pid: 'PID', blk: '系统框图', ft: '傅立叶变换', fs: '傅立叶级数', explore: '交互求解', derive: '公式推导', home: '工作台' };
+
+  return { $, $$, clamp, lerp, mapRange, el, html, loop, throttle, fmt, toDb, angle, mag, cadd, cscale, cmul, cexp, polar, fitRange, shuffle, polyTex, normChars, safeCalc, polyMul, polyAdd, utf8Encode, utf8Decode, MODULE_NAMES };
 })();
 
 window.U = U;

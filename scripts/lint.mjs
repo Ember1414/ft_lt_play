@@ -5,7 +5,7 @@
  *   L2  禁止 document.write（CDN 回退必须走 app.js 动态加载器）
  *   L3  index.html 引用的本地资源必须存在；?v= 版本号必须全局一致
  *   L4  实验存储必须带 schemaVersion（禁止新增裸 localStorage 业务键 ——
- *       允许清单：flt-theme / flt-models / flt-expr-history / MI 历史键 flt-tf-* / fltp:*）
+ *       允许清单：flt-theme / flt-models / flt-expr-history / flt-sym-history / MI 历史键 flt-tf-* / fltp:*）
  *   提示（警告，不失败）：innerHTML 赋值行内含 ${ 模板插值（人工确认插值内容是否用户可控）
  * ============================================================ */
 import fs from 'node:fs';
@@ -39,7 +39,7 @@ for (const f of jsFiles) {
     if (/localStorage\.(set|get)Item\(\s*['"`]/.test(line)) {
       const m = line.match(/['"`]([^'"`]+)['"`]/);
       const key = m ? m[1] : '';
-      const ok = /^(flt-theme|flt-models|flt-expr-history|flt-tf-|fltp:|fs-|blk-)/.test(key);
+      const ok = /^(flt-theme|flt-models|flt-expr-history|flt-sym-history|flt-tf-|fltp:|fs-|blk-)/.test(key);
       if (key && !ok) errors.push(`L4 未登记的 localStorage 键 "${key}" ${n}（业务数据请走 fltp: 版本化存储）`);
     }
   });

@@ -1,0 +1,159 @@
+/* ============================================================
+ * base.css — 全局基础样式 + M0 骨架布局
+ * 仅承载：重置、排版基线、焦点环、常用原子（.btn/.tbl/.card）
+ * 组件级样式在各自组件内；本文件的类名不构成对外契约。
+ * ============================================================ */
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: var(--w-regular) var(--fs-4)/1.75 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+::selection { background: var(--accent-soft); }
+
+h1, h2, h3, p { margin: 0; }
+button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+
+code, .mono { font-family: var(--font-mono); font-size: .92em; }
+
+/* —— 排版基线（页面通用） —— */
+.hero h1 { font-size: clamp(26px, 3.6vw, 34px); font-weight: var(--w-black); letter-spacing: -.4px; line-height: 1.25; }
+.hero p { margin-top: var(--sp-3); color: var(--ink-2); max-width: 44em; }
+
+.section { margin-top: var(--sp-7); }
+.section h2 { font-size: var(--fs-5); font-weight: var(--w-bold); margin-bottom: var(--sp-3); }
+
+/* —— 原子 —— */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--line-2); border-radius: var(--r);
+  padding: 6px 12px; font-size: var(--fs-2); font-weight: var(--w-medium);
+  transition: border-color var(--t-fast) var(--ease-out), background var(--t-fast) var(--ease-out);
+}
+.btn:hover { border-color: var(--ink-3); }
+.btn.primary { background: var(--accent); border-color: transparent; color: #fff; }
+
+.badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 9px; border-radius: var(--r-full);
+  font-size: var(--fs-1); font-weight: var(--w-bold);
+  color: var(--accent); background: var(--accent-soft);
+}
+
+.swatches { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sp-3); }
+.swatch { display: flex; flex-direction: column; gap: var(--sp-2); }
+.swatch i { display: block; height: 44px; border-radius: var(--r-md); border: 1px solid var(--line); }
+.swatch span { font: var(--w-medium) 11px/1.4 var(--font-mono); color: var(--ink-3); }
+
+.tbl {
+  width: 100%; border-collapse: separate; border-spacing: 0;
+  font-size: var(--fs-2);
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-md);
+  overflow: hidden;
+}
+.tbl th {
+  text-align: left; font-size: 11px; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--ink-3); background: var(--panel-2); padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.tbl td { padding: 7px 10px; border-bottom: 1px solid var(--line); color: var(--ink-2); }
+.tbl tr:last-child td { border-bottom: none; }
+
+.sym { font-size: var(--fs-5); color: var(--ink); }
+.muted { color: var(--ink-3); font-size: var(--fs-1); margin-top: var(--sp-2); }
+
+/* —— 公式区（KaTeX）：整行公式横向可滚，行距统一 —— */
+.tex-line { overflow-x: auto; overflow-y: hidden; padding: 1px 0; }
+.tex-line .katex { font-size: 1.05em; }
+.formula-block { display: flex; flex-direction: column; gap: var(--sp-2); }
+.formula-fallback {
+  font: var(--w-medium) var(--fs-1)/1.6 var(--font-mono);
+  color: var(--ink-2); background: var(--well);
+  border: 1px dashed var(--line); border-radius: var(--r-sm);
+  padding: 4px 8px; overflow-x: auto; white-space: pre;
+}
+
+/* —— ROC 条带（拉普拉斯）：一行一条候选收敛域，稳定域高亮 —— */
+.roc-rows { display: flex; flex-direction: column; gap: 6px; }
+.roc-row { display: grid; grid-template-columns: 132px 1fr 112px; gap: 10px; align-items: center; font-size: var(--fs-1); }
+.roc-track { position: relative; height: 20px; background: var(--well); border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden; }
+.roc-track.is-axis { height: 14px; background: transparent; border-style: dashed; }
+.roc-band {
+  position: absolute; top: 0; bottom: 0;
+  background: var(--accent-soft);
+  border-left: 1.5px dashed var(--accent-line); border-right: 1.5px dashed var(--accent-line);
+}
+.roc-band.is-stable { background: var(--ok-soft); border-color: var(--ok); }
+.roc-tick { position: absolute; top: 50%; transform: translate(-50%, -50%); color: var(--accent); font-size: 12px; line-height: 1; }
+
+/* —— 系统框图（block）：SVG 元件与正交连线（颜色全部走令牌，随主题切换） —— */
+.blk-wrap { position: relative; overflow: hidden; background: var(--well); border: 1px solid var(--line); border-radius: var(--r-md); }
+.blk-svg { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+.blk-svg:active { cursor: grabbing; }
+.blk-grid-line { stroke: var(--line); stroke-width: 1; }
+.blk-node { cursor: move; }
+.blk-edge { fill: none; stroke: var(--ink-3); stroke-width: 1.6; stroke-linejoin: round; }
+.blk-edge.is-sel { stroke: var(--accent); stroke-width: 2.4; }
+.blk-edge-hit { fill: none; stroke: transparent; stroke-width: 14; cursor: pointer; }
+.blk-wire { fill: none; stroke: var(--accent); stroke-width: 1.8; stroke-dasharray: 6 4; }
+.blk-box { fill: var(--panel); stroke: var(--ink-2); stroke-width: 1.6; }
+.blk-box.is-sel { stroke: var(--accent); stroke-width: 2.4; }
+.blk-shape { fill: var(--panel); stroke: var(--ink-2); stroke-width: 1.6; }
+.blk-shape.is-sel { stroke: var(--accent); stroke-width: 2.4; }
+.blk-txt { fill: var(--ink); font: var(--w-medium) 12px var(--font-mono); }
+.blk-sub { fill: var(--ink-3); font: var(--w-medium) 10px var(--font-mono); }
+.blk-arrow { fill: var(--ink-3); }
+.blk-arrow.is-sel { fill: var(--accent); }
+.blk-badge { fill: var(--panel); stroke: var(--line); stroke-width: 1.2; }
+.blk-badge-g { cursor: pointer; }
+.blk-badge-txt { fill: var(--ink-2); font: var(--w-medium) 11px var(--font-mono); }
+.blk-port { fill: var(--accent); }
+.blk-port.in { fill: var(--ink-3); }
+
+/* —— 数据输入区（textarea，交互求解的数据视图） —— */
+.c-area {
+  width: 100%; min-height: 96px; resize: vertical;
+  font: var(--w-medium) var(--fs-1)/1.6 var(--font-mono);
+  color: var(--ink); background: var(--well);
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  padding: 6px 8px; outline: none;
+}
+.c-area:focus { border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* —— 语音输入（M3）：按钮 + 状态行（不支持/被拒/无语音都必须给出具体原因） —— */
+.voice-wrap { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.voice-msg { font-size: var(--fs-1); color: var(--ink-2); max-width: 440px; }
+.voice-msg.is-err { color: var(--danger); }
+
+/* —— 页面布局工具（页级样式，不构成组件契约） —— */
+.stack { display: flex; flex-direction: column; gap: var(--sp-4); }
+.row { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: var(--sp-4); }
+.grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--sp-3); width: 100%; }
+
+.card {
+  padding: var(--sp-4);
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-md);
+}
+.card h3 { font-size: var(--fs-3); font-weight: var(--w-bold); margin-bottom: var(--sp-2); }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+  html { scroll-behavior: auto; }
+}
+
+/* 用户显式偏好覆盖（设置中心 · 动效）：强制减弱 / 强制完整（覆盖系统偏好） */
+html[data-motion="reduce"] * { animation: none !important; transition: none !important; }
+html[data-motion="reduce"] { scroll-behavior: auto; }

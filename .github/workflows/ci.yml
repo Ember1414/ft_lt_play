@@ -21,3 +21,39 @@ jobs:
         run: npm test
       - name: Build 校验（资源引用 / _headers / 体积）
         run: npm run build
+
+  v2:
+    name: v2 · 类型/回归网/构建
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: v2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: v2/package-lock.json
+      - name: Install（锁定版本）
+        run: npm ci
+      - name: Type check（TS strict）
+        run: npm run check
+      - name: 内核回归网（v1↔v2 对拍 + 闭式真值）
+        run: npm run parity
+      - name: 内核语义/审计断言（§四 空洞 + #12/#14/#9）
+        run: npm run audit
+      - name: UI 数据层断言（剧本库 / 备份 / 参数表 · M9/M10/M12）
+        run: npm run uidata
+      - name: 主线程重算开销巡检（灾难级预算 · M15）
+        run: npm run perf
+      - name: Production build
+        run: npm run build
+      - name: 产物体积报告
+        run: |
+          echo "== dist 总计 =="
+          du -sh dist
+          echo "== 最大 5 个 JS 分片 =="
+          find dist -name '*.js' -printf '%s\t%p\n' | sort -nr | head -5 | awk '{printf "%.1f KB\t%s\n", $1/1024, $2}'
+      - name: 部署件自检（_headers 已随构建进入 dist）
+        run: test -f dist/_headers && echo "dist/_headers 就位"

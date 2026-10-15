@@ -133,18 +133,8 @@ const FX_LIB = (() => {
 
   /* ============ 表达式解析 ============ */
   // 解析实系数多项式 => 系数自高到低。支持 (s+2)*(s+3)、s^2+2*s+5。
-  function polyMul(a, b) {
-    const out = new Array(a.length + b.length - 1).fill(0);
-    for (let i = 0; i < a.length; i++) for (let j = 0; j < b.length; j++) out[i + j] += a[i] * b[j];
-    return out;
-  }
-  function polyAdd(a, b) {
-    const n = Math.max(a.length, b.length);
-    const out = new Array(n).fill(0);
-    for (let i = 0; i < a.length; i++) out[n - a.length + i] += a[i];
-    for (let i = 0; i < b.length; i++) out[n - b.length + i] += b[i];
-    return out;
-  }
+  const polyMul = U.polyMul;
+  const polyAdd = U.polyAdd;
   function stripOuter(s) {
     while (s.length >= 2 && s[0] === '(' && s[s.length - 1] === ')') {
       let d = 0, wrapped = true;
@@ -290,7 +280,8 @@ const FX_LIB = (() => {
 
   function parseTF(str, v = 's') {
     if (!str) return null;
-    const s = String(str).replace(/\s+/g, '').replace(/\*\*/g, '^');
+    // 入口归一化：全角（含全角分数线 ／、全角数字/负号）→ ASCII 后再切分子/分母；** → ^ 由 normChars 一并处理
+    const s = U.normChars(String(str)).replace(/\s+/g, '').replace(/\*\*/g, '^');
     const parts = splitDepth(s, (c) => c === '/');
     const num = parsePoly(parts[0], v);
     const denStr = parts.slice(1).map((p) => p.replace(/^\//, '')).join('/');
@@ -313,62 +304,105 @@ const FX_LIB = (() => {
     return { num: parts[0] || '1', den: parts.slice(1).map((p) => p.replace(/^\//, '')).join('/') || '1' };
   }
 
-  // 解析以 t 为变量的时域表达式，返回 f(t) 函数 + 校验
-  // 内置信号函数：u 阶跃 / heaviside / sinc / rect / tri
-  // 安全：mathjs 是求值 DSL 而非沙箱，先过 AST 白名单（节点类型/符号/函数/运算符）
-  //      + 长度与节点数上限，杜绝 AssignmentNode/AccessorNode/矩阵等能力的滥用面。
-  const MATH_OK_NODES = new Set(['OperatorNode', 'ConstantNode', 'SymbolNode', 'FunctionNode', 'ParenthesisNode']);
-  const MATH_OK_OPS = new Set(['+', '-', '*', '/', '^', '%']);
-  const MATH_OK_FUNCS = new Set(['sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'sinh', 'cosh', 'tanh', 'exp', 'log', 'log2', 'log10', 'sqrt', 'cbrt', 'abs', 'sign', 'floor', 'ceil', 'round', 'min', 'max', 'pow', 'atan2', 'u', 'heaviside', 'sinc', 'rect', 'tri']);
-  const MATH_OK_SYMBOLS = new Set(['t', 'pi', 'e', 'u', 'heaviside', 'sinc', 'rect', 'tri']);
-  function mathExprSafe(node) {
-    let count = 0, bad = null;
-    node.traverse((n) => {
-      if (bad) return;
-      if (++count > 2000) { bad = '表达式过大'; return; }
-      if (!MATH_OK_NODES.has(n.type)) { bad = '不允许的语法「' + n.type + '」'; return; }
-      if (n.type === 'FunctionNode') {
-        const fn = n.fn && n.fn.name;
-        if (!fn || !MATH_OK_FUNCS.has(fn)) bad = '不允许的函数「' + (fn || '?') + '」';
-      } else if (n.type === 'SymbolNode') {
-        if (!MATH_OK_SYMBOLS.has(n.name)) bad = '未知符号「' + n.name + '」';
-      } else if (n.type === 'OperatorNode') {
-        if (!MATH_OK_OPS.has(n.op)) bad = '不允许的运算「' + n.op + '」';
-      } else if (n.type === 'ConstantNode') {
-        if (typeof n.value !== 'number' || !isFinite(n.value)) bad = '存在非有限常量';
+  /* ============ 时域表达式解析（内置解析器，零外部依赖） ============
+   * 自 1.1.3 起不再依赖 CDN 的 mathjs：断网 / 网络受限（CDN 不可达）时
+   * 「交互求解」的时域信号同样可解析，符合平台 local-first 定位。
+   * 语法：数字（含 .5 / 1e-3）· 变量 t · 常量 pi/e/tau · + - * / ^ % ·
+   *      括号 · 一元 ± · 隐式乘法（2t、3(t+1)、(t+1)(t-1)、2pi、2sin(t)）
+   * 安全：纯递归下降解析 + 白名单函数表，不执行任何字符串代码；
+   *      入口限长 300 字符、括号嵌套 ≤ 32 层，杜绝栈溢出与能力滥用。 */
+  const TIME_FNS = {
+    sin: Math.sin, cos: Math.cos, tan: Math.tan,
+    asin: Math.asin, acos: Math.acos, atan: Math.atan, atan2: Math.atan2,
+    sinh: Math.sinh, cosh: Math.cosh, tanh: Math.tanh,
+    exp: Math.exp, sqrt: Math.sqrt, cbrt: Math.cbrt, pow: Math.pow,
+    abs: Math.abs, sign: Math.sign, floor: Math.floor, ceil: Math.ceil, round: Math.round,
+    ln: Math.log, log: (x, b) => (b == null ? Math.log(x) : Math.log(x) / Math.log(b)),
+    log2: Math.log2, log10: Math.log10, min: Math.min, max: Math.max,
+    u: (x) => (x >= 0 ? 1 : 0),
+    heaviside: (x) => (x > 0 ? 1 : x < 0 ? 0 : 0.5),
+    sinc: (x) => (Math.abs(x) < 1e-9 ? 1 : Math.sin(Math.PI * x) / (Math.PI * x)),
+    rect: (x) => (Math.abs(x) < 0.5 ? 1 : 0),
+    tri: (x) => Math.max(0, 1 - Math.abs(x))
+  };
+  const TIME_CONSTS = { pi: Math.PI, PI: Math.PI, e: Math.E, tau: 2 * Math.PI };
+
+  // 编译为 f(t) 闭包树；任何非法写法 → 返回 null（调用方按解析失败处理）
+  function compileTimeExpr(src) {
+    const s = String(src).replace(/\s+/g, '');
+    let i = 0, depth = 0;
+    const startsAtom = (c) => c != null && (/[0-9.]/.test(c) || /[A-Za-z_(]/.test(c));
+    const eat = (c) => { if (s[i] === c) { i++; return true; } return false; };
+    function parseExpr() {
+      let f = parseTerm();
+      for (;;) {
+        if (eat('+')) { const l = f, r = parseTerm(); f = (t) => l(t) + r(t); }
+        else if (eat('-')) { const l = f, r = parseTerm(); f = (t) => l(t) - r(t); }
+        else return f;
       }
-    });
-    return bad;
-  }
-  function parseTimeExpr(str) {
-    if (!window.math) return null;
-    // 与其他解析入口一致：先做全角/Unicode 负号/上标/** 归一化（U.normChars），再交给 mathjs
-    const s0 = U.normChars(String(str || ''));
-    if (!s0.trim() || s0.length > 300) return null;
+    }
+    function parseTerm() {
+      let f = parseUnary();
+      for (;;) {
+        if (eat('*')) { const l = f, r = parseUnary(); f = (t) => l(t) * r(t); }
+        else if (eat('/')) { const l = f, r = parseUnary(); f = (t) => l(t) / r(t); }
+        else if (eat('%')) { const l = f, r = parseUnary(); f = (t) => l(t) % r(t); }
+        // 隐式乘法（终点后紧跟新原子）：2t、3(t+1)、(t+1)(t-1)、2pi、2sin(t)
+        else if (startsAtom(s[i])) { const l = f, r = parseUnary(); f = (t) => l(t) * r(t); }
+        else return f;
+      }
+    }
+    function parseUnary() {
+      if (eat('+')) return parseUnary();
+      if (eat('-')) { const r = parseUnary(); return (t) => -r(t); }
+      return parsePower();
+    }
+    function parsePower() {
+      const b = parseAtom();
+      if (eat('^')) { const e = parseUnary(); return (t) => Math.pow(b(t), e(t)); }   // 右结合
+      return b;
+    }
+    function parseAtom() {
+      if (eat('(')) {
+        if (++depth > 32) throw new Error('嵌套过深');
+        const f = parseExpr();
+        if (!eat(')')) throw new Error('括号不闭合');
+        depth--;
+        return f;
+      }
+      const num = s.slice(i).match(/^(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?/);
+      if (num) { i += num[0].length; const v = parseFloat(num[0]); return () => v; }
+      const id = s.slice(i).match(/^[A-Za-z_][A-Za-z0-9_]*/);
+      if (!id) throw new Error('非法字符「' + (s[i] || '末尾') + '」');
+      const name = id[0];
+      i += name.length;
+      if (s[i] === '(') {                       // 函数调用（仅白名单）
+        const fn = Object.prototype.hasOwnProperty.call(TIME_FNS, name) ? TIME_FNS[name] : null;
+        if (!fn) throw new Error('不支持的函数「' + name + '」');
+        i++;
+        const args = [parseExpr()];
+        while (eat(',')) args.push(parseExpr());
+        if (!eat(')')) throw new Error('函数 ' + name + ' 缺少右括号');
+        if (args.length === 1) return (t) => fn(args[0](t));
+        return (t) => fn.apply(null, args.map((a) => a(t)));
+      }
+      if (name === 't') return (t) => t;
+      if (Object.prototype.hasOwnProperty.call(TIME_CONSTS, name)) { const v = TIME_CONSTS[name]; return () => v; }
+      throw new Error('未知符号「' + name + '」');
+    }
     try {
-      const node = window.math.parse(s0);
-      const bad = mathExprSafe(node);
-      if (bad) { console.warn('表达式被拒绝：' + bad); return null; }
-      const helpers = {
-        u: (x) => (x >= 0 ? 1 : 0),
-        heaviside: (x) => (x > 0 ? 1 : x < 0 ? 0 : 0.5),
-        sinc: (x) => (Math.abs(x) < 1e-9 ? 1 : Math.sin(Math.PI * x) / (Math.PI * x)),
-        rect: (x) => (Math.abs(x) < 0.5 ? 1 : 0),
-        tri: (x) => Math.max(0, 1 - Math.abs(x))
-      };
-      const f = (t) => {
-        try {
-          const scope = Object.assign({}, helpers, { t });
-          const v = node.evaluate(scope);
-          if (typeof v === 'number') return v;
-          if (v && typeof v.re === 'number') return v.re;
-          if (v && typeof v.valueOf === 'function') { const n = v.valueOf(); return typeof n === 'number' ? n : 0; }
-          return 0;
-        } catch (e) { return 0; }
-      };
-      for (const q of [0.1, 1, 2.5]) if (!isFinite(f(q))) throw new Error('not finite');
+      const f = parseExpr();
+      if (i !== s.length) return null;                                  // 有残留 → 非法
+      for (const q of [0.1, 1, 2.5]) if (!isFinite(f(q))) return null;  // 抽样必须有限
       return f;
     } catch (e) { return null; }
+  }
+
+  function parseTimeExpr(str) {
+    // 与其他解析入口一致：先做全角/Unicode 负号/上标/** 归一化（U.normChars）
+    const s0 = U.normChars(String(str || ''));
+    if (!s0.trim() || s0.length > 300) return null;
+    return compileTimeExpr(s0);
   }
 
   return { shapePoints, customShapePoints, ftSignals, laplacePresets, parseTF, parseTFFields, tfToFields, parsePoly, parseTimeExpr, extractParams, substituteParams };

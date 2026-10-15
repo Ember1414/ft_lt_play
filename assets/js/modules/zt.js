@@ -41,12 +41,12 @@ App.register('zt', (host) => {
         <details class="plot-fold" id="zt-jury-fold">
           <summary>Jury 稳定判据（特征表，不依赖求根）</summary>
           <div class="ctrl row" style="margin-top:6px">
-            <input type="text" id="zt-jury-in" placeholder="特征多项式 D(z)，如 z^3-0.5*z^2+0.25*z-0.125" spellcheck="false" style="flex:1">
+            <input type="text" id="zt-jury-in" placeholder="特征多项式 D(z)，如 z-0.5 或 z^3-0.5*z^2+0.25*z-0.125" spellcheck="false" style="flex:1">
             <button class="btn" id="zt-jury-cur" title="填入当前分母 D(z)">用当前 D(z)</button>
             <button class="btn primary" id="zt-jury-go">生成 Jury 表</button>
           </div>
           <div id="zt-jury-out"></div>
-          <div class="hint">D(z) 的根全部在单位圆内 ⇔ 满足：a₀&gt;0、D(1)&gt;0、(−1)ⁿD(−1)&gt;0、|aₙ|&lt;a₀，且逐行 r₀&gt;|r_last|。与劳斯表（连续域）对应，可交叉验证上方的「最大极点模」。</div>
+          <div class="hint">D(z) 的根全部在单位圆内 ⇔ 满足：a₀&gt;0、D(1)&gt;0、(−1)ⁿD(−1)&gt;0、|aₙ|&lt;a₀（一阶仅需 |a₁|&lt;a₀），且逐行 r₀&gt;|r_last|；首项为负会自动归一。与劳斯表（连续域）对应，ρmax 与下方零极点图的「最大极点模」互为验证。</div>
         </details>
       </div>
       <div class="pane">
@@ -250,7 +250,10 @@ App.register('zt', (host) => {
     for (let i = 0; i < NW; i++) {
       const wv = (i / (NW - 1)) * Math.PI;
       const z = { re: Math.cos(wv), im: Math.sin(wv) };
-      const h = DSP.cdiv(DSP.horner(num, z), DSP.horner(den, z));
+      const denH = DSP.horner(den, z);
+      const denMag = Math.hypot(denH.re, denH.im);
+      if (denMag < 1e-15) continue;   // 单位圆上的极点附近：跳过该频率点，避免 Infinity 破坏图表
+      const h = DSP.cdiv(DSP.horner(num, z), denH);
       w.push(wv); mag.push(U.toDb(Math.hypot(h.re, h.im))); ph.push((180 / Math.PI) * Math.atan2(h.im, h.re));
     }
     return { w, mag, ph };
@@ -323,8 +326,8 @@ App.register('zt', (host) => {
   function renderJury(str) {
     const out = $('#zt-jury-out');
     const c = FX_LIB.parsePoly(str, 'z');
-    if (!c || !c.length || c.length < 3 || !(c[0] > 0)) {
-      out.innerHTML = '<p style="color:var(--danger)">无法解析（需阶数 ≥ 2 且首项系数为正），示例：z^3-0.5*z^2+0.25*z-0.125</p>';
+    if (!c || !c.length || c.length < 2 || !c[0]) {
+      out.innerHTML = '<p style="color:var(--danger)">无法解析（需阶数 ≥ 1 且首项系数非零），示例：z-0.5 或 z^3-0.5*z^2+0.25*z-0.125</p>';
       return;
     }
     const j = DSP.jury(c);
@@ -339,8 +342,15 @@ App.register('zt', (host) => {
     });
     html += '</table>';
     html += j.conds.map((cd) => `<p class="hint" style="margin:2px 0;color:${cd.ok ? 'var(--accent-2)' : 'var(--danger)'}">${cd.ok ? '✓' : '✗'} ${cd.text}</p>`).join('');
-    html += `<p style="font-weight:600;color:${j.stable ? 'var(--accent-2)' : 'var(--danger)'}">${j.stable ? '✓ 全部满足 → 特征根都在单位圆内 → 系统稳定' : '✗ 存在不满足项 → 存在单位圆上或圆外特征根 → 系统不稳定'}</p>`;
-    html += `<p class="hint">求根交叉验证：最大极点模 = ${U.fmt(Math.max(...DSP.polyRoots(c).map((q) => Math.hypot(q.re, q.im))), 4)}${j.stable ? '（&lt; 1，一致）' : '（≥ 1，一致）'}</p>`;
+    // ρmax / 裕度统计行；|1−ρmax|≈0 → 特征根在单位圆上 → 临界措辞
+    const crit = j.rhoMax != null && Math.abs(j.margin) < 1e-6;
+    html += `<div class="statbar" style="margin:8px 0">
+      <div class="stat"><span class="k">ρmax 最大极点模</span><span class="v">${j.rhoMax != null ? U.fmt(j.rhoMax, 4) : '—'}</span></div>
+      <div class="stat"><span class="k">稳定裕度 1−ρmax</span><span class="v" style="color:${crit ? 'var(--warn)' : j.margin > 0 ? 'var(--accent-2)' : 'var(--danger)'}">${j.margin != null ? U.fmt(j.margin, 4) : '—'}</span></div>
+    </div>`;
+    html += `<p style="font-weight:600;color:${crit ? 'var(--warn)' : j.stable ? 'var(--accent-2)' : 'var(--danger)'}">${crit
+      ? '⚠ 临界：ρmax ≈ 1（特征根位于单位圆上），系统临界稳定'
+      : j.stable ? '✓ 全部满足 → 特征根都在单位圆内 → 系统稳定' : '✗ 存在不满足项 → 存在单位圆上或圆外特征根 → 系统不稳定'}</p>`;
     out.innerHTML = html;
   }
   $('#zt-jury-go').addEventListener('click', () => renderJury($('#zt-jury-in').value));

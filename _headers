@@ -1,6 +1,9 @@
 # Cloudflare Pages 安全响应头（部署到根路径，所有资产生效）
 # 注意：
-# - script-src 不含 'unsafe-inline'：页面无内联脚本，CDN 回退走 app.js 动态加载（unpkg.com 已列入）
+# - script-src 不含 'unsafe-inline'：页面无内联脚本，CDN 回退走 app.js 动态加载
+#   （KaTeX 镜像 unpkg / fastly.jsdelivr / cdnjs 已列入）
+# - worker-src 必须显式放行 blob:（根轨迹 / PID 寻优的 Worker 由 Blob URL 创建；
+#   缺此指令时回落到 script-src → Blob 被拦截，功能静默失效）
 # - style-src 需要 'unsafe-inline'：KaTeX 渲染会写内联 style 属性
 # - 本站 local-first：无任何后端请求，connect-src 收紧为 'self'
 /*
@@ -8,4 +11,4 @@
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: microphone=(self), camera=(), geolocation=(), payment=(), usb=()
-  Content-Security-Policy: default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net data:; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://unpkg.com https://fastly.jsdelivr.net https://cdnjs.cloudflare.com; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com https://fastly.jsdelivr.net https://cdnjs.cloudflare.com; font-src 'self' https://cdn.jsdelivr.net https://unpkg.com https://fastly.jsdelivr.net https://cdnjs.cloudflare.com data:; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'

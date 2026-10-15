@@ -1,0 +1,1729 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>信号与控制实验平台 v2 · 重构规划书（已批准 · 执行中）</title>
+<style>
+/* ============================================================
+   规划书样式 —— 同时作为「精密仪器」设计语言的轻量预览
+   token 与 §8 设计系统提案一致（浅色纸感 / 深色实验室夜景）
+   ============================================================ */
+:root{
+  --paper:#F6F5F1; --panel:#FFFFFF; --panel-2:#EFEEE9; --well:#FBFAF7;
+  --ink:#1B1F27; --ink-2:#48525F; --ink-3:#7B8492;
+  --line:#E4E2DA; --line-2:#CFCCC0;
+  --accent:#2456CC; --accent-2:#0C7C6B; --violet:#6B4FD8; --amber:#A15C06; --red:#C7403C;
+  --accent-soft:rgba(36,86,204,.09); --accent-line:rgba(36,86,204,.28);
+  --ok:#0C7C6B; --ok-soft:rgba(12,124,107,.10);
+  --warn-soft:rgba(161,92,6,.10); --red-soft:rgba(199,64,60,.09);
+  --shadow:0 1px 2px rgba(24,28,38,.05),0 6px 24px rgba(24,28,38,.06);
+  --r:10px; --r-lg:14px;
+  --mono:ui-monospace,"SF Mono","Cascadia Code",Consolas,"Roboto Mono",monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","IBM Plex Sans","PingFang SC","Microsoft YaHei",sans-serif;
+}
+html[data-theme="dark"]{
+  --paper:#0B0E14; --panel:#121826; --panel-2:#0E131D; --well:#0D1220;
+  --ink:#E9EDF5; --ink-2:#AAB5C7; --ink-3:#7E8896;
+  --line:#212A3A; --line-2:#2E3A4F;
+  --accent:#5B8BFF; --accent-2:#3ECFB2; --violet:#9C86F0; --amber:#E0A44E; --red:#F0736C;
+  --accent-soft:rgba(91,139,255,.13); --accent-line:rgba(91,139,255,.36);
+  --ok:#3ECFB2; --ok-soft:rgba(62,207,178,.12);
+  --warn-soft:rgba(224,164,78,.12); --red-soft:rgba(240,115,108,.12);
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 30px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--paper);color:var(--ink);font:400 15px/1.75 var(--sans);-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code,.mono{font-family:var(--mono);font-size:.86em;background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:1px 6px}
+.mono.plain{background:none;border:none;padding:0}
+
+/* 顶栏 */
+.topbar{position:sticky;top:0;z-index:60;display:flex;align-items:center;gap:14px;padding:10px 22px;
+  background:color-mix(in srgb,var(--paper) 90%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar .brand{font-weight:650;font-size:14px;letter-spacing:.2px}
+.topbar .spacer{flex:1}
+.tag{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600;line-height:1.6;border:1px solid var(--line-2);color:var(--ink-2);background:var(--panel)}
+.tag.p0{color:#fff;background:var(--accent);border-color:transparent}
+.tag.p1{color:var(--accent);background:var(--accent-soft);border-color:var(--accent-line)}
+.tag.p2{color:var(--ink-2)}
+.tag.na{color:var(--ink-3);border-style:dashed}
+.tag.tbd{color:var(--amber);background:var(--warn-soft);border-color:transparent}
+.tag.assume{color:var(--violet);background:color-mix(in srgb,var(--violet) 12%,transparent);border-color:transparent}
+.tag.sug{color:var(--ok);background:var(--ok-soft);border-color:transparent}
+.tag.done{color:var(--ink-2);text-decoration:line-through}
+.btn{cursor:pointer;border:1px solid var(--line-2);background:var(--panel);color:var(--ink);border-radius:8px;
+  padding:6px 12px;font:600 13px/1.4 var(--sans);transition:.15s}
+.btn:hover{border-color:var(--ink-3)}
+.btn.primary{background:var(--accent);border-color:transparent;color:#fff}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--ink-2)}
+.btn.ghost:hover{color:var(--ink);background:var(--panel-2)}
+
+/* 布局 */
+.wrap{max-width:1180px;margin:0 auto;padding:0 26px}
+.layout{display:grid;grid-template-columns:228px minmax(0,1fr);gap:44px;align-items:start}
+nav.toc{position:sticky;top:64px;padding:26px 0;font-size:13px}
+nav.toc .t{font-weight:700;color:var(--ink-3);letter-spacing:.08em;font-size:11px;text-transform:uppercase;margin:0 0 10px}
+nav.toc a{display:block;color:var(--ink-2);padding:3.5px 0;border-left:2px solid transparent;padding-left:12px;margin-left:-2px}
+nav.toc a:hover{color:var(--accent);text-decoration:none}
+nav.toc a.on{color:var(--accent);border-color:var(--accent);font-weight:600}
+nav.toc .sub{font-size:12.5px;color:var(--ink-3);padding-left:26px;border:none}
+@media (max-width:1020px){.layout{grid-template-columns:1fr} nav.toc{display:none}}
+
+/* 封面 */
+.cover{padding:58px 0 34px;border-bottom:1px solid var(--line)}
+.eyebrow{font:700 12px/1 var(--sans);letter-spacing:.16em;color:var(--accent);text-transform:uppercase;margin-bottom:16px}
+h1{font-size:clamp(30px,4.4vw,44px);line-height:1.18;letter-spacing:-.5px;margin:0 0 14px;font-weight:750}
+.lede{font-size:17px;line-height:1.8;color:var(--ink-2);max-width:46em;margin:0 0 26px}
+.meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin-top:8px}
+.meta .cell{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:11px 14px}
+.meta .k{font-size:11px;letter-spacing:.08em;color:var(--ink-3);text-transform:uppercase;font-weight:700}
+.meta .v{font-size:13.5px;font-weight:600;margin-top:3px}
+.meta .v small{font-weight:400;color:var(--ink-2)}
+
+/* 章节 */
+section.chapter{padding:46px 0 10px;border-top:1px solid var(--line)}
+section.chapter:first-of-type{border-top:none}
+h2{font-size:25px;letter-spacing:-.3px;margin:0 0 6px;font-weight:750}
+h2 .no{color:var(--accent);font-family:var(--mono);font-size:20px;margin-right:10px;font-weight:600}
+h3{font-size:17.5px;margin:34px 0 8px;font-weight:700;letter-spacing:-.2px}
+h4{font-size:15px;margin:22px 0 6px;font-weight:700;color:var(--ink)}
+p{margin:9px 0;color:var(--ink-2)}
+p strong,li strong{color:var(--ink)}
+ul,ol{margin:8px 0;padding-left:22px;color:var(--ink-2)}
+li{margin:4px 0}
+.subtitle{color:var(--ink-3);font-size:14px;margin:0 0 12px}
+hr.soft{border:none;border-top:1px dashed var(--line);margin:26px 0}
+
+/* 表格 */
+.tbl{width:100%;border-collapse:separate;border-spacing:0;margin:14px 0;font-size:13.5px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.tbl th{text-align:left;font-weight:700;font-size:12px;letter-spacing:.05em;color:var(--ink-3);text-transform:uppercase;background:var(--panel-2);padding:9px 12px;border-bottom:1px solid var(--line)}
+.tbl td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top;color:var(--ink-2)}
+.tbl tr:last-child td{border-bottom:none}
+.tbl td strong{color:var(--ink)}
+.tbl.tight td,.tbl.tight th{padding:7px 10px}
+
+/* 提示卡 */
+.note{border:1px solid var(--line);border-left:3px solid var(--accent);background:var(--panel);border-radius:var(--r);padding:12px 16px;margin:16px 0;font-size:13.5px;color:var(--ink-2)}
+.note .hd{font-weight:700;color:var(--ink);margin-bottom:3px;font-size:13px}
+.note.ok{border-left-color:var(--ok)} .note.warn{border-left-color:var(--amber)} .note.decide{border-left-color:var(--violet)}
+
+/* 决策卡 */
+.decision{border:1px solid var(--accent-line);background:linear-gradient(180deg,var(--accent-soft),transparent 60%);border-radius:var(--r-lg);padding:18px 20px;margin:18px 0;box-shadow:var(--shadow)}
+.decision .dh{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+.decision .dh .id{font-family:var(--mono);font-weight:700;color:var(--accent);font-size:13px;background:var(--panel);border:1px solid var(--accent-line);padding:2px 8px;border-radius:6px}
+.decision .dh .tt{font-weight:750;font-size:15.5px}
+.decision p{margin:6px 0;font-size:13.5px}
+.decision .pick{margin-top:10px;padding:10px 12px;background:var(--panel);border:1px dashed var(--line-2);border-radius:var(--r);font-size:13px;color:var(--ink-3)}
+.decision .pick b{color:var(--ink)}
+.opt{display:flex;gap:10px;margin:8px 0;align-items:flex-start}
+.opt .b{flex:0 0 auto;width:22px;height:22px;border-radius:6px;border:1.5px solid var(--line-2);background:var(--panel);display:grid;place-items:center;font:700 12px/1 var(--sans);color:var(--ink-2)}
+.opt.rec .b{border-color:var(--accent);background:var(--accent);color:#fff}
+.opt.rec .ot{color:var(--ink)}
+.opt .ot{font-size:13.5px;color:var(--ink-2)}
+.opt .ot b{color:var(--ink)}
+
+/* 内嵌演示 */
+.demo{border:1px solid var(--line);border-radius:var(--r-lg);background:var(--well);margin:18px 0;overflow:hidden;box-shadow:var(--shadow)}
+.demo .cap{display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--line);background:var(--panel);font-size:12px;color:var(--ink-3)}
+.demo .cap b{color:var(--ink);font-size:12.5px}
+.demo .body{padding:16px}
+.demo .foot{padding:8px 14px;border-top:1px dashed var(--line);font-size:12px;color:var(--ink-3)}
+.grid{display:grid;gap:12px}
+.g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media (max-width:860px){.g3,.g4{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:560px){.g2,.g3,.g4{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px}
+.card .ct{font-weight:700;font-size:13.5px}
+.card .cs{font-size:12px;color:var(--ink-3);margin-top:2px}
+.kpi{font:750 26px/1.1 var(--mono);letter-spacing:-.5px;color:var(--ink)}
+.kpi small{font:600 12px/1 var(--sans);color:var(--ink-3);margin-left:6px;letter-spacing:0}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:14px 0}
+.kpis .k{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px}
+.kpis .k .kl{font-size:11.5px;color:var(--ink-3);font-weight:600;margin-bottom:5px}
+.swatch{height:44px;border-radius:8px;border:1px solid var(--line);display:flex;align-items:flex-end;padding:6px 8px;font:600 10.5px/1.3 var(--mono)}
+.note-inline{font-size:12px;color:var(--ink-3)}
+.pillrow{display:flex;flex-wrap:wrap;gap:6px}
+.pill{font-size:12px;border:1px solid var(--line-2);border-radius:999px;padding:3px 10px;color:var(--ink-2);background:var(--panel)}
+.num{font-family:var(--mono);font-weight:600}
+.caption{font-size:12.5px;color:var(--ink-3)}
+footer.doc{padding:40px 0 70px;border-top:1px solid var(--line);color:var(--ink-3);font-size:12.5px}
+@media print{nav.toc,.topbar{display:none}.layout{grid-template-columns:1fr}}
+
+/* ====== 演示专用（局部样式，前缀 d- 避免与正文冲突） ====== */
+.d-shell{border:1px solid var(--line-2);border-radius:12px;overflow:hidden;background:var(--paper);box-shadow:var(--shadow)}
+.d-bar{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--line);font-size:12px;color:var(--ink-3)}
+.d-dot{width:9px;height:9px;border-radius:50%;background:var(--line-2)}
+.d-kbd{font:600 11px/1 var(--mono);border:1px solid var(--line-2);border-bottom-width:2px;border-radius:5px;padding:3px 6px;color:var(--ink-2);background:var(--panel-2)}
+.d-row{display:flex;gap:12px}
+.d-side{flex:0 0 148px;display:flex;flex-direction:column;gap:4px}
+.d-main{flex:1;min-width:0}
+.d-navp{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;font-size:12.5px;color:var(--ink-2);cursor:pointer;border:1px solid transparent}
+.d-navp:hover{background:var(--panel-2)}
+.d-navp.on{background:var(--accent-soft);border-color:var(--accent-line);color:var(--ink);font-weight:600}
+.d-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;transition:.15s}
+.d-card:hover{border-color:var(--accent-line);transform:translateY(-1px)}
+.d-canvas{border:1px dashed var(--line-2);border-radius:10px;background:repeating-linear-gradient(0deg,transparent,transparent 23px,var(--line) 24px),repeating-linear-gradient(90deg,transparent,transparent 23px,var(--line) 24px);min-height:150px;position:relative;overflow:hidden}
+.d-canvas .wave{position:absolute;inset:0;width:100%;height:100%}
+.d-pal{position:absolute;inset:10px;background:var(--panel);border:1px solid var(--accent-line);border-radius:12px;box-shadow:var(--shadow);display:none;flex-direction:column;overflow:hidden}
+.d-pal.open{display:flex}
+.d-pal input{border:none;outline:none;background:transparent;color:var(--ink);font:500 13px var(--sans);padding:11px 14px;border-bottom:1px solid var(--line)}
+.d-pal .pl{max-height:150px;overflow:auto}
+.d-pal .pi{padding:8px 14px;font-size:12.5px;color:var(--ink-2);display:flex;justify-content:space-between;cursor:pointer}
+.d-pal .pi:hover,.d-pal .pi.hi{background:var(--accent-soft);color:var(--ink)}
+.d-pal .pi small{color:var(--ink-3)}
+.d-step{display:flex;gap:10px;align-items:flex-start;padding:9px 10px;border-radius:9px;cursor:pointer;border:1px solid transparent}
+.d-step:hover{background:var(--panel-2)}
+.d-step.on{background:var(--panel);border-color:var(--accent-line);box-shadow:var(--shadow)}
+.d-step .bub{flex:0 0 22px;height:22px;border-radius:50%;border:1.5px solid var(--line-2);display:grid;place-items:center;font:700 11px/1 var(--mono);color:var(--ink-3);background:var(--panel)}
+.d-step.on .bub{border-color:var(--accent);color:var(--accent)}
+.d-step.done .bub{background:var(--accent);border-color:var(--accent);color:#fff}
+.d-step .st{font-size:12.5px;font-weight:600;color:var(--ink)}
+.d-step .ss{font-size:11.5px;color:var(--ink-3)}
+.d-prog{height:6px;border-radius:99px;background:var(--panel-2);overflow:hidden;border:1px solid var(--line)}
+.d-prog i{display:block;height:100%;background:var(--accent);border-radius:99px;transition:.3s}
+.d-toast{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);background:var(--ink);color:var(--paper);font-size:11.5px;border-radius:8px;padding:6px 12px;opacity:0;transition:.25s;pointer-events:none}
+.d-toast.show{opacity:1}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="brand">信号与控制实验平台 v2 · 重构规划书</span>
+  <span class="tag sug">已批准 · 执行中</span>
+  <span class="spacer"></span>
+  <span class="note-inline" id="themeLabel">浅色预览</span>
+  <button class="btn ghost" id="btnTheme" title="切换预览主题">◐ 主题</button>
+</div>
+
+<div class="wrap"><div class="layout">
+
+<nav class="toc" id="toc">
+  <p class="t">目录</p>
+  <a href="#s0">0 · 导读与决策点</a>
+  <a href="#s1">1 · 项目背景与目标</a>
+  <a href="#s2">2 · 用户与场景</a>
+  <a href="#s3">3 · 范围与边界</a>
+  <a href="#s4">4 · 功能需求</a>
+  <a href="#s5">5 · 非功能需求</a>
+  <a href="#s6">6 · 技术需求</a>
+  <a href="#s7">7 · 数据需求</a>
+  <a href="#s8">8 · 界面与体验</a>
+  <a href="#s9">9 · 安全与合规</a>
+  <a href="#s10">10 · 部署与运维</a>
+  <a href="#s11">11 · 测试与质量</a>
+  <a href="#s12">12 · 项目管理</a>
+  <a href="#s13">13 · 交付与验收</a>
+  <a href="#s14">14 · 运营与迭代</a>
+  <a href="#sapx">附录 A–D</a>
+</nav>
+
+<main>
+
+<!-- ================= 封面 ================= -->
+<header class="cover">
+  <div class="eyebrow">重构规划书 · 已批准 · 执行中</div>
+  <h1>信号与控制实验平台 v2</h1>
+  <p class="lede">从「交互工具集」重构为「专业级通用工具箱」：<strong>不限定课堂</strong>——工程师、研究者、教师、学生、爱好者，凡与信号、变换、系统、控制打交道的人皆可使用；全新设计语言 · 电影级演示动画 · 标准化符号 · 工具 10 → 14 并持续扩充——本地优先、零成本运行、由 AI 完整开发、项目所有者逐批验收。</p>
+  <div class="meta">
+    <div class="cell"><div class="k">文档</div><div class="v">v1.1 · 2026-10-12 <small>／ 状态：已批准（按推荐执行）</small></div></div>
+    <div class="cell"><div class="k">基线版本</div><div class="v">v1.1.3 <small>／ 10 模块 · 13 库 · 30 测试脚本</small></div></div>
+    <div class="cell"><div class="k">目标版本</div><div class="v">v2.0 <small>／ 功能增加 + 全新设计</small></div></div>
+    <div class="cell"><div class="k">执行方式</div><div class="v">AI 完整开发 <small>／ 所有者审批</small></div></div>
+    <div class="cell"><div class="k">成本</div><div class="v">0 元 <small>／ 全免费技术栈与托管</small></div></div>
+    <div class="cell"><div class="k">形态</div><div class="v">响应式 Web + PWA <small>／ local-first，无后端</small></div></div>
+  </div>
+</header>
+
+<!-- ================= 0 导读 ================= -->
+<section class="chapter" id="s0">
+  <h2><span class="no">0</span>导读与决策点</h2>
+  <p class="subtitle">本文档按你给出的 14 个维度逐项规划；功能需求（§4）为主体篇幅。文档中的内嵌演示均为<strong>可交互的方向示意</strong>，用于审批"体验与交互"，不是最终实现。</p>
+
+  <h3>0.1 记号约定</h3>
+  <table class="tbl tight">
+    <tr><th style="width:130px">记号</th><th>含义</th></tr>
+    <tr><td><span class="tag p0">P0</span></td><td>v2.0 必须交付，缺失即验收不通过</td></tr>
+    <tr><td><span class="tag p1">P1</span></td><td>v2.x 迭代候选，不在 v2.0 承诺范围内</td></tr>
+    <tr><td><span class="tag p2">P2</span></td><td>明确不做（非目标），避免范围蔓延</td></tr>
+    <tr><td><span class="tag sug">建议</span></td><td>AI 的推荐方案，待审批者确认或修改</td></tr>
+    <tr><td><span class="tag tbd">待定</span></td><td>需要审批者提供信息或拍板的数值/范围</td></tr>
+    <tr><td><span class="tag assume">假设</span></td><td>为推进规划而采用的合理推断，可被推翻</td></tr>
+    <tr><td><span class="tag na">不适用</span></td><td>该项目形态下无此概念，已注明原因</td></tr>
+  </table>
+
+  <h3>0.2 你的 14 个维度 → 本文档映射</h3>
+  <table class="tbl">
+    <tr><th style="width:200px">你要求的维度</th><th style="width:90px">章节</th><th>处理方式</th></tr>
+    <tr><td>1 项目背景与目标</td><td><a href="#s1">§1</a></td><td>完整规划：现状盘点、核心问题、成功标准</td></tr>
+    <tr><td>2 用户与场景</td><td><a href="#s2">§2</a></td><td>完整规划；权限层级 → 本地优先下为"视角模型"，见 §2.2</td></tr>
+    <tr><td>3 范围与边界</td><td><a href="#s3">§3</a></td><td>P0 / P1 / 非目标 + 最小完整旅程</td></tr>
+    <tr><td>4 功能需求</td><td><a href="#s4">§4</a></td><td>核心主体：15 项功能 ID + 交互示意</td></tr>
+    <tr><td>5 非功能需求</td><td><a href="#s5">§5</a></td><td>性能预算 / 离线 / 兼容矩阵 / 无障碍</td></tr>
+    <tr><td>6 技术需求</td><td><a href="#s6">§6</a></td><td>按你要求纳入（含决策点 D1）；无后端</td></tr>
+    <tr><td>7 数据需求</td><td><a href="#s7">§7</a></td><td>schema v2、迁移、备份、隐私</td></tr>
+    <tr><td>8 界面与体验</td><td><a href="#s8">§8</a></td><td>设计语言 + 页面清单 + 可交互预览</td></tr>
+    <tr><td>9 安全与合规</td><td><a href="#s9">§9</a></td><td>CSP/无动态执行/隐私；账号与审计 → 不适用</td></tr>
+    <tr><td>10 部署与运维</td><td><a href="#s10">§10</a></td><td>Cloudflare Pages + GitHub Actions（免费）</td></tr>
+    <tr><td>11 测试与质量</td><td><a href="#s11">§11</a></td><td>现有 30 脚本 + 新增 E2E/性能/无障碍</td></tr>
+    <tr><td>12 项目管理</td><td><a href="#s12">§12</a></td><td>里程碑 M0–M4 + 审批门 + 风险；预算 0 元</td></tr>
+    <tr><td>13 交付与验收</td><td><a href="#s13">§13</a></td><td>交付物清单 + 四类验收指标</td></tr>
+    <tr><td>14 运营与迭代</td><td><a href="#s14">§14</a></td><td>无遥测前提下的反馈闭环 + 迭代路线</td></tr>
+  </table>
+
+  <h3>0.3 决策点（已批准 · 按推荐执行）</h3>
+  <p>已批准（2026-10-12）：以下 4 项全部按<strong>推荐方案</strong>执行，执行期不再逐项等待确认，随里程碑交付统一汇报。本轮追加的新要求（电影级动画 / 符号标准化 / 工具扩充 / 存量重修 / 极致质量）已并入规划，见 <a href="#s0-4">§0.4</a>。</p>
+  <div class="decision">
+    <div class="dh"><span class="id">D1</span><span class="tt">技术路线</span><span class="tag sug">推荐 A</span></div>
+    <p><b>A · 渐进式现代化（推荐）</b>：迁移为 Vite + TypeScript + 轻量组件层（Preact ~4KB），数学内核与工程基线全部保留并复用；构建产物仍是纯静态，部署与免费性不变。</p>
+    <p><b>B · 零框架精进</b>：延续"无框架、无构建"品牌，仅重写设计与架构组织。功能范围不变，工程效率与体验上限略低。</p>
+    <p><b>C · 全面框架重写（不推荐）</b>：引入 React/Next 生态全量重写——偏离 local-first 静态部署与轻量定位，成本高收益低。</p>
+    <div class="pick"><b>✅ 已批准（2026-10-12）：</b>执行 <b>A · 渐进式现代化</b>（Vite + TypeScript + Preact，内核与基线全部复用）。</div>
+  </div>
+  <div class="decision">
+    <div class="dh"><span class="id">D2</span><span class="tt">视觉方向</span><span class="tag sug">推荐 A</span></div>
+    <p><b>A · 精密仪器 · 纸感浅色为主 + 夜景深色（推荐）</b>：延续现有基因做高阶化——浅色"学术纸面"，深色"实验室夜景"，双主题同等精致，默认跟随系统。</p>
+    <p><b>B · 深色实验室优先</b>：默认深色，强调科技感与长时间使用舒适度。</p>
+    <p><b>C · 保持现状风格微调</b>：不做语言级重设计，仅统一与打磨。</p>
+    <div class="pick"><b>✅ 已批准（2026-10-12）：</b>执行 <b>A · 精密仪器</b>（纸感浅色为主 + 夜景深色，默认跟随系统）。</div>
+  </div>
+  <div class="decision">
+    <div class="dh"><span class="id">D3</span><span class="tt">v2.0 功能批次边界</span><span class="tag sug">推荐 A</span></div>
+    <p><b>A · 全量 P0（推荐）</b>：按 §3.1 的 P0 清单完整交付；通过里程碑 M0–M4 逐批验收，风险由审批门控制。</p>
+    <p><b>B · 精简 P0</b>：先交付"新架构 + 新设计 + 现有模块升级"；学习路径、内容包、报告导出顺延到 v2.1。</p>
+    <div class="pick"><b>✅ 已批准（2026-10-12）：</b>执行 <b>A · 全量 P0</b>（19 项 FR，含本轮追加的电影级动画、符号标准化、工具扩充、存量重修）。</div>
+  </div>
+  <div class="decision">
+    <div class="dh"><span class="id">D4</span><span class="tt">旧版数据与链接兼容策略</span><span class="tag sug">推荐 A</span></div>
+    <p><b>A · 自动迁移 + 旧链接兼容（推荐）</b>：首次打开 v2 自动迁移本地实验（v1→v2 schema），旧分享码 PX1 可读并升级为 PX2；不丢任何数据。</p>
+    <p><b>B · 双版本并行</b>：保留 v1 入口（/v1/），用户手动切换。</p>
+    <p><b>C · 不迁移</b>：v2 全新开始（现有本地实验与分享码失效）。</p>
+    <div class="pick"><b>✅ 已批准（2026-10-12）：</b>执行 <b>A · 自动迁移 + 旧链接兼容</b>（v1 数据零丢失，PX1 分享码可读）。</div>
+  </div>
+
+  <h3 id="s0-4">0.4 本轮追加要求（已纳入规划）</h3>
+  <table class="tbl tight">
+    <tr><th style="width:210px">你的要求</th><th>落点</th></tr>
+    <tr><td><strong>电影级可视化动画</strong></td><td>新增 <b>FR-16「电影级动画与演示剧场」</b>：每工具 ≥1 段镜头化叙事动画（时间轴/旁白/可打断）；动效系统升级见 §8.10</td></tr>
+    <tr><td><strong>符号要标准</strong></td><td>新增 <b>FR-17「符号标准化体系」</b>：全站唯一符号登记表（§8.11），构建期 lint 校验，报告与界面同源</td></tr>
+    <tr><td><strong>以工具为主 · 增加工具</strong></td><td>新增 <b>FR-18「工具矩阵扩充」</b>：v2.0 工具 10 → 14（+滤波器设计器 / 随机信号实验室 / 调制与通信实验室 / 控制系统设计器）；P1 再增 3</td></tr>
+    <tr><td><strong>存量问题重修</strong></td><td>新增 <b>FR-19「存量问题重修」</b>：先立回归网 → 全量审计 → 分级修复 → 问题清零为发布条件</td></tr>
+    <tr><td><strong>追求极致</strong></td><td>质量门全面加严（§11.2）：E2E 全旅程 · 双主题视觉回归 · 动画帧率与性能预算 · 零 console 错误 · 符号一致性自动校验</td></tr>
+    <tr><td><strong>统一输入与显示</strong></td><td>新增 <b>§8.5.1《输入与显示统一契约》</b>：输入 9 类 + 显示 7 类全部登记；14 个工具逐项合规（lint + 走查），杜绝各工具自造样式</td></tr>
+  </table>
+</section>
+
+<!-- ================= 1 背景与目标 ================= -->
+<section class="chapter" id="s1">
+  <h2><span class="no">1</span>项目背景与目标</h2>
+
+  <h3>1.1 项目是什么 · 现状盘点</h3>
+  <p>「信号与控制实验平台」是一个<strong>纯前端、本地优先（local-first）的信号与控制通用交互工具箱</strong>：面向一切与信号、变换、系统、控制打交道的人——<strong>不限定课堂或教学场景</strong>；以"实验（工作状态）"为单位组织操作——输入信号/传函/方程 → 仿真可视化 → 保存快照 → 分享导出。全部计算与存储在浏览器完成，无服务端、无数据上传，部署于 Cloudflare Pages（免费）。</p>
+  <table class="tbl">
+    <tr><th style="width:150px">维度</th><th>现状（v1.1.3）</th></tr>
+    <tr><td>功能模块</td><td>10 个：工作台 / 傅立叶级数 / 傅立叶变换 / 拉普拉斯 / Z 变换 / 系统分析 / PID 整定 / 系统框图 / 交互求解 / 公式推导</td></tr>
+    <tr><td>核心资产</td><td>13 个自研库（数值内核、符号变换、框图求解、状态空间、数据模型、绘图与输入组件）；自研 FFT/求根/留数法/RK4/Jury/奈奎斯特/根轨迹等算法，全程无 <code>eval</code></td></tr>
+    <tr><td>工程基线</td><td>30 个零依赖测试脚本（约 830 断言）、CI 四步质量门、CSP 安全头、PWA 离线、版本化实验存储与分享码（PX1）</td></tr>
+    <tr><td>设计现状</td><td>浅色默认 + 深色主题、设计令牌、SVG 图标、桌面侧栏 + 移动底栏；视觉量级停留在"精修过的演示工具"，未到专业产品水准</td></tr>
+  </table>
+
+  <h3>1.2 观察到的核心问题</h3>
+  <table class="tbl">
+    <tr><th style="width:190px">问题（证据）</th><th>受影响的时刻</th><th style="width:300px">v2 的产品回应</th></tr>
+    <tr><td><strong>工具集合，没有路径</strong>：10 个模块平铺，新用户不知道"从哪开始、学到哪了"；专业用户也缺少"秒达工具"的入口</td><td>任何人的首次访问、临时查阅</td><td>命令中心 + 学习路径（FR-01/02/03，路径可选）</td></tr>
+    <tr><td><strong>没有"出口"</strong>：分析做得再好，只停留在画布上；无法形成可提交、可批注的成果</td><td>汇报、评审、演示</td><td>报告导出 + 实验笔记（FR-05/07）</td></tr>
+    <tr><td><strong>难以对比</strong>：同一模块换参数后前一组结果消失，无法并排观察参数敏感性</td><td>需要"A/B 对照"的任何场景（演示、评审、调参）</td><td>对比实验（FR-06）</td></tr>
+    <tr><td><strong>交互与显示不统一</strong>：各工具的输入控件、读数格式、折叠与工具栏行为各异；调参靠滑杆，缺少"直接操纵"</td><td>每次使用</td><td>统一工作区 + 输入/显示统一契约（FR-09 / §8.5.1）</td></tr>
+    <tr><td><strong>视觉与体验有天花板</strong>：现有设计是 1.0 演示工具风格；信息层级、动效、排版未到"高端产品"水准</td><td>第一印象、品牌信任</td><td>全新设计语言（§8）</td></tr>
+    <tr><td><strong>技术债</strong>：全局命名空间、无类型、重计算未全 Worker 化、无 E2E 自动化</td><td>维护与扩展</td><td>技术重构（§6）+ 质量升级（§11）</td></tr>
+  </table>
+
+  <h3>1.3 产品判断与 v2 定位</h3>
+  <div class="note">
+    <div class="hd">一句话定位</div>
+    v2 把平台从「一堆好用的工具」重构为「<strong>专业级通用工具箱</strong>」：以<strong>命令中心</strong>秒达任意工具，以<strong>统一工作区</strong>承载专业操作，以<strong>报告 / 分享</strong>交付成果；学习路径只是<strong>可选</strong>的组织方式，而非产品主线——任何与这些知识打交道的人，都能按自己的方式使用。
+  </div>
+  <table class="tbl">
+    <tr><th style="width:170px">体验层</th><th>用户得到的</th><th style="width:260px">由什么支撑</th></tr>
+    <tr><td><strong>入口层 · 命令中心</strong></td><td>一屏之内：继续上次工作 / 快速开始 / 全部工具索引 / 最近分享</td><td>命令中心首页（FR-01）、实验管理 2.0（FR-02）、命令面板 2.0（FR-08）</td></tr>
+    <tr><td><strong>实验层 · 统一工作区</strong></td><td>所有 14 个工具共用同一套布局与操作习惯；参数直接拖、结果可对比、过程可批注</td><td>工作区框架（FR-09）、对比实验（FR-06）、笔记（FR-07）</td></tr>
+    <tr><td><strong>产出层 · 报告与路径</strong></td><td>把工作沉淀为可提交的报告；零散实验可串成有进度的路径（<strong>可选</strong>：学生、转行者、复习者按需使用，专业用户可完全不进路径）</td><td>报告导出（FR-05）、学习路径与内容包（FR-03/04，可选）</td></tr>
+  </table>
+
+  <h3>1.4 业务目标与用户目标</h3>
+  <table class="tbl">
+    <tr><th style="width:120px">对象</th><th>目标（可观察，非口号）</th></tr>
+    <tr><td>工程师 / 研究者</td><td>能用键盘流（命令面板 + 快捷键）在最少操作次数内完成一次分析 / 设计，并导出可信数据与报告</td></tr>
+    <tr><td>教师 / 团队负责人</td><td>能把"一套预置内容 + 题目"打包成链接分发；接收方完成后回传可读成果（课堂、评审、教程分发皆可）</td></tr>
+    <tr><td>学生 / 自学者 / 爱好者</td><td>可从一条路径入手，完成至少一步（实验 + 自测）并导出一份报告；中断后可恢复进度</td></tr>
+    <tr><td>跨领域技术人员</td><td>（音频 / 嵌入式 / 通信 / 数据分析…）能直接找到对应工具完成一次专业操作，不被"教学假设"挡在门外</td></tr>
+    <tr><td>项目（产品）</td><td>功能只增不减；现有本地数据无损迁移；质量门（§11）全绿；全流程零成本运行</td></tr>
+  </table>
+
+  <h3>1.5 成功标准（怎么算成功）</h3>
+  <table class="tbl">
+    <tr><th style="width:110px">类别</th><th>判定（全部满足即视为成功）</th><th style="width:220px">验证方式</th></tr>
+    <tr><td>功能</td><td>P0 清单（§3.1）全部可用；现有 10 模块能力无回退</td><td>功能验收单逐项勾选</td></tr>
+    <tr><td>旅程</td><td>4 条核心旅程（§2.3）端到端走通：路径学习 / 内容分发与回收 / 工程师速查 / 分享接收</td><td>E2E 自动化 + 人工走查</td></tr>
+    <tr><td>质量</td><td><code>verify</code> 全绿；E2E 用例全部通过；无 P0/P1 级缺陷遗留</td><td>CI 报告</td></tr>
+    <tr><td>性能</td><td>达到 §5.1 性能预算〔建议目标，待 D3 审批时确认〕</td><td>Lighthouse + 实测采样</td></tr>
+    <tr><td>体验</td><td>键盘可完成全部核心操作；WCAG 2.1 AA 关键项通过；深浅主题一致精致</td><td>无障碍扫描 + 走查清单</td></tr>
+    <tr><td>数据</td><td>v1 本地实验 100% 迁移成功；PX1 分享码可读</td><td>迁移测试用例</td></tr>
+    <tr><td>成本</td><td>全流程 0 元：开发工具、依赖、托管、CI 均为免费方案</td><td>§12.2 免费栈清单核对</td></tr>
+  </table>
+
+  <h3>1.6 当前阶段与已有基础（保留 / 重建）</h3>
+  <table class="tbl">
+    <tr><th style="width:90px">处置</th><th>对象</th><th>说明</th></tr>
+    <tr><td><span class="tag done">保留</span></td><td>数学与领域内核（DSP / TR / BLKSOLVE / ODE / SS / FX_LIB 等）、数据模型与校验、30 个测试脚本、CSP/PWA/CI 基线、算法测试用例</td><td>它们是已验证资产；v2 以模块化封装复用，不重写算法</td></tr>
+    <tr><td><span class="tag na">重建</span></td><td>应用外壳、导航与信息架构、全部模块的界面与交互、设计系统、输入组件、状态管理</td><td>"重新构造"的主体：新架构 + 新设计 + 新体验</td></tr>
+    <tr><td><span class="tag p1">增强</span></td><td>绘图引擎（Plot/ComplexPlane 升级）、命令面板、工具栏、Worker 池</td><td>在保留 DNA 的前提下现代化</td></tr>
+  </table>
+</section>
+
+<!-- ================= 2 用户与场景 ================= -->
+<section class="chapter" id="s2">
+  <h2><span class="no">2</span>用户与场景</h2>
+
+  <h3>2.1 目标用户（不限定课堂）</h3>
+  <p>产品面向<strong>一切与信号、变换、系统、控制打交道的人</strong>——以下是常见画像，而不是边界；任何人都不应被"教学假设"挡在门外。</p>
+  <div class="grid g4">
+    <div class="card"><div class="ct">工程师 / 研究者</div><div class="cs">随手可得的专业工具：传函分析、PID 整定、离散化验证、滤波器设计。核心诉求：快（键盘流）、准（数值可信）、可导出（CSV / 报告）。</div></div>
+    <div class="card"><div class="ct">教师 / 讲师 / 团队负责人</div><div class="cs">演示与分发：把一套"预置内容 + 题目"打包分享、回收可读成果（课堂、内训、评审皆可）。核心诉求：省时、可复用、零门槛分发。</div></div>
+    <div class="card"><div class="ct">学生 / 自学者 / 爱好者</div><div class="cs">需要"看得见"的直觉与可提交的成果。核心诉求：从哪开始（路径可选）、我懂了吗（自测）、怎么交（报告）。</div></div>
+    <div class="card"><div class="ct">跨领域技术人员</div><div class="cs">音频 DSP、嵌入式、通信、数据分析、科研绘图……按需取用单个工具，不必理解整个平台。核心诉求：直达、专业、可组合。</div></div>
+  </div>
+
+  <h3>2.2 角色与权限层级</h3>
+  <p><strong>〔不适用说明〕</strong>本产品 local-first、无账号体系，因此不存在传统"注册/登录/权限层级"。v2 采用<strong>视角模型</strong>替代：</p>
+  <table class="tbl tight">
+    <tr><th style="width:170px">视角</th><th>能做什么</th><th>数据边界</th></tr>
+    <tr><td>所有者（本机用户）</td><td>全部功能：创建/编辑/删除实验、导入导出、管理本地数据</td><td>浏览器本地存储，仅本机可见</td></tr>
+    <tr><td>分享接收者</td><td>打开链接后获得一份<strong>只读副本</strong>并可"另存为我的实验"后自由编辑</td><td>不接触分享者的其他任何数据</td></tr>
+    <tr><td>内容包接收者（学员 / 协作者）</td><td>打开内容包 = 获得预置实验与题目；完成后导出"提交包"</td><td>同上；提交包由接收方手动回传（不经服务器）</td></tr>
+  </table>
+  <p class="caption">如未来引入可选云同步（P1），届时再定义账号与权限模型；v2.0 不做（见 §3.3）。</p>
+
+  <h3>2.3 核心使用场景（4 条旅程）</h3>
+  <table class="tbl">
+    <tr><th style="width:150px">旅程</th><th>路径</th><th style="width:210px">完成证据</th></tr>
+    <tr><td><strong>J1 · 路径学习</strong></td><td>首页 → 选择路径 → 步骤页（导读 → 打开预置实验 → 操作 → 自测判分）→ 进度保存 → 导出报告</td><td>路径进度推进；报告文件落盘</td></tr>
+    <tr><td><strong>J2 · 内容分发与回收</strong></td><td>组装内容包（路径子集 + 预置实验 + 题目）→ 生成分享链接 → 接收方完成后回传提交包 → 分发者查看成果（课堂布置、团队评审、教程分发皆可）</td><td>内容包链接；提交包可打开复现</td></tr>
+    <tr><td><strong>J3 · 工程师速查</strong></td><td>任意页面 ⌘K → 输入"根轨迹" → 直达并预置参数 → 分析 → 导出 CSV/PNG</td><td>命令面板命中；导出文件</td></tr>
+    <tr><td><strong>J4 · 分享接收</strong></td><td>打开 <code>#exp=PX2.…</code> / <code>#pkg=…</code> 链接 → 预览摘要 → 导入本地 → 继续编辑</td><td>导入后与分享端状态一致</td></tr>
+  </table>
+
+  <h3>2.4 用户痛点 → v2 回应</h3>
+  <table class="tbl">
+    <tr><th style="width:110px">角色</th><th style="width:300px">痛点（现状）</th><th>v2 回应（功能 ID）</th></tr>
+    <tr><td>初学者</td><td>不知从哪开始；学完没有成就感与交付物</td><td>学习路径 + 自测（FR-03，可选）、报告（FR-05）</td></tr>
+    <tr><td>任何用户</td><td>丢过一次工作 / 刷新后回到原点，不敢随便试</td><td>自动保存与快照已有 → 升级为"随时可回退"的全局撤销（FR-09）</td></tr>
+    <tr><td>分发者（教师 / 团队）</td><td>分发一套预置内容靠口述步骤或截图，接收方环境不一致</td><td>内容包分享：一套链接携带全部预置（FR-04）</td></tr>
+    <tr><td>全体</td><td>无法快速对比"整定前/后、改参前/后"的图</td><td>对比实验 A/B（FR-06）</td></tr>
+    <tr><td>工程师</td><td>在各工具之间切换时，操作习惯与输入显示不一致</td><td>统一工作区 + 输入/显示契约（FR-09 / §8.5.1）</td></tr>
+    <tr><td>全部</td><td>手机上只能"看"，不能顺畅操作</td><td>移动端一等公民（FR-11）</td></tr>
+  </table>
+
+  <h3>2.5 使用频率与规模〔假设〕</h3>
+  <ul>
+    <li>频率〔假设〕：专业用户按需为主（月数次~每周）；课程期 / 项目期集中（每周 1–5 次）；课堂与评审场景阶段性高峰。</li>
+    <li>规模〔假设〕：公开发布的静态站点，规模上限由托管免费额度决定（静态资源不限量级）；<strong>无并发服务端压力</strong>——所有计算在访客设备上。</li>
+    <li>设备〔假设〕：桌面为主（工程分析、演示汇报），手机 / 平板用于随手查阅与轻操作——v2 将其升级为可用而非凑合。</li>
+  </ul>
+</section>
+
+<!-- ================= 3 范围与边界 ================= -->
+<section class="chapter" id="s3">
+  <h2><span class="no">3</span>范围与边界</h2>
+
+  <h3>3.1 必须做 · P0（v2.0 验收范围）</h3>
+  <table class="tbl">
+    <tr><th style="width:74px">ID</th><th style="width:200px">功能</th><th>一句话定义</th><th style="width:90px">面向旅程</th></tr>
+    <tr><td><span class="mono">FR-01</span></td><td>应用外壳与信息架构</td><td>新导航模型、页面地图、路由与返回语义</td><td>J1–J4</td></tr>
+    <tr><td><span class="mono">FR-02</span></td><td>首页 · 命令中心</td><td>继续实验 / 快速开始 / 路径入口 / 最近分享四区入口</td><td>J1 J3</td></tr>
+    <tr><td><span class="mono">FR-03</span></td><td>学习路径</td><td>路径→步骤→实验+自测，进度本地保存</td><td>J1</td></tr>
+    <tr><td><span class="mono">FR-04</span></td><td>内容包与提交包</td><td>打包一组预置内容 + 题目分发；接收方回传成果（课堂 / 团队 / 教程皆可）</td><td>J2</td></tr>
+    <tr><td><span class="mono">FR-05</span></td><td>实验报告导出</td><td>自包含 HTML 报告（图表数据重绘可打印为 PDF）</td><td>J1 J2</td></tr>
+    <tr><td><span class="mono">FR-06</span></td><td>对比实验 A/B</td><td>同模块多组参数并列/叠加对比</td><td>J1 J2</td></tr>
+    <tr><td><span class="mono">FR-07</span></td><td>实验笔记</td><td>每实验可附笔记，纳入报告</td><td>J1</td></tr>
+    <tr><td><span class="mono">FR-08</span></td><td>命令面板 2.0</td><td>从"跳转"升级为"动作"（含参数预置）</td><td>J3</td></tr>
+    <tr><td><span class="mono">FR-09</span></td><td>统一工作区与交互层</td><td>所有 14 个工具共用布局骨架 + 直接操纵 + 全局撤销 + 输入/显示统一契约（§8.5.1）</td><td>全部</td></tr>
+    <tr><td><span class="mono">FR-10</span></td><td>滤波器设计模块（新）</td><td>IIR/FIR 设计、量化、系数导出——信号链闭环</td><td>J3</td></tr>
+    <tr><td><span class="mono">FR-11</span></td><td>现有十大模块升级</td><td>逐模块体验与功能升级（见 §4.11）</td><td>全部</td></tr>
+    <tr><td><span class="mono">FR-12</span></td><td>移动端与触控体验</td><td>手机/平板一等公民：手势、底部操作条、性能降级</td><td>J1 J3</td></tr>
+    <tr><td><span class="mono">FR-13</span></td><td>导入导出与备份</td><td>统一导出矩阵 + 全量备份/恢复</td><td>全部</td></tr>
+    <tr><td><span class="mono">FR-14</span></td><td>设置中心（基础版）</td><td>主题、交互偏好、存储用量与清理</td><td>全部</td></tr>
+    <tr><td><span class="mono">FR-15</span></td><td>帮助中心更新</td><td>快捷键表、术语表、更新日志、路径指引</td><td>全部</td></tr>
+    <tr><td><span class="mono">FR-16</span></td><td>电影级动画与演示剧场</td><td>每工具 ≥1 段镜头化叙事动画（时间轴 / 旁白 / 可打断 / 60fps）</td><td>全部</td></tr>
+    <tr><td><span class="mono">FR-17</span></td><td>符号标准化体系</td><td>全站唯一符号登记表 + 构建期 lint 校验 + 导出同源</td><td>全部</td></tr>
+    <tr><td><span class="mono">FR-18</span></td><td>工具矩阵扩充</td><td>v2.0 新增 4 个工具（共 14 个）；P1 再增 3 个，持续多样化</td><td>J1 J3</td></tr>
+    <tr><td><span class="mono">FR-19</span></td><td>存量问题重修</td><td>回归网先行 → 全量审计 → 分级修复 → 问题清零为发布条件</td><td>全部</td></tr>
+  </table>
+
+  <h3>3.2 可以做 · P1（v2.x 迭代候选，不构成 v2.0 承诺）</h3>
+  <ul>
+    <li><strong>新工具扩展</strong>：音频信号实验室（麦克风/音频文件 → 实时频谱与滤波试听）、2D 信号视觉化（二维 FFT / 图像卷积）、数据实验室独立化。</li>
+    <li><strong>数据导入增强</strong>：音频文件导入（波形/频谱）、更大数据集分块处理。</li>
+    <li><strong>主题与语言</strong>：英文界面（i18n 资源层）、更多图表配色方案。</li>
+    <li><strong>可选云同步</strong>：Cloudflare Workers/D1 免费额度内的"可选、默认关闭"同步（届时单独评审隐私与账号模型）。</li>
+    <li><strong>题库与路径扩展</strong>：更多路径、按章节组织的题库、错题回顾。</li>
+  </ul>
+
+  <h3>3.3 明确不做 · P2（防止范围蔓延）</h3>
+  <table class="tbl tight">
+    <tr><th style="width:230px">不做的事</th><th>原因</th></tr>
+    <tr><td>账号体系与云端用户数据（v2.0）</td><td>local-first 是产品核心承诺（隐私 + 零成本 + 离线可用）；引入账号将改变数据与合规模型</td></tr>
+    <tr><td>付费 AI 功能（智能解题/问答）</td><td>"全程免费"约束；不做需要付费 API 的能力</td></tr>
+    <tr><td>原生 App / 小程序</td><td>PWA 已覆盖安装与离线诉求；多端原生化与单人开发模式不匹配</td></tr>
+    <tr><td>服务端渲染 / 服务端计算</td><td>与静态托管、离线优先相悖；所有计算留在此刻的浏览器</td></tr>
+    <tr><td>遥测、埋点、广告、支付</td><td>隐私优先；无商业变现需求</td></tr>
+    <tr><td>实时多人协作编辑同一实验</td><td>无后端前提下的复杂度与收益不成正比；以"内容包 + 提交包"异步协作替代</td></tr>
+  </table>
+
+  <h3>3.4 交付形态</h3>
+  <p><strong>响应式 Web 站点 + 可安装 PWA</strong>：桌面（主战场）、平板、手机同一代码；离线可用；通过静态托管全球分发。不产出服务端组件。</p>
+
+  <h3>3.5 最小完整旅程（P0 边界定义）</h3>
+  <table class="tbl tight">
+    <tr><th style="width:130px">要素</th><th>定义</th></tr>
+    <tr><td>进入条件</td><td>打开站点（有无本地数据均可，无需任何注册）</td></tr>
+    <tr><td>P0 动作</td><td>选择一条路径 → 打开预置实验并操作 → 完成自测 → 生成报告</td></tr>
+    <tr><td>完成证据</td><td>路径进度落盘可见；报告文件可离线打开且图表清晰</td></tr>
+    <tr><td>恢复路径</td><td>中途关闭/崩溃 → 重开自动恢复实验与进度；报告失败 → 实验保留、可重试</td></tr>
+    <tr><td>P1 支持</td><td>内容包（分发视角）为增强项，缺失不阻塞本旅程</td></tr>
+  </table>
+</section>
+
+<!-- ================= 4 功能需求 ================= -->
+<section class="chapter" id="s4">
+  <h2><span class="no">4</span>功能需求</h2>
+  <p class="subtitle">本章为主体：19 项 P0 功能的触发、规则、结果状态与异常；交互重的部分内嵌可交互示意。</p>
+
+  <h3>4.0 功能全景</h3>
+  <table class="tbl">
+    <tr><th style="width:74px">ID</th><th style="width:170px">功能</th><th>v2 相较现状的变化</th></tr>
+    <tr><td><span class="mono">FR-01</span></td><td>应用外壳与信息架构</td><td>四分组平铺 → 三层体验（命令中心 / 工作区 / 路径与报告）+ 命令面板常驻</td></tr>
+    <tr><td><span class="mono">FR-02</span></td><td>首页 · 命令中心</td><td>新增页面（v1 无真正的首页）</td></tr>
+    <tr><td><span class="mono">FR-03</span></td><td>学习路径</td><td>全新：路径/步骤/自测/进度</td></tr>
+    <tr><td><span class="mono">FR-04</span></td><td>内容包与提交包</td><td>全新：分享码从"单实验"升级为"一组内容 + 题目"</td></tr>
+    <tr><td><span class="mono">FR-05</span></td><td>实验报告导出</td><td>全新：v1 仅能导出散图/CSV</td></tr>
+    <tr><td><span class="mono">FR-06</span></td><td>对比实验</td><td>全新：参数敏感性对照的核心交互（演示、评审、调参通用）</td></tr>
+    <tr><td><span class="mono">FR-07</span></td><td>实验笔记</td><td>全新：实验从"一次性"变为"可沉淀"</td></tr>
+    <tr><td><span class="mono">FR-08</span></td><td>命令面板 2.0</td><td>跳转 → 动作化（带参数预置、最近动作）</td></tr>
+    <tr><td><span class="mono">FR-09</span></td><td>统一工作区与交互层</td><td>各工具各自布局 → 统一骨架 + 输入/显示统一契约 + 直接操纵 + 全局撤销</td></tr>
+    <tr><td><span class="mono">FR-10</span></td><td>滤波器设计器</td><td>新增工具（信号链闭环）：设计 → 验证 → 导出</td></tr>
+    <tr><td><span class="mono">FR-11</span></td><td>十大模块升级</td><td>保留全部能力并逐项增强（§4.11）</td></tr>
+    <tr><td><span class="mono">FR-12</span></td><td>移动端体验</td><td>可用 → 好用</td></tr>
+    <tr><td><span class="mono">FR-13</span></td><td>导入导出与备份</td><td>补齐"全量备份/恢复"与统一导出入口</td></tr>
+    <tr><td><span class="mono">FR-14</span></td><td>设置中心</td><td>新增：主题/交互/存储管理</td></tr>
+    <tr><td><span class="mono">FR-15</span></td><td>帮助中心</td><td>弹窗说明 → 结构化帮助中心</td></tr>
+    <tr><td><span class="mono">FR-16</span></td><td>电影级动画与演示剧场</td><td>全新：动画从"示意"升级为"作品"（见 §4.16）</td></tr>
+    <tr><td><span class="mono">FR-17</span></td><td>符号标准化体系</td><td>全新：教科书级符号统一（见 §4.17）</td></tr>
+    <tr><td><span class="mono">FR-18</span></td><td>工具矩阵扩充</td><td>全新：工具 10 → 14，七类能力覆盖（见 §4.18）</td></tr>
+    <tr><td><span class="mono">FR-19</span></td><td>存量问题重修</td><td>全新：先审计后修复，问题清零（见 §4.19）</td></tr>
+  </table>
+
+  <h3>4.1 FR-01 · 应用外壳与信息架构</h3>
+  <p><strong>目的</strong>：让用户在任何时刻都知道"我在哪、能去哪、怎么最快到"。</p>
+  <table class="tbl">
+    <tr><th style="width:150px">项</th><th>定义</th></tr>
+    <tr><td>页面地图</td><td>① 首页（命令中心） ② 学习路径（列表 + 路径详情） ③ 工作区（14 个工具共用骨架） ④ 实验管理（列表/详情/快照） ⑤ 报告预览 ⑥ 设置 ⑦ 帮助中心</td></tr>
+    <tr><td>桌面导航</td><td>左侧固定侧栏（分组 + 模块）+ 顶栏（面包屑 / 命令按钮 / 主题）+ 全局命令面板；侧栏可折叠为图标条</td></tr>
+    <tr><td>移动导航</td><td>底部标签栏（命令中心/路径/工作区/我的）+ 抽屉完整索引 + 手势返回</td></tr>
+    <tr><td>路由与返回语义</td><td>hash 路由优先级：<code>#exp=</code>/<code>#pkg=</code>（导入）＞ 路径/模块路由 ＞ 默认首页；浏览器返回 = 回到上一视图且不丢当前输入（与 history 集成）；实验激活期间沿用"抑制旧版单输入 hash"规则</td></tr>
+    <tr><td>全局交互基线</td><td>⌘K 任何页面可用；Esc 逐层关闭（面板→弹层→抽屉）；所有破坏性操作（删除实验/重置进度）二次确认且可撤销</td></tr>
+  </table>
+
+  <h3>4.2 FR-02 · 首页 · 命令中心</h3>
+  <p><strong>目的</strong>：把"从哪开始"的决策成本降到一次点击。用户打开站点后 5 秒内可进入任意一种模式（继续 / 模板 / 路径 / 分享）。</p>
+  <table class="tbl">
+    <tr><th style="width:130px">区块</th><th>内容与规则</th></tr>
+    <tr><td>继续实验</td><td>最近一次实验（含模块、名称、自动保存时间）；一键回到工作区原状态。无实验时降级为路径引导卡</td></tr>
+    <tr><td>快速开始</td><td>模板卡 12 个〔建议〕（v1 为 6 个），按四大分组呈现；点击 = 建实验并进入工作区</td></tr>
+    <tr><td>学习路径入口</td><td>3 条内置路径卡片（进度条 + 继续按钮）</td></tr>
+    <tr><td>最近与分享</td><td>最近实验/分享导入记录 ≤6 条；支持固定收藏</td></tr>
+    <tr><td>异常</td><td>本地存储不可用（隐私模式/配额满）→ 顶部常驻提示"当前为临时会话，数据不会保存"，功能可继续使用</td></tr>
+  </table>
+
+  <div class="demo" data-demo="A">
+    <div class="cap"><b>交互示意 A</b><span>首页"命令中心" + 命令面板（可输入过滤、↑↓ 选择、Enter 执行）</span></div>
+    <div class="body">
+      <div class="d-shell">
+        <div class="d-bar">
+          <span class="d-dot"></span><span class="d-dot"></span><span class="d-dot"></span>
+          <span style="margin-left:6px">信号与控制实验平台</span>
+          <span style="flex:1"></span>
+          <button class="d-kbd" data-da-open>⌘K 命令面板</button>
+        </div>
+        <div style="padding:12px;position:relative">
+          <div class="d-row">
+            <div class="d-side">
+              <div class="d-navp on">◧ 命令中心</div>
+              <div class="d-navp">◈ 学习路径</div>
+              <div class="d-navp">∿ 信号与变换</div>
+              <div class="d-navp">⌁ 系统与控制</div>
+              <div class="d-navp">✎ 工具与参考</div>
+            </div>
+            <div class="d-main">
+              <div class="card" style="display:flex;align-items:center;gap:14px;margin-bottom:10px">
+                <div style="flex:1">
+                  <div class="caption">继续上次实验</div>
+                  <div style="font-weight:700;font-size:14.5px">二阶系统 · 根轨迹 K=3.2</div>
+                  <div class="caption">系统分析 · 2 分钟前自动保存</div>
+                </div>
+                <button class="btn primary" data-da-toast="已回到工作区原状态（示意）">继续 →</button>
+              </div>
+              <div class="caption" style="margin:2px 0 6px">快速开始 · 模板</div>
+              <div class="grid g3" style="gap:8px">
+                <div class="d-card" data-da-toast="已创建实验：超前校正（示意）"><div style="font-weight:600;font-size:13px">超前校正</div><div class="caption">系统分析</div></div>
+                <div class="d-card" data-da-toast="已创建实验：数字谐振器（示意）"><div style="font-weight:600;font-size:13px">数字谐振器</div><div class="caption">Z 变换</div></div>
+                <div class="d-card" data-da-toast="已创建实验：方波合成（示意）"><div style="font-weight:600;font-size:13px">方波合成</div><div class="caption">傅立叶级数</div></div>
+              </div>
+            </div>
+          </div>
+          <div class="d-pal" data-da-pal>
+            <input data-da-q placeholder="搜索模块 / 动作 / 实验 / 路径…  （Esc 关闭）">
+            <div class="pl" data-da-list></div>
+          </div>
+          <div class="d-toast" data-da-toastbox></div>
+        </div>
+      </div>
+    </div>
+    <div class="foot">对应 FR-02 / FR-08；动效、密度与最终文案以实现为准。</div>
+  </div>
+
+  <h3>4.3 FR-03 · 学习路径</h3>
+  <p><strong>目的</strong>：为需要系统学习的用户（学生、转行者、复习者）提供<strong>可选</strong>的路径式体验：把 14 个工具按需串成"有起点、有进度"的学习 / 复习路径；<strong>不强制</strong>——专业用户可完全不进路径，直接使用工具。</p>
+  <table class="tbl">
+    <tr><th style="width:130px">项</th><th>定义</th></tr>
+    <tr><td>结构</td><td>路径 = 元信息（标题/简介/难度/预计步数）+ 步骤列表；步骤 = 标题 + 导读（2–3 句）+ 关联实验（模块 + 预置参数）+ 要点卡 + 自测题（3–5 题）</td></tr>
+    <tr><td>完成条件</td><td>打开过关联实验（≥1 次有效操作）且自测得分 ≥60%〔建议阈值，待确认〕；可重做，记录最高分；不锁定顺序但默认推荐顺序</td></tr>
+    <tr><td>内置路径〔建议〕</td><td>① 信号与系统入门（10 步：正弦/级数/采样/拉普拉斯/Z/频响）② 控制系统入门（10 步：模型/波特/稳定性/根轨迹/PID/离散）③ 工程师速查（6 步：传函分析/PID 整定/离散化/滤波器设计/数据导出）</td></tr>
+    <tr><td>进度</td><td>按路径本地保存（已完成步骤、最高分、最后位置）；支持"重置进度"（二次确认）</td></tr>
+    <tr><td>异常</td><td>预置实验加载失败 → 以模块默认状态打开并提示；题目数据校验失败 → 跳过该题并标注原因；路径更新（版本升级）→ 保留已获进度，新增步骤标为"未开始"</td></tr>
+  </table>
+
+  <div class="demo" data-demo="B">
+    <div class="cap"><b>交互示意 B</b><span>学习路径：点击步骤查看详情；"标记完成"演示进度推进</span></div>
+    <div class="body">
+      <div class="d-shell" style="padding:14px;position:relative">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+          <div style="flex:1">
+            <div style="font-weight:700">信号与系统入门</div>
+            <div class="caption">6 步（示意） · 关联 4 个实验 · 每步 3 题自测</div>
+          </div>
+          <div class="caption" data-db-progtext>2 / 6 完成</div>
+        </div>
+        <div class="d-prog" style="margin-bottom:12px"><i data-db-bar style="width:33%"></i></div>
+        <div class="d-row">
+          <div class="d-side" style="flex:0 0 250px" data-db-steps></div>
+          <div class="d-main card" data-db-detail style="min-height:170px"></div>
+        </div>
+        <div class="d-toast" data-db-toastbox></div>
+      </div>
+    </div>
+    <div class="foot">对应 FR-03；正式版路径与题库清单将在 M2 前单独提交审批。</div>
+  </div>
+
+  <h3>4.4 FR-04 · 内容包与提交包</h3>
+  <p><strong>目的</strong>：让任何人"零门槛"分发一组预置内容、让接收方"零门槛"交付成果——课堂布置、团队评审、教程分发皆可；全程无账号、无服务器，以链接 / 文件为流通载体。</p>
+  <table class="tbl">
+    <tr><th style="width:130px">环节</th><th>规则</th></tr>
+    <tr><td>分发者 · 组装</td><td>在工作台选择：路径（或步骤子集）＋ 预置实验状态 ＋ 自测题（可自定义增删）＋ 元信息（标题/说明/建议时长[自填]）；生成 <code>#pkg=</code> 分享链接</td></tr>
+    <tr><td>体积降级</td><td>内容超出链接上限（6000 字符级）→ 自动降级为 <code>.fltpkg</code> 文件下载（导入方式相同）</td></tr>
+    <tr><td>接收方 · 接收</td><td>打开链接 → 预览摘要（标题/步骤数/说明）→ "开始" = 复制到本地并进入第 1 步；原分享者数据不受影响</td></tr>
+    <tr><td>接收方 · 提交</td><td>完成后"生成提交包"：含每题答案、得分、报告（若有）、完成时间；导出为链接或文件，经任意渠道回传</td></tr>
+    <tr><td>分发者 · 查看</td><td>打开提交包 → 成绩单视图（各步骤/题目得分 + 报告入口）；可导出汇总 CSV</td></tr>
+    <tr><td>异常</td><td>包校验失败（篡改/截断）→ 明确拒绝并说明；版本不兼容 → 提示"请升级后再打开"；重复导入 → 幂等，不产生重复实验</td></tr>
+  </table>
+
+  <h3>4.5 FR-05 · 实验报告导出</h3>
+  <p><strong>目的</strong>：给每个实验一个"出口"——一份可提交、可打印、可离线打开的专业报告。</p>
+  <table class="tbl">
+    <tr><th style="width:130px">项</th><th>定义</th></tr>
+    <tr><td>触发</td><td>结果工具栏"生成报告"（实验已激活时可用，任意模块）</td></tr>
+    <tr><td>报告内容</td><td>① 封面：实验名/模块/时间/版本 ② 输入与参数快照（表格化） ③ 主图表（<strong>由数据重绘</strong>而非截屏，保证矢量级清晰度） ④ 关键指标读数 ⑤ 相关公式（含无 KaTeX 时的纯文本降级） ⑥ 实验笔记 ⑦ 自测结果（若来自路径）</td></tr>
+    <tr><td>格式</td><td>单文件自包含 HTML（无外部依赖，离线可开）；内置打印样式 → 浏览器"打印为 PDF"即为标准 PDF 报告</td></tr>
+    <tr><td>状态</td><td>生成中（进度提示）→ 完成（预览 + 下载）→ 失败（实验数据完整保留，可重试；失败原因明示）</td></tr>
+    <tr><td>异常</td><td>数据量超限〔阈值待定〕→ 提示"精简数据/仅保留主图"选项；无笔记/无自测 → 对应区块自动隐藏，不留空壳</td></tr>
+  </table>
+  <div class="note"><div class="hd">为什么"数据重绘"而不是截图</div>同一份实验，在 4K 屏与手机屏上导出报告都应清晰一致；重绘还能让报告体积可控、可被将来版本重新解析。这是"高端交付物"与"随手截图"的分水岭。</div>
+
+  <h3>4.6 FR-06 · 对比实验 A/B</h3>
+  <p><strong>目的</strong>：让"改一个参数、看两遍结果"变成并排可见——这是观察（并传达）参数敏感性最有效的交互。</p>
+  <table class="tbl">
+    <tr><th style="width:130px">项</th><th>定义</th></tr>
+    <tr><td>对比组</td><td>把当前模块状态保存为命名对比组（A/B/C/D，≤4 组，可重命名/删除）；"应用为当前"可跳回任一组继续编辑</td></tr>
+    <tr><td>呈现方式</td><td>曲线类（波特/响应/频响）：叠加显示 + 图例对比；指标类：并排读数表（差值列自动计算）</td></tr>
+    <tr><td>适用模块</td><td>P0：系统分析 / PID / Z 变换 / 拉普拉斯 / 傅立叶变换 / 滤波器设计；框图对比为 P1</td></tr>
+    <tr><td>规则</td><td>仅同模块可对比（跨模块对比给出明确提示）；对比组随实验一起保存；报告可附对比图</td></tr>
+    <tr><td>异常</td><td>数据量过大 → 自动退化为"仅指标对比"并说明；参数不一致项在差值列标注"—"而非臆造数值</td></tr>
+  </table>
+
+  <h3>4.7 FR-07 · 实验笔记</h3>
+  <p><strong>目的</strong>：实验不止于操作——允许边做边记，笔记随实验保存并进入报告。</p>
+  <table class="tbl tight">
+    <tr><th style="width:130px">项</th><th>定义</th></tr>
+    <tr><td>能力</td><td>轻量 Markdown 子集：标题 / 列表 / 粗体 / 行内公式（本地渲染）；纯文本输入即所见。</td></tr>
+    <tr><td>位置与保存</td><td>工作区"笔记"面板（可折叠）；输入防抖自动保存进实验，无需手动操作。</td></tr>
+    <tr><td>流转</td><td>纳入实验报告与内容包提交包；分享实验时笔记随状态一起分享（接收方可另存）。</td></tr>
+    <tr><td>异常</td><td>公式渲染失败 → 显示原始文本（不打断输入）；超长笔记（&gt;32KB〔建议上限〕）→ 提示精简。</td></tr>
+  </table>
+
+  <h3>4.8 FR-08 · 命令面板 2.0</h3>
+  <table class="tbl">
+    <tr><th style="width:150px">维度</th><th>v1 现状</th><th>v2 目标</th></tr>
+    <tr><td>可搜索对象</td><td>模块 / 实验 / 模板</td><td>＋ 动作、路径与步骤、最近分享、设置项</td></tr>
+    <tr><td>命中后行为</td><td>仅跳转</td><td>"动作化"：跳转并预置参数（如"用 K=6 打开根轨迹"）、直接执行（新建实验 / 导出报告 / 切换主题）</td></tr>
+    <tr><td>智能排序</td><td>多词 AND 匹配</td><td>模糊匹配 + 最近使用加权 + 空结果兜底建议（"未找到？创建新实验"）</td></tr>
+    <tr><td>键盘</td><td>↑↓/Enter/Esc</td><td>＋ Tab 切分组、⌘1–9 直选前 9 项、Enter 执行后保留面板（连续操作）</td></tr>
+  </table>
+  <p class="caption">交互见上方"交互示意 A"。</p>
+
+  <h3>4.9 FR-09 · 统一工作区与交互层</h3>
+  <p><strong>目的</strong>：14 个工具共享同一套"手感和秩序"——学会一个模块 = 学会全部模块。</p>
+  <table class="tbl">
+    <tr><th style="width:150px">机制</th><th>定义</th></tr>
+    <tr><td>布局骨架</td><td>顶栏（模块名 · 实验名 · 工具栏）＋ 三区（参数区 ≤320px ｜ 主内容区 ｜ 分析区）＋ 底部结果条（关键指标 + 导出动作）；每个区域可独立折叠，支持"专注模式"（仅主内容区）</td></tr>
+    <tr><td>直接操纵</td><td>数值标签可横向拖拽调值（步长随数量级自适应，按住 Shift 精调）；滑杆与输入框双向绑定；图上对象（极点/零点/参数点）拖拽即时重算</td></tr>
+    <tr><td>全局撤销</td><td>统一 undo 栈：模块输入级 ≥30 步（⌘Z / ⌘⇧Z），叠加实验级快照；"撤销"永远不要求用户先想清楚</td></tr>
+    <tr><td>状态体系</td><td>空态 / 加载态 / 错误态 / 降级态（如 KaTeX 缺失）统一视觉与文案模板；所有长任务有进度反馈与取消入口</td></tr>
+    <tr><td>结果条</td><td>导出动作统一收口：PNG · SVG · CSV · JSON · 报告 · 分享；禁用项给出原因提示（而非静默灰掉）</td></tr>
+    <tr><td><strong>输入 / 显示统一</strong></td><td>所有工具的输入控件与显示形态出自同一组件库（《输入与显示统一契约》§8.5.1）：学会一个 = 学会全部；杜绝原生控件混用与自造样式</td></tr>
+  </table>
+
+  <div class="demo" data-demo="C">
+    <div class="cap"><b>交互示意 C</b><span>统一工作区骨架：三区布局 · 面板折叠 · 专注模式 · A/B 对比</span></div>
+    <div class="body">
+      <div class="d-shell" style="position:relative">
+        <div class="d-bar">
+          <span style="font-weight:700;color:var(--ink)">系统分析</span>
+          <span class="caption">二阶系统 · 已自动保存</span>
+          <span style="flex:1"></span>
+          <button class="d-kbd" data-dc-tl>参数栏</button>
+          <button class="d-kbd" data-dc-tr>分析栏</button>
+          <button class="d-kbd" data-dc-tz>专注</button>
+          <button class="d-kbd" data-dc-tb>A/B 对比</button>
+        </div>
+        <div class="d-row" style="padding:10px;flex-wrap:wrap">
+          <div class="d-side" data-dc-left style="flex:0 0 172px">
+            <div class="card"><div class="caption">增益 K</div><div style="font:600 15px var(--mono);color:var(--ink)">3.20</div><input type="range" min="0" max="10" step="0.1" value="3.2" style="width:100%"></div>
+            <div class="card"><div class="caption">阻尼 ζ</div><div style="font:600 15px var(--mono);color:var(--ink)">0.35</div><input type="range" min="0" max="1.2" step="0.01" value="0.35" style="width:100%"></div>
+          </div>
+          <div class="d-main" style="min-width:220px">
+            <div class="d-canvas">
+              <svg class="wave" viewBox="0 0 400 150" preserveAspectRatio="none">
+                <path d="M0 118 C30 30 62 26 95 112 C128 152 168 46 205 48 C246 50 292 118 400 64" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round"/>
+                <path data-dc-b d="M0 130 C40 60 80 58 118 126 C158 152 196 74 236 76 C286 78 330 132 400 96" fill="none" stroke="var(--violet)" stroke-width="2" stroke-dasharray="6 5" style="display:none"/>
+              </svg>
+              <span class="pill" data-dc-badge style="display:none;position:absolute;top:8px;left:8px;border-color:var(--violet);color:var(--violet)">对比组 B · K=6.4</span>
+            </div>
+            <div class="pillrow" style="margin-top:8px">
+              <span class="pill">PNG</span><span class="pill">SVG</span><span class="pill">CSV</span><span class="pill">报告</span><span class="pill">笔记</span>
+            </div>
+          </div>
+          <div class="d-side" data-dc-right style="flex:0 0 148px">
+            <div class="card"><div class="caption">相位裕度</div><div style="font:700 17px var(--mono);color:var(--ink)">41.6°</div></div>
+            <div class="card"><div class="caption">截止频率</div><div style="font:700 17px var(--mono);color:var(--ink)">3.4<span class="caption"> rad/s</span></div></div>
+          </div>
+        </div>
+        <div class="d-toast" data-dc-toastbox></div>
+      </div>
+    </div>
+    <div class="foot">对应 FR-06 / FR-09；骨架固定、内容由各模块填充——保证"学一个 = 学会全部"。</div>
+  </div>
+
+  <h3>4.10 FR-10 · 新模块：滤波器设计</h3>
+  <p><strong>目的</strong>：补齐信号链最后一环（分析 → 设计 → 验证 → 导出），并为"工程师速查"路径提供终点。</p>
+  <table class="tbl">
+    <tr><th style="width:130px">环节</th><th>定义</th></tr>
+    <tr><td>设计输入</td><td>类型（IIR：Butterworth / Chebyshev I / Chebyshev II；FIR：窗函数法 rect / hamming / hanning / blackman）+ 规格（通带/阻带边界、Rp/Rs、采样率）→ 自动阶数估计</td></tr>
+    <tr><td>结果视图</td><td>幅频 / 相频 / 群时延 / 零极点（复用复平面组件）/ 脉冲与阶跃响应；与"系统分析"一键交接</td></tr>
+    <tr><td>工程化</td><td>系数量化对比（不同字长下的频响劣化）、系数导出 CSV、一键生成报告</td></tr>
+    <tr><td>异常</td><td>规格不可达 → 明确建议（如"增大阶数或放宽 Rs"）；阶数过高（&gt;20〔建议〕）→ 提示数值风险</td></tr>
+  </table>
+
+  <h3>4.11 FR-11 · 现有十大模块升级清单</h3>
+  <table class="tbl">
+    <tr><th style="width:130px">模块</th><th>全部保留</th><th>v2 升级点</th></tr>
+    <tr><td>工作台</td><td>实验/快照/模板/导入导出</td><td>并入命令中心（FR-02）；模板扩充至 12+；实验支持标签与固定</td></tr>
+    <tr><td>傅立叶级数</td><td>画圈动画/手绘/谐波/3D 瀑布</td><td>对比模式（不同项数叠加）；导出 SVG；形状库扩充</td></tr>
+    <tr><td>傅立叶变换</td><td>时频联动/卷积定理/采样重建</td><td>双信号对比；Parseval 指标并入结果条</td></tr>
+    <tr><td>拉普拉斯</td><td>s 平面/ROC/反变换/性质验证</td><td>极零点拖拽实时读指标；ROC 面板可视化升级</td></tr>
+    <tr><td>Z 变换</td><td>单位圆/Jury/频响/递推/s↔z</td><td>与滤波器设计互通；稳定裕度可视化</td></tr>
+    <tr><td>系统分析</td><td>波特/奈奎斯特/根轨迹/裕度/误差</td><td>三图同屏（桌面宽屏）或快速切换；K 滑杆并入参数区范式</td></tr>
+    <tr><td>PID 整定</td><td>环路仿真/整定/寻优/扰动</td><td>寻优进度可取消；对比组（整定前/后一键对比）</td></tr>
+    <tr><td>系统框图</td><td>编辑器/避障/求解/采样分析</td><td>符号体系统一到新设计语言；框图对比（P1）；连线手感升级</td></tr>
+    <tr><td>交互求解</td><td>五页签/符号变换/方程/数据/语音</td><td>结果区并入统一结果条与报告出口；更高数据规模</td></tr>
+    <tr><td>公式推导</td><td>性质表/逐步推导/自定义推导</td><td>推导结果可"发送到"其他模块（如送 LaTeX 到报告）</td></tr>
+  </table>
+  <p class="caption">以上每一项升级都必须同时接入《输入与显示统一契约》（§8.5.1）与《符号登记表》（§8.11）——这是升级清单的隐含验收条件。</p>
+
+  <h3>4.12 FR-12 · 移动端与触控体验</h3>
+  <table class="tbl tight">
+    <tr><th style="width:130px">项</th><th>定义</th></tr>
+    <tr><td>手势</td><td>沿用单指平移/双指捏合（v1 已有）；新增：长按 = 上下文菜单、双击图框 = 复位、屏幕边缘横滑 = 返回上层</td></tr>
+    <tr><td>布局</td><td>参数/分析区改为底部抽屉；主内容满宽；底部固定"主操作条"（当前模块 2–3 个关键动作 + 更多）</td></tr>
+    <tr><td>触控目标</td><td>全部可点元素 ≥44×44px；滑杆拖拽热区加宽</td></tr>
+    <tr><td>性能降级</td><td>低端设备自动降采样/降低动画密度（不降功能）；横竖屏切换不丢状态</td></tr>
+    <tr><td>安装与离线</td><td>首访后可安装；离线打开完整可用（含路径与报告）</td></tr>
+  </table>
+
+  <h3>4.13 FR-13 · 导入导出与备份</h3>
+  <table class="tbl">
+    <tr><th style="width:150px">能力</th><th>定义</th></tr>
+    <tr><td>统一导出矩阵</td><td>每模块：PNG（位图）· SVG（矢量图表，新增）· CSV（数据）· JSON（模块状态）· 报告（FR-05）；统一入口在结果条，禁用项给出原因</td></tr>
+    <tr><td>导入</td><td>实验 JSON / 分享码 PX1·PX2 / 内容包 <code>#pkg=</code> 或 <code>.fltpkg</code> / 提交包 / 全量备份文件</td></tr>
+    <tr><td>全量备份</td><td>一键导出"全部实验 + 路径进度 + 笔记 + 设置"单文件；恢复支持"合并（推荐）/ 覆盖"两种模式（覆盖需二次确认）</td></tr>
+    <tr><td>冲突策略</td><td>同 id 重复导入 → 幂等更新（不复制）；命名冲突 → 自动追加序号</td></tr>
+    <tr><td>异常</td><td>文件损坏/版本过高 → 拒绝并给出可读原因（延续 v1 拒绝式校验哲学）</td></tr>
+  </table>
+
+  <h3>4.14 FR-14 · 设置中心（基础版）</h3>
+  <table class="tbl tight">
+    <tr><th style="width:150px">分组</th><th>项</th></tr>
+    <tr><td>外观</td><td>主题（浅 / 深 / 跟随系统）· 动效（完整 / 精简）· 图表配色（默认 / 色盲友好〔P1〕）</td></tr>
+    <tr><td>交互</td><td>数值显示精度（小数位）· 角度制/弧度制 · 快捷键表入口</td></tr>
+    <tr><td>数据</td><td>存储用量可视化 · 导出备份 · 导入恢复 · 清空数据（二次确认 + 建议先导出）</td></tr>
+    <tr><td>关于</td><td>版本、更新日志、开源许可、隐私说明（数据不出浏览器）</td></tr>
+  </table>
+
+  <h3>4.15 FR-15 · 帮助中心更新</h3>
+  <p>由弹窗升格为结构化帮助页：快速上手（3 分钟）· 快捷键总表 · 术语表（实验/路径/对比组/内容包…）· 更新日志 · 各模块内联"?"入口（面板内即时解释当前操作）。</p>
+
+  <h3>4.16 FR-16 · 电影级动画与演示剧场</h3>
+  <p><strong>目的</strong>：让"看懂"升级为"被震撼地看懂"——每个核心概念都配一段电影级叙事动画，即"演示剧场"。</p>
+  <table class="tbl">
+    <tr><th style="width:150px">机制</th><th>定义</th></tr>
+    <tr><td>演示剧场（Theater）</td><td>每个工具 ≥1 段编排动画：自动构图 → 分幕讲解（旁白字幕）→ 高潮镜头 → 收尾定格；用户一操作立即接管（动画让位于交互）</td></tr>
+    <tr><td>时间轴控制</td><td>播放 / 暂停 / 逐帧 / 0.25×–2× 速率 / 循环 / 进度拖拽；可键盘控制（空格、←→）</td></tr>
+    <tr><td>镜头语言</td><td>推（zoom-to-feature）· 拉（全局视野）· 摇（跟随极点/相量/轨迹）· 聚光（焦点元素高亮，其余降透明度）· 转场（交叉溶解 / 沿轴推移）· 时间缩放（慢动作解析关键瞬间）</td></tr>
+    <tr><td>视觉品质</td><td>多层辉光（受控 shadowBlur）· 渐变描边 · 网格淡入 · 读数飘字 · 轨迹拖尾；色彩克制，不霓虹乱闪、无频闪</td></tr>
+  </table>
+  <table class="tbl">
+    <tr><th style="width:170px">存量动画（v1 已有）</th><th>电影级升级</th></tr>
+    <tr><td>傅立叶级数 · 画圈套画圈</td><td>相量轨迹拖尾 + 余摆线构图 + 分幕旁白（谐波逐项加入）</td></tr>
+    <tr><td>傅立叶变换 · 卷积翻转平移</td><td>镜头跟随滑动的 g(τ) + 重叠面积聚光 + 慢动作顶点</td></tr>
+    <tr><td>傅立叶变换 · 采样与混叠</td><td>频域折叠动画（谱线"折回"的慢动作）</td></tr>
+    <tr><td>系统分析 · 根轨迹扫描</td><td>K 增长时极点的行进轨迹伴随阻尼比网格淡入</td></tr>
+    <tr><td>系统分析 · 奈奎斯特围线</td><td>D 形围线绕行 + 包围圈计数的聚光标注</td></tr>
+    <tr><td>拉普拉斯/Z · 极点拖动</td><td>极点移动与响应曲线联动的即时慢镜头（弹簧缓动）</td></tr>
+    <tr><td>滤波器设计 · 阶数收敛</td><td>规格区域与频响曲线逐次逼近的过程动画</td></tr>
+  </table>
+  <table class="tbl tight">
+    <tr><th style="width:150px">品质与性能</th><th>标准</th></tr>
+    <tr><td>帧率</td><td>剧场动画 ≥55fps（中端设备）；离屏缓存 + 增量绘制 + 长任务分帧</td></tr>
+    <tr><td>降级</td><td>低端设备自动切换"精华版"动画；reduced-motion 用户 → 静态分步幻灯片模式（功能等价）</td></tr>
+    <tr><td>技术</td><td>自研时间轴引擎：确定性帧驱动、可回放、可逐帧导出；<span class="tag p1">P1</span> 浏览器原生 MediaRecorder 导出 WebM</td></tr>
+  </table>
+
+  <h3>4.17 FR-17 · 符号标准化体系</h3>
+  <table class="tbl tight">
+    <tr><th style="width:130px">项</th><th>定义</th></tr>
+    <tr><td>目标</td><td>全站"教科书级"符号：同一概念只有一个符号，符合主流教材与工程惯例（GB/T、IEC 通用用法）</td></tr>
+    <tr><td>范围</td><td>轴标签、图例、公式、指标、面板文案、提示、导出报告、学习路径内容——全部同源</td></tr>
+    <tr><td>机制</td><td>唯一《符号登记表》（§8.11）→ 组件/绘图/文案/报告统一引用；构建期 lint 扫描违规别名（如 fs / Fs、ωc / wc 混用）；报告模板逐字同源</td></tr>
+    <tr><td>呈现</td><td>KaTeX 渲染；变量斜体、单位正体；数值与单位间空格；轴标注格式统一（dB / ° / rad/s）</td></tr>
+  </table>
+
+  <h3>4.18 FR-18 · 工具矩阵扩充（以工具为主线）</h3>
+  <p><strong>定位</strong>：平台的第一性是"工具箱"——路径与报告是组织层，工具本身必须<strong>又多、又精、又多样</strong>。v2.0 工具总数 <strong>10 → 14</strong>；每个工具都要求"专业级才能 + 电影级呈现 + 标准符号"三位一体。</p>
+  <table class="tbl">
+    <tr><th style="width:180px">工具</th><th style="width:100px">类别</th><th>核心能力</th><th style="width:70px">状态</th></tr>
+    <tr><td>命令中心（首页）</td><td>枢纽</td><td>继续 / 模板 / 路径 / 最近 / 命令面板</td><td>新增</td></tr>
+    <tr><td>傅立叶级数</td><td>变换</td><td>画圈动画 / 手绘 / 谐波 / 3D 瀑布</td><td>升级</td></tr>
+    <tr><td>傅立叶变换</td><td>变换</td><td>时频联动 / 卷积定理 / 采样重建</td><td>升级</td></tr>
+    <tr><td>拉普拉斯变换</td><td>变换</td><td>s 平面 / ROC / 留数反变换 / 性质验证</td><td>升级</td></tr>
+    <tr><td>Z 变换</td><td>变换</td><td>单位圆 / Jury / 频响 / s↔z 三映射</td><td>升级</td></tr>
+    <tr><td>系统分析</td><td>分析</td><td>波特 / 奈奎斯特 / 根轨迹 / 误差 / 状态空间</td><td>升级</td></tr>
+    <tr><td>PID 整定</td><td>设计</td><td>环路仿真 / ZN·CC·CHR / 寻优 / 扰动</td><td>升级</td></tr>
+    <tr><td>系统框图</td><td>仿真</td><td>编辑器 / 求解 / 采样 z 域分析</td><td>升级</td></tr>
+    <tr><td>交互求解</td><td>数据</td><td>表达式 / 符号变换 / 方程 / 序列 / 手绘 / 语音</td><td>升级</td></tr>
+    <tr><td>公式推导</td><td>参考</td><td>性质表 / 逐步推导 / 自定义推导</td><td>升级</td></tr>
+    <tr><td><strong>滤波器设计器</strong></td><td>设计</td><td>IIR（Butterworth/Chebyshev I·II）+ FIR（窗函数法）、量化对比、系数导出</td><td><span class="tag p0">新增</span></td></tr>
+    <tr><td><strong>随机信号实验室</strong></td><td>随机</td><td>噪声类型与参数、功率谱密度、自/互相关、滤波前后对比、统计指标</td><td><span class="tag p0">新增</span></td></tr>
+    <tr><td><strong>调制与通信实验室</strong></td><td>通信</td><td>AM / DSB / FM 调制解调、频谱搬移、采样定理与重建、眼图雏形</td><td><span class="tag p0">新增</span></td></tr>
+    <tr><td><strong>控制系统设计器</strong></td><td>设计</td><td>超前/滞后校正设计、极点配置向导、设计前后对比、灵敏度校核</td><td><span class="tag p0">新增</span></td></tr>
+  </table>
+  <p class="caption">P1 再增 3 个（音频信号实验室 / 2D 信号视觉化 / 数据实验室独立化），持续多样化；每个新工具都必须通过"数值正确性对拍 + 剧场动画 + 符号合规"三项验收。</p>
+
+  <h3>4.19 FR-19 · 存量问题重修（比新增更重要）</h3>
+  <p><strong>背景</strong>：你明确指出存量存在多项问题。v2 的原则是——<strong>先把旧账清干净，再谈新功能</strong>；修复必须伴随回归测试，防止"修一个坏两个"。</p>
+  <table class="tbl">
+    <tr><th style="width:130px">步骤</th><th>做法</th></tr>
+    <tr><td>① 回归网先行</td><td>把现有 30 个测试脚本迁移为回归安全网，并为"已修历史问题"补钉死用例（v1 CHANGELOG 中的修复项逐条回归）</td></tr>
+    <tr><td>② 全量审计</td><td>M0 起对 10 个工具 × 审计维度逐项实机走查（下表），产出《存量问题清单》</td></tr>
+    <tr><td>③ 分级</td><td>P0 阻断（功能不可用 / 数值错误）→ 立即修；P1 体验（交互不一致 / 视觉缺陷 / 文案符号）→ 批量修；P2 润色 → 收尾修</td></tr>
+    <tr><td>④ 修复批次</td><td>修复并入 M1–M4；每项修复补对应测试或走查记录（防复发）</td></tr>
+    <tr><td>⑤ 清零验收</td><td>"存量问题清零（无未关闭的 P0/P1）"是 M4 发布硬条件</td></tr>
+  </table>
+  <table class="tbl tight">
+    <tr><th style="width:150px">审计维度</th><th>检查点示例</th></tr>
+    <tr><td>功能正确性</td><td>经典案例数值对拍（如 Ku=6 / Tu=4.443）；极端参数不崩溃</td></tr>
+    <tr><td>交互一致性</td><td>折叠行为、工具栏动作、快捷键、空态/错误态在全工具的差异清单</td></tr>
+    <tr><td>视觉与布局</td><td>360px–4K、双主题、中屏断点、图表遮挡与溢出</td></tr>
+    <tr><td>文案与符号</td><td>术语一致、符号合规（对接 FR-17）、错误信息可读</td></tr>
+    <tr><td>性能与内存</td><td>长时间使用无泄漏、重计算不阻塞、移动端发热与掉帧</td></tr>
+    <tr><td>兼容与离线</td><td>四大浏览器、iOS/Android、断网全功能、存储不可用降级</td></tr>
+    <tr><td>历史问题回归</td><td>移动端遮挡、CDN 依赖、解析回归等已修项逐条复验</td></tr>
+    <tr><td>文档一致性</td><td>文档与实现的版本/数量/描述漂移（已知线索：README 测试数、平台文档版本号滞后）随修复同步订正</td></tr>
+  </table>
+</section>
+
+<!-- ================= 5 非功能需求 ================= -->
+<section class="chapter" id="s5">
+  <h2><span class="no">5</span>非功能需求</h2>
+
+  <h3>5.1 性能预算〔建议目标，随 D3 一并确认〕</h3>
+  <table class="tbl">
+    <tr><th style="width:300px">指标</th><th style="width:190px">预算</th><th>测量方式</th></tr>
+    <tr><td>首屏可交互（本地/静态托管）</td><td>&lt; 1.5s（中端设备）</td><td>Lighthouse / Performance 面板</td></tr>
+    <tr><td>模块切换（已加载）</td><td>&lt; 150ms</td><td>本地计时（不上传）</td></tr>
+    <tr><td>交互帧率（拖拽/动画）</td><td>≥ 50fps（常规图）· ≥ 30fps（重绘负载）</td><td>DevTools FPS / 长任务面板</td></tr>
+    <tr><td>长任务（&gt;50ms）占用主线程</td><td>重计算 ≥90% 在 Worker〔建议〕</td><td>Performance 长任务审查</td></tr>
+    <tr><td>初始包体（gzip）</td><td>&lt; 400KB〔建议〕；模块按需加载，单块 &lt; 150KB</td><td>构建产物报告（build 脚本自动统计）</td></tr>
+    <tr><td>报告生成（典型实验）</td><td>&lt; 5s</td><td>端到端计时</td></tr>
+    <tr><td>内存占用（10 分钟密集使用）</td><td>&lt; 300MB</td><td>浏览器任务管理器采样</td></tr>
+  </table>
+
+  <h3>5.2 可用性与离线</h3>
+  <table class="tbl tight">
+    <tr><th style="width:170px">项</th><th>定义</th></tr>
+    <tr><td>离线能力</td><td>首访在线之后，全部核心功能（14 工具 + 路径 + 报告 + 导入导出）离线可用；KaTeX/字体自托管以消除 CDN 单点</td></tr>
+    <tr><td>SLA</td><td><span class="tag na">不适用</span>静态托管无服务承诺；以"版本可回滚 + 产物校验"保障可用性</td></tr>
+    <tr><td>故障恢复</td><td>数据故障 → 本地导出可恢复；发布故障 → 托管平台回退上一版本（静态资源无迁移）</td></tr>
+    <tr><td>优雅降级</td><td>存储不可用 → 临时会话模式；公式库缺失 → 纯文本公式；低端设备 → 降采样</td></tr>
+  </table>
+
+  <h3>5.3 可扩展性与可维护性</h3>
+  <ul>
+    <li><strong>模块契约稳定</strong>：新模块接入 = 1 个模块文件 + 1 条注册（延续 v1 <code>getState/applyState</code> 契约，升级为版本化状态 + 对比组支持）。</li>
+    <li><strong>单一事实来源</strong>：设计令牌、模块清单、存储键、schema 版本各自唯一登记，构建脚本与测试自动核对（延续 v1 的 lint/build 校验哲学）。</li>
+    <li><strong>类型与文档</strong>：核心数据与契约用 TypeScript 描述（D1 选 A 时）；维护《平台文档》《设计系统文档》《CHANGELOG》三件套。</li>
+    <li><strong>无动态执行</strong>：延续"无 eval / 白名单解析"红线，杜绝新技术栈引入 <code>dangerouslySetInnerHTML</code> 类风险。</li>
+  </ul>
+
+  <h3>5.4 兼容性矩阵〔建议〕</h3>
+  <table class="tbl tight">
+    <tr><th style="width:150px">维度</th><th>支持范围</th></tr>
+    <tr><td>桌面浏览器</td><td>Chrome / Edge ≥ 110 · Firefox ≥ 110 · Safari ≥ 16</td></tr>
+    <tr><td>移动端</td><td>iOS Safari 16+ · Android Chrome 110+</td></tr>
+    <tr><td>输入方式</td><td>鼠标 · 触控 · 触控笔 · 全键盘</td></tr>
+    <tr><td>屏幕</td><td>宽 360px → 4K；横竖屏；<span class="tag p1">P1</span> Windows 高对比度模式完整适配</td></tr>
+    <tr><td>旧引擎</td><td>不支持 IE/旧版 Edge（明确不测试）</td></tr>
+  </table>
+
+  <h3>5.5 易用性与无障碍</h3>
+  <table class="tbl tight">
+    <tr><th style="width:170px">目标</th><th>判定</th></tr>
+    <tr><td>WCAG 2.1 AA（关键项）</td><td>文本对比度 ≥4.5:1 · 全键盘可达（含画布操作的键盘替代）· 焦点可见 · 语义化标签与 ARIA · 尊重 reduced-motion</td></tr>
+    <tr><td>零帮助可上手</td><td>新用户不读文档，3 分钟内完成"从首页到一次实验操作"〔走查验证〕</td></tr>
+    <tr><td>中文排版规范</td><td>全角标点、中英混排间距、数字与单位（等宽数字、单位不换行）</td></tr>
+    <tr><td>错误可理解</td><td>所有报错使用用户语言（如"分子阶次需 ≤ 分母阶次"），禁止原始异常文本直出</td></tr>
+  </table>
+</section>
+
+<!-- ================= 6 技术需求 ================= -->
+<section class="chapter" id="s6">
+  <h2><span class="no">6</span>技术需求</h2>
+  <p class="subtitle">按你的维度要求纳入。PRD 通常不规定实现；此处作为<strong>技术规约</strong>给出方向与约束，最终以《技术方案》随 M0 一并落地。</p>
+
+  <h3>6.1 决策点 D1 · 三条路线对比</h3>
+  <table class="tbl">
+    <tr><th style="width:150px">维度</th><th>A · 渐进式现代化 <span class="tag sug">推荐</span></th><th>B · 零框架精进</th><th>C · 全面框架重写</th></tr>
+    <tr><td>技术形态</td><td>Vite + TypeScript + Preact（~4KB）</td><td>延续 vanilla + 全局命名空间</td><td>React/Next 生态全量重写</td></tr>
+    <tr><td>复用现有资产</td><td>高：数学内核/测试/基线全部复用</td><td>最高（原封封装）</td><td>低（算法可搬，工程资产报废）</td></tr>
+    <tr><td>体验上限</td><td>高（组件化支撑新功能族）</td><td>中（手写 DOM，复杂交互更费力）</td><td>高</td></tr>
+    <tr><td>与 local-first / 静态部署</td><td>完全兼容（产物仍纯静态）</td><td>完全兼容</td><td>偏离（SSR/生态依赖）</td></tr>
+    <tr><td>风险</td><td>中（迁移是渐进可控的）</td><td>低（但新功能开发慢）</td><td>高（大爆炸式替换）</td></tr>
+    <tr><td>无框架品牌</td><td>让位于"高端体验"（推荐取舍）</td><td>保留</td><td>放弃</td></tr>
+  </table>
+  <div class="note"><div class="hd">推荐理由（一句话）</div>v2 的目标是"高端体验 + 功能族扩充"，组件化与类型系统对这两件的杠杆最大；而数学内核与质量基线才是项目的真正资产——方案 A 恰好"只换引擎外壳、不动引擎"。若你更看重"无框架、无构建"的品牌连续性，方案 B 的产品功能范围完全不变。</div>
+
+  <h3>6.2 前端技术栈（按 A 展开）</h3>
+  <table class="tbl">
+    <tr><th style="width:150px">层</th><th style="width:260px">选型</th><th>说明（全部免费/开源）</th></tr>
+    <tr><td>语言</td><td>TypeScript（strict）</td><td>核心数据契约与模块接口有类型；算法内核可渐进标注</td></tr>
+    <tr><td>构建</td><td>Vite</td><td>开发热更新；产物为纯静态（可继续直接静态托管）；构建报告纳入质量门</td></tr>
+    <tr><td>UI 层</td><td>Preact + 自研绘图引擎</td><td>组件管 UI 状态；Canvas/SVG 图表仍走自研引擎（框架无关）</td></tr>
+    <tr><td>样式</td><td>原生 CSS + 设计令牌</td><td>不引 CSS 框架；令牌单一定义、主题切换即变量切换</td></tr>
+    <tr><td>状态</td><td>轻量 store + 模块契约</td><td><code>getState/applyState</code> 升级为版本化接口；实验级撤销栈</td></tr>
+    <tr><td>图表/公式</td><td>自研 + KaTeX（自托管）</td><td>去掉 CDN 依赖：断网/受限网络下公式与字体完好</td></tr>
+    <tr><td>测试</td><td>现有 Node 断言（保留）+ Playwright E2E（新增）</td><td>内核 830 断言是回归安全网；E2E 覆盖 4 条旅程</td></tr>
+    <tr><td>运行时依赖</td><td>仅 Preact（核心计算零依赖）</td><td>延续"算法自研、无 eval"的安全与审计优势</td></tr>
+  </table>
+
+  <h3>6.3 后端 · 数据库 · 消息队列</h3>
+  <table class="tbl tight">
+    <tr><th style="width:170px">项</th><th>结论</th></tr>
+    <tr><td>后端 / API 风格</td><td><span class="tag na">不适用</span>无服务端；不提供 API——所有能力在访客浏览器内完成（local-first 是产品约束而非妥协）</td></tr>
+    <tr><td>数据库 / 缓存 / 消息队列</td><td><span class="tag na">不适用</span>数据持久化 = 浏览器本地存储（§7）；无跨用户数据面</td></tr>
+    <tr><td>计算隔离</td><td>Web Worker 池承担重计算（延续 v1；v2 将覆盖率提升至 ≥90% 长任务）</td></tr>
+  </table>
+
+  <h3>6.4 第三方集成</h3>
+  <table class="tbl tight">
+    <tr><th style="width:190px">集成</th><th>用途</th><th>策略</th></tr>
+    <tr><td>KaTeX（开源库）</td><td>公式渲染</td><td><strong>自托管</strong>（含字体子集）——消除 CDN 单点与隐私顾虑；缺失时纯文本降级保留</td></tr>
+    <tr><td>IBM Plex Sans（OFL 字体）</td><td>界面字体</td><td>自托管可变字体（子集化）；失败回落系统字体栈</td></tr>
+    <tr><td>Web Speech API</td><td>语音输入（沿用 v1 功能）</td><td>浏览器内置能力，仅 Chrome/Edge 可用；不可用时按钮隐藏</td></tr>
+    <tr><td>支付 / 地图 / 短信 / 登录</td><td>—</td><td><span class="tag na">不适用</span>不引入</td></tr>
+  </table>
+
+  <h3>6.5 部署环境</h3>
+  <table class="tbl tight">
+    <tr><th style="width:170px">环境</th><th>形态</th></tr>
+    <tr><td>开发</td><td>本地 Vite dev server（Node 22 LTS，免费）</td></tr>
+    <tr><td>预览</td><td>PR 预览部署（托管平台自带，免费）——每个里程碑交付可在真实 URL 走查</td></tr>
+    <tr><td>生产</td><td>Cloudflare Pages 静态托管（免费套餐；自定义域名可选）</td></tr>
+    <tr><td>Docker / K8s</td><td><span class="tag na">不适用</span>静态站点无容器化需求</td></tr>
+  </table>
+
+  <h3>6.6 架构形态与迁移策略</h3>
+  <ul>
+    <li><strong>形态</strong>：单体静态应用（模块化内核 + 组件化外壳 + Worker 计算层）；不是微服务，也无需 Serverless。</li>
+    <li><strong>迁移原则</strong>：内核"搬运 + ESM 封装"，不重写算法；外壳全部重写；每完成一批即以现有测试 + E2E 回归，里程碑门把关。</li>
+    <li><strong>并行策略</strong>：v2 在独立分支/目录开发；v1 线上持续可用；上线时切换并保留回滚点（D4 决定去留形态）。</li>
+  </ul>
+</section>
+
+<!-- ================= 7 数据需求 ================= -->
+<section class="chapter" id="s7">
+  <h2><span class="no">7</span>数据需求</h2>
+
+  <h3>7.1 数据实体</h3>
+  <table class="tbl">
+    <tr><th style="width:170px">实体</th><th>关键字段</th><th style="width:220px">说明</th></tr>
+    <tr><td><strong>Experiment</strong>（实验）</td><td>schemaVersion / id / name / 时间戳 / favorite / tags / module / moduleStates / compareGroups / notes / snapshots</td><td>v1 schema 超集：新增对比组、笔记；保持拒绝式校验</td></tr>
+    <tr><td><strong>Path</strong>（学习路径）</td><td>id / 标题 / 简介 / steps[]（标题/导读/关联实验/题目）</td><td>内置内容（随版本发布），用户进度另存</td></tr>
+    <tr><td><strong>PathProgress</strong>（路径进度）</td><td>pathId / 已完成步骤 / 各步最高分 / 最后位置 / 更新时间</td><td>本地持久化；可重置</td></tr>
+    <tr><td><strong>CoursePack</strong>（内容包）</td><td>id / 标题 / 说明 / 步骤子集 / 预置实验状态 / 题目 / 版本</td><td>编码为 <code>#pkg=</code> 链接或 <code>.fltpkg</code> 文件</td></tr>
+    <tr><td><strong>Submission</strong>（提交包）</td><td>packId / 接收方作答 / 得分 / 报告引用 / 完成时间</td><td>由接收方导出、分发者打开查看</td></tr>
+    <tr><td><strong>Settings</strong>（设置）</td><td>主题 / 动效 / 精度 / 角弧度制</td><td>轻量键值</td></tr>
+  </table>
+
+  <h3>7.2 关系与规则</h3>
+  <ul>
+    <li>Experiment 1—n CompareGroup；Experiment 1—1 Notes；Experiment 与 Path 步骤通过"预置引用"关联（引用是快照，不随路径更新破坏历史实验）。</li>
+    <li>CoursePack 引用实验状态为<strong>不可变快照</strong>；Submissions 与 CoursePack 通过 packId 关联。</li>
+    <li>分享码：PX1（v1，可读兼容）→ <strong>PX2</strong>（v2，携带 schema 版本与更强校验；超限自动降级为文件）。</li>
+  </ul>
+
+  <h3>7.3 数据来源与清洗</h3>
+  <table class="tbl tight">
+    <tr><th style="width:170px">来源</th><th>处理规则</th></tr>
+    <tr><td>用户输入（表达式/参数）</td><td>统一归一化（全角/π/隐式乘法）→ 白名单解析 → 实时校验定位（沿用 v1 输入层）</td></tr>
+    <tr><td>粘贴数据（两列 t,y 等）</td><td>自动识别采样率；校验时间严格递增、Δt 均匀（沿用 v1 规则）</td></tr>
+    <tr><td>导入（分享/内容包/备份）</td><td>拒绝式校验 + 校验和；损坏即拒绝并给出原因，不做"尽力而为"的静默修复</td></tr>
+    <tr><td>系统预置（模板/路径/题库）</td><td>随版本发布，构建期校验引用完整性</td></tr>
+  </table>
+
+  <h3>7.4 存储介质与配额（决策候选）</h3>
+  <table class="tbl">
+    <tr><th style="width:170px">介质</th><th>用途</th><th>说明</th></tr>
+    <tr><td>IndexedDB〔建议主存储〕</td><td>实验、路径进度、笔记、提交包</td><td>配额远大于 localStorage；异步不阻塞 UI；v1 的 <code>fltp:v1:*</code> 自动迁移</td></tr>
+    <tr><td>localStorage</td><td>设置、主题、最近使用等轻量键值</td><td>同步读取快，适合小数据</td></tr>
+    <tr><td>配额上限〔建议〕</td><td>实验 ≤200 个 · 单实验 ≤1MB · 总占用软上限 50MB 提示</td><td>超限时引导导出归档，而不是静默失败</td></tr>
+  </table>
+  <p class="caption">若 D1 选 B（零框架精进），存储仍建议升级 IndexedDB——它与框架无关，属独立改进。</p>
+
+  <h3>7.5 备份、归档与迁移</h3>
+  <table class="tbl tight">
+    <tr><th style="width:170px">项</th><th>规则</th></tr>
+    <tr><td>备份</td><td>全量备份单文件（实验+进度+笔记+设置）；建议在设置中心一键完成</td></tr>
+    <tr><td>归档</td><td>旧实验可"归档"（移出列表、保留数据），替代删除的心理负担</td></tr>
+    <tr><td>迁移</td><td>schema 版本表逐级迁移；高于当前版本 → 明确拒绝并提示升级；v1→v2 迁移在首次打开时自动执行且有回执提示</td></tr>
+  </table>
+
+  <h3>7.6 隐私、脱敏与合规</h3>
+  <table class="tbl tight">
+    <tr><th style="width:170px">项</th><th>结论</th></tr>
+    <tr><td>数据收集</td><td>零收集：无遥测、无 Cookie 追踪、无第三方分析脚本</td></tr>
+    <tr><td>数据边界</td><td>所有数据仅存于用户浏览器；分享/导出是用户显式的主动动作</td></tr>
+    <tr><td>个人信息（PII）</td><td>产品不要求任何账号或身份信息；实验数据由用户自控，无需服务端脱敏</td></tr>
+    <tr><td>合规适用性</td><td>因不进行服务端个人信息处理，等保/GDPR 等"个人数据处理者义务"场景不直接适用〔非法律意见；上线前如需可在设置/帮助中提供隐私说明页〕</td></tr>
+  </table>
+</section>
+
+<!-- ================= 8 界面与体验 ================= -->
+<section class="chapter" id="s8">
+  <h2><span class="no">8</span>界面与体验</h2>
+
+  <h3>8.1 设计语言：「精密仪器」</h3>
+  <p>三个关键词：<strong>克制</strong>（色彩与装饰只为信息服务）、<strong>精确</strong>（等宽数字、对齐、单位规范）、<strong>层次</strong>（排版与间距建立秩序）。目标观感：像一台做工精良的实验室仪器——而不是一张花哨的幻灯片。</p>
+
+  <h3>8.2 设计语言预览（交互）</h3>
+  <div class="demo" data-demo="D">
+    <div class="cap"><b>交互示意 D</b><span>色板 · 字级 · 组件 —— 点下方按钮或右上角"主题"，整页即时切换双主题</span></div>
+    <div class="body">
+      <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+        <button class="btn primary" data-dd-light>浅色 · 纸感</button>
+        <button class="btn" data-dd-dark>深色 · 夜景</button>
+        <span class="caption" style="align-self:center">双主题同等精致 · 默认跟随系统</span>
+      </div>
+      <div class="grid g4" style="gap:8px">
+        <div class="swatch" style="background:var(--paper);color:var(--ink-2)">paper 背景</div>
+        <div class="swatch" style="background:var(--panel);color:var(--ink-2)">panel 面板</div>
+        <div class="swatch" style="background:var(--accent);color:#fff">accent 主色</div>
+        <div class="swatch" style="background:var(--accent-2);color:#fff">accent-2 辅助</div>
+        <div class="swatch" style="background:var(--violet);color:#fff">violet 对比组</div>
+        <div class="swatch" style="background:var(--amber);color:#fff">amber 注意</div>
+        <div class="swatch" style="background:var(--red);color:#fff">red 错误</div>
+        <div class="swatch" style="background:var(--ink);color:var(--paper)">ink 文字</div>
+      </div>
+      <div style="margin-top:14px" class="grid g2">
+        <div class="card">
+          <div class="caption">字级（层级靠字重与间距，而非字号膨胀）</div>
+          <div style="font-size:22px;font-weight:750;letter-spacing:-.4px;margin:6px 0 2px">标题 22 · 实验与路径标题</div>
+          <div style="font-size:15px;margin:2px 0">正文 15 · 中文优先，行高宽松</div>
+          <div style="font-family:var(--mono);font-size:14px;margin:2px 0">数值 14 等宽 · 3.14159 / 41.6° / 0.707 / K=3.20</div>
+          <div class="caption">说明 12 · 弱化辅助信息</div>
+        </div>
+        <div class="card">
+          <div class="caption" style="margin-bottom:8px">组件（令牌化，双主题一致）</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <button class="btn primary">主按钮</button>
+            <button class="btn">次按钮</button>
+            <span class="pill">芯片</span>
+            <span class="tag p0">徽标</span>
+            <span class="tag sug">已保存</span>
+          </div>
+          <div style="margin-top:10px"><input style="width:100%;padding:7px 10px;border:1px solid var(--line-2);border-radius:8px;background:var(--panel);color:var(--ink);font-family:var(--mono);font-size:13px" value="H(s) = (s+1)/(s^2+2s+2)"></div>
+          <div style="margin-top:10px;display:flex;align-items:center;gap:8px">
+            <input type="range" min="0" max="100" value="60" style="flex:1">
+            <span class="mono plain" style="color:var(--ink);font-weight:600">0.60</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="foot">对应 §8；M0 将交付完整《设计系统文档》（全量令牌、组件状态、动效与可访问性细则）。</div>
+  </div>
+
+  <h3>8.3 色彩系统（令牌）</h3>
+  <table class="tbl tight">
+    <tr><th style="width:150px">令牌</th><th>浅色 · 纸感</th><th>深色 · 夜景</th><th>用途</th></tr>
+    <tr><td><span class="mono">paper / panel</span></td><td>#F6F5F1 / #FFFFFF</td><td>#0B0E14 / #121826</td><td>背景 / 面板</td></tr>
+    <tr><td><span class="mono">ink / ink-2 / ink-3</span></td><td>#1B1F27 / #48525F / #7B8492</td><td>#E9EDF5 / #AAB5C7 / #7E8896</td><td>三级文字</td></tr>
+    <tr><td><span class="mono">accent</span></td><td>#2456CC（钴蓝）</td><td>#5B8BFF</td><td>主色：焦点、主路径、选中</td></tr>
+    <tr><td><span class="mono">accent-2</span></td><td>#0C7C6B（青）</td><td>#3ECFB2</td><td>辅助数据系列</td></tr>
+    <tr><td><span class="mono">violet</span></td><td>#6B4FD8</td><td>#9C86F0</td><td>对比组 B（固定语义）</td></tr>
+    <tr><td><span class="mono">amber / red</span></td><td>#A15C06 / #C7403C</td><td>#E0A44E / #F0736C</td><td>注意 / 错误（仅状态语义）</td></tr>
+  </table>
+  <p class="caption">原则：颜色即语义——主色表"焦点"，紫色表"对比"，语义色仅用于状态；不做彩虹式分类着色。图表配色在深浅主题下保持同序（色盲友好方案列入 P1）。</p>
+
+  <h3>8.4 字体与排版</h3>
+  <table class="tbl tight">
+    <tr><th style="width:150px">项</th><th>规范</th></tr>
+    <tr><td>界面字体</td><td>IBM Plex Sans 可变字体（自托管子集）+ 中文系统字体栈（PingFang / 微软雅黑）</td></tr>
+    <tr><td>数字与公式</td><td>等宽数字（tabular-nums）：指标、坐标、参数对齐不跳动；公式走 KaTeX</td></tr>
+    <tr><td>字级</td><td>12 / 14 / 15 / 17 / 22（标题、正文、数值、说明分工明确）</td></tr>
+    <tr><td>中文排版</td><td>全角标点；中英混排自动间距；单位与数值不换行</td></tr>
+  </table>
+
+  <h3>8.5 组件清单（统一实现）</h3>
+  <div class="pillrow">
+    <span class="pill">按钮（主/次/幽灵/危险）</span><span class="pill">输入框（表达式/数值/文本）</span><span class="pill">数值拖拽</span><span class="pill">滑杆</span><span class="pill">芯片</span><span class="pill">标签页</span><span class="pill">折叠面板</span><span class="pill">工具栏/结果条</span><span class="pill">徽标与状态点</span><span class="pill">空态</span><span class="pill">加载与进度</span><span class="pill">命令面板</span><span class="pill">抽屉</span><span class="pill">弹层与确认</span><span class="pill">气泡提示（toast）</span><span class="pill">上下文菜单</span><span class="pill">图例</span><span class="pill">十字读数</span>
+  </div>
+
+  <h3>8.5.1 输入与显示统一契约（跨工具强制）</h3>
+  <p><strong>一个概念 → 一种控件；一类数据 → 一种显示。</strong>全部 14 个工具必须接入本契约：构建期校验 + 逐工具合规走查（§11.1），杜绝原生控件混用与各工具自造样式。</p>
+  <table class="tbl">
+    <tr><th style="width:160px">输入范式（9 类）</th><th>统一形态与行为</th></tr>
+    <tr><td>数值参数</td><td>三态绑定：文本框 ↔ 滑杆 ↔ 拖拽标签，全工具同一操作模式；步长随量级自适应，Shift 精调；非法输入即时红边 + 具体原因</td></tr>
+    <tr><td>表达式（传函 / 信号 / 方程）</td><td>统一走 MI 组件：同一归一化管线（全角 / π / 隐式乘法）＋ 同一纠错词典 ＋ 三态徽标；禁止各工具自造解析反馈</td></tr>
+    <tr><td>参数变更重算</td><td>防抖统一 300ms；重计算超 300ms 自动转 Worker 并显示进度；连续拖动只保留最新请求（可取消）</td></tr>
+    <tr><td>矩阵 / 极零点列表</td><td>统一矩阵输入：网格态 + 粘贴态双模式、维度即时显示、非法维度就地报错</td></tr>
+    <tr><td>数据序列（粘贴 / 文件）</td><td>统一数据粘贴区：单列 / 两列自动识别、采样率识别、均匀性校验，同一提示语模板</td></tr>
+    <tr><td>枚举 / 模式选择</td><td>统一分段芯片（SegmentedChips）；不以原生 select 作为主形态</td></tr>
+    <tr><td>开关 / 复选框</td><td>统一样式、统一位置（参数区行尾右对齐）、统一焦点环</td></tr>
+    <tr><td>表格编辑（系数 / 对比组）</td><td>统一可编辑表格：单元格编辑规范、Tab / Enter 导航、粘贴多列支持</td></tr>
+    <tr><td>参数组 / 折叠</td><td>统一 FieldGroup：标题 + 说明 + 重置；折叠状态随实验保存</td></tr>
+  </table>
+  <table class="tbl">
+    <tr><th style="width:160px">显示格式（7 类）</th><th>统一形态与行为</th></tr>
+    <tr><td>指标读数</td><td>统一 Metric 卡：标签 + 等宽数字 + 单位不换行；精度由设置中心全局控制；悬停显示定义（指向符号登记表）</td></tr>
+    <tr><td>结果表格</td><td>统一表样式：数值列右对齐等宽、单位独立列、缺失值显示 "—"（不显示 0）</td></tr>
+    <tr><td>公式显示</td><td>统一 KaTeX 容器：失败降级纯文本、一键复制 LaTeX；导出报告逐字同源</td></tr>
+    <tr><td>曲线与图例</td><td>统一色板 / 线型 / 点型（同量纲同色）；图例与十字线读数全站一致</td></tr>
+    <tr><td>状态徽标</td><td>统一三态（ok / warn / err）+ 固定文案模板；颜色之外必须有图标或文字（不以颜色单独表意）</td></tr>
+    <tr><td>空态 / 错误态 / 加载态</td><td>统一模板：图示 + 一句话 + 行动按钮（空态必给下一步）；加载态给出进度与取消</td></tr>
+    <tr><td>提示（toast / 悬停卡）</td><td>统一定位（底部居中）与时长（2.6s）；错误提示必带原因与替代路径</td></tr>
+  </table>
+  <div class="card" style="margin:14px 0">
+    <div class="caption" style="margin-bottom:10px">控件画廊（示意 · 随主题切换；M0 后此为组件的唯一实现）</div>
+    <div class="grid g2" style="gap:14px">
+      <div>
+        <div class="caption">数值三态绑定</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+          <input type="range" min="0" max="100" value="42" style="flex:1">
+          <span class="mono plain" style="font-weight:600;color:var(--ink);border:1px solid var(--line-2);border-radius:6px;padding:3px 8px">0.42</span>
+        </div>
+        <div class="caption" style="margin-top:12px">表达式输入 + 三态徽标</div>
+        <input style="width:100%;margin-top:6px;padding:7px 10px;border:1px solid var(--line-2);border-radius:8px;background:var(--panel);color:var(--ink);font-family:var(--mono);font-size:13px" value="H(s) = (s+1)/(s^2+2s+2)">
+        <div class="pillrow" style="margin-top:6px">
+          <span class="tag sug">✓ 解析正常</span>
+          <span class="tag tbd">! 提示：分子阶次 = 分母阶次</span>
+          <span class="tag" style="background:var(--red-soft);color:var(--red);border-color:transparent">✕ 无法解析：括号未闭合</span>
+        </div>
+      </div>
+      <div>
+        <div class="caption">指标读数（等宽 · 单位不换行）</div>
+        <div class="grid g2" style="gap:8px;margin-top:6px">
+          <div class="card"><div class="caption">相位裕度 PM</div><div style="font:700 16px var(--mono);color:var(--ink)">41.6°</div></div>
+          <div class="card"><div class="caption">稳态误差 ess</div><div style="font:700 16px var(--mono);color:var(--ink)">0.000</div></div>
+        </div>
+        <div class="caption" style="margin-top:12px">分段芯片（图切换）</div>
+        <div class="pillrow" style="margin-top:6px">
+          <span class="pill" style="border-color:var(--accent);color:var(--accent);background:var(--accent-soft);font-weight:600">波特图</span>
+          <span class="pill">奈奎斯特</span>
+          <span class="pill">根轨迹</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="caption">契约落地：控件只允许来自《设计系统》组件库；禁止在工具内手写同类控件；lint 扫描"额外自造控件样式"并报警（M0 定稿清单）。</p>
+
+  <h3>8.6 动效规范</h3>
+  <table class="tbl tight">
+    <tr><th style="width:150px">场景</th><th>时长与缓动</th></tr>
+    <tr><td>微交互（悬停/按下/开关）</td><td>120ms · ease-out</td></tr>
+    <tr><td>面板展开/折叠、抽屉</td><td>180–240ms · cubic-bezier 标准曲线</td></tr>
+    <tr><td>图表首次入场/数据更新</td><td>180ms 内 · 不做循环炫技动画</td></tr>
+    <tr><td>降级</td><td>系统 reduced-motion 或设置"精简"→ 全部动效 ≤60ms 或直接切换</td></tr>
+  </table>
+  <p class="caption">本表约束 UI 层微动效（克制、快速、服务于状态变化）；演示剧场的叙事动画属独立体系，见 §8.10。</p>
+
+  <h3>8.7 页面与屏幕清单</h3>
+  <table class="tbl">
+    <tr><th style="width:150px">页面</th><th>关键区域</th><th>核心操作</th><th style="width:170px">响应式要点</th></tr>
+    <tr><td>首页 · 命令中心</td><td>继续实验 / 模板 / 路径 / 最近</td><td>继续、新建、进路径</td><td>卡片单列堆叠</td></tr>
+    <tr><td>学习路径</td><td>路径列表 & 步骤视图</td><td>选步、做实验、自测</td><td>步骤列表纵向化</td></tr>
+    <tr><td>工作区（14 工具）</td><td>顶栏 / 三区 / 结果条</td><td>调参、观察、导出</td><td>侧区变底部抽屉</td></tr>
+    <tr><td>实验管理</td><td>列表 / 详情 / 快照</td><td>搜索、固定、恢复</td><td>列表行紧凑化</td></tr>
+    <tr><td>报告预览</td><td>报告渲染 / 打印样式</td><td>预览、下载、打印</td><td>单列流式</td></tr>
+    <tr><td>设置 / 帮助</td><td>分组表单 / 文档检索</td><td>偏好、备份、查键位</td><td>分组折叠</td></tr>
+  </table>
+
+  <h3>8.8 交互原则（十条）</h3>
+  <ol>
+    <li><strong>直接操纵优先</strong>：能拖的就不填表；参数就在图上。</li>
+    <li><strong>即时反馈</strong>：交互 &lt;100ms 有响应；长任务必有进度与取消。</li>
+    <li><strong>永远可撤销</strong>：用户敢探索，是体验的上限。</li>
+    <li><strong>渐进披露</strong>：默认折叠次要图表（延续 v1 的克制基因）。</li>
+    <li><strong>一致优于个性</strong>：骨架、快捷键、文案模板全站统一。</li>
+    <li><strong>键盘与鼠标同权</strong>：核心旅程全键盘可完成。</li>
+    <li><strong>空态是引导、错误态是出路</strong>：每个空态都给出下一步按钮；错误必须给原因与替代路径。</li>
+    <li><strong>不打断</strong>：无强制弹窗、无横幅骚扰；提示轻量且可关。</li>
+    <li><strong>数据可视决定论</strong>：同一数据 → 同一张图（算法确定、无随机美化）。</li>
+    <li><strong>尊重用户节奏</strong>：动画可关、状态不丢、刷新可恢复。</li>
+  </ol>
+
+  <h3>8.9 响应式 · 暗色 · 多语言</h3>
+  <table class="tbl tight">
+    <tr><th style="width:150px">项</th><th>规划</th></tr>
+    <tr><td>断点</td><td>&lt;560 手机 ｜ 560–1024 平板/窄屏 ｜ &gt;1024 桌面 ｜ &gt;1440 宽屏（系统分析可三图同屏）</td></tr>
+    <tr><td>暗色</td><td>与浅色同为设计一等公民（D2 决定默认策略）；图表与公式均随主题切换无闪变</td></tr>
+    <tr><td>多语言</td><td>中文为准；英文界面列入 P1（文案集中管理，先打 i18n 地基不做全文翻译）</td></tr>
+  </table>
+
+  <h3>8.10 电影级动效系统（FR-16 展开）</h3>
+  <p>动效分三层，各司其职、互不干扰：</p>
+  <table class="tbl">
+    <tr><th style="width:150px">层级</th><th>职责</th><th style="width:220px">节奏</th></tr>
+    <tr><td>① UI 微动效</td><td>状态反馈（悬停/开关/展开）</td><td>≤240ms，克制（§8.6）</td></tr>
+    <tr><td>② 数据动效</td><td>图表数据变化、参数联动的插值过渡</td><td>180–360ms，弹簧/缓动，可打断</td></tr>
+    <tr><td>③ 演示剧场</td><td>叙事动画：镜头编排 + 旁白 + 分幕</td><td>单段 60–120s，可暂停/循环/逐帧</td></tr>
+  </table>
+  <table class="tbl">
+    <tr><th style="width:150px">镜头语言</th><th>实现要点</th></tr>
+    <tr><td>推 / 拉</td><td>视野平滑缩放至要素（zoom-to-feature）/ 拉回全局；缓入缓出曲线库（标准曲线 5 条）</td></tr>
+    <tr><td>摇 / 跟随</td><td>镜头跟随动点（极点、相量、滑动的卷积核），留白构图</td></tr>
+    <tr><td>聚光 / 压暗</td><td>焦点元素保持全彩，其余降透明度并轻度去饱和</td></tr>
+    <tr><td>转场</td><td>交叉溶解、沿轴推移、网格淡入；不用花哨擦除</td></tr>
+    <tr><td>时间缩放</td><td>关键瞬间 0.25× 慢动作解析；其余 1×</td></tr>
+  </table>
+  <table class="tbl tight">
+    <tr><th style="width:150px">性能与合规</th><th>标准</th></tr>
+    <tr><td>帧率</td><td>≥55fps（中端设备）；离屏缓存、增量绘制、长任务分帧</td></tr>
+    <tr><td>降级</td><td>低端设备"精华版"；reduced-motion → 静态分步 + 键盘翻页（功能等价）</td></tr>
+    <tr><td>禁止项</td><td>频闪、无意义粒子特效、UI 层循环炫技、动画遮挡或阻塞交互</td></tr>
+  </table>
+
+  <h3>8.11 符号与标注规范（FR-17 登记表）</h3>
+  <p>全站唯一符号来源；组件、绘图、文案、报告、路径内容一律引用本表（构建期 lint 校验别名违规）。</p>
+  <table class="tbl">
+    <tr><th style="width:130px">领域</th><th style="width:280px">标准符号</th><th>说明与禁用</th></tr>
+    <tr><td>基本变量</td><td>t (s) · f (Hz) · ω (rad/s) · s = σ + jω · z</td><td>角频率只用 ω，禁用 w；频率用 f；采样频率 fs（禁用 Fs 混写）</td></tr>
+    <tr><td>采样</td><td>采样周期 T · 采样频率 fs · 奈奎斯特频率 fN = fs/2</td><td>下标一律正体；单位与数值间空格</td></tr>
+    <tr><td>二阶系统</td><td>阻尼比 ζ · 自然频率 ωn · 阻尼振荡频率 ωd</td><td>ωd 与 ωn 关系 ωd = ωn√(1−ζ²) 统一表述</td></tr>
+    <tr><td>基本信号</td><td>单位阶跃 u(t) · 单位冲激 δ(t) · sinc(x) · rect(x) · tri(x)</td><td>不用 heaviside（界面文案除外）</td></tr>
+    <tr><td>变换与传函</td><td>ℒ{·} · ℱ{·} · 𝒵{·} · H(s) · G(s) · 开环 L(s) · 闭环 T(s)</td><td>频率响应 H(jω)（连续）/ H(e^{jω})（离散）</td></tr>
+    <tr><td>性能指标</td><td>超调 Mp · 上升时间 tr · 调节时间 ts · 稳态误差 ess · 相位裕度 PM (°) · 幅值裕度 GM (dB) · 增益穿越频率 ωc · 相位穿越频率 ωg · 谐振峰 Mr · 带宽 ωb · 灵敏度峰值 Ms</td><td>下标正体；角度用 °、幅值用 dB</td></tr>
+    <tr><td>控制系统框图</td><td>方框＝传函 · Σ＝求和点（标 ±）· 实心圆＝分支点 · 开关符号＝采样器 · 阶梯符号＝ZOH</td><td>沿用教材符号体系（FR-11 框图同步改造）</td></tr>
+    <tr><td>数字滤波</td><td>H(z) · 系数 b_k / a_k · 量化位数 B · 量化步长 q</td><td>系数按 b0…bM、a0…aN 顺序展示</td></tr>
+    <tr><td>状态空间</td><td>ẋ = Ax + Bu · y = Cx + Du · 能控性矩阵 𝒞 = [B AB ⋯ A^{n−1}B] · 能观性矩阵 𝒪</td><td>矩阵大写正体斜体规范；维度 n ≤ 6</td></tr>
+    <tr><td>坐标与轴标注</td><td>波特图：幅值 (dB) / 相位 (°) vs ω (rad/s，对数轴) · s 平面：σ–jω · z 平面：Re–Im + 单位圆</td><td>轴标签单位紧随其后；对数轴档位标注 1/2/5</td></tr>
+  </table>
+  <p class="caption">呈现规则：变量斜体、单位正体、数值与单位间空格、同页同概念同符号；公式一律 KaTeX（缺失时纯文本降级），导出报告与界面逐字同源。</p>
+</section>
+
+<!-- ================= 9 安全与合规 ================= -->
+<section class="chapter" id="s9">
+  <h2><span class="no">9</span>安全与合规</h2>
+
+  <h3>9.1 安全基线（延续 v1 红线 + v2 收紧）</h3>
+  <table class="tbl">
+    <tr><th style="width:150px">项</th><th>v2.0 要求</th></tr>
+    <tr><td>CSP</td><td>KaTeX/字体自托管后，<code>script-src 'self'</code> 为主（不再需要 CDN 白名单）；<code>worker-src 'self' blob:</code>；<code>connect-src 'self'</code>（无任何数据外发）</td></tr>
+    <tr><td>无动态执行</td><td><code>eval</code> / <code>new Function</code> 全站禁止；表达式一律白名单递归下降解析（v1 红线延续，lint 规则扩展到 TypeScript）</td></tr>
+    <tr><td>依赖供应链</td><td>运行时依赖仅 Preact（锁定版本 + lockfile）；CI 执行依赖审计；构建产物哈希记录可追溯</td></tr>
+    <tr><td>输入与导入校验</td><td>统一归一化 → 白名单解析 → 拒绝式校验（NaN/Infinity/原型污染键/超深/超长）；分享码 PX2 校验和；内容包/提交包同规则</td></tr>
+    <tr><td>Worker 沙箱</td><td>Blob Worker 仅加载内核脚本；被策略拦截或出错时自动回退主线程（结果一致，功能不静默失效）</td></tr>
+    <tr><td>拒绝而非容错</td><td>校验失败=明确拒绝 + 可读原因；不做"尽力修复"式静默处理（避免半损坏数据进入用户存储）</td></tr>
+  </table>
+
+  <h3>9.2 认证 / 授权 / 审计</h3>
+  <p><span class="tag na">不适用</span>：无账号体系、无服务端、无多用户数据面——不存在认证、授权与审计日志场景。分享/内容包是"显式的数据导出动作"，由用户本人发起与持有。</p>
+
+  <h3>9.3 隐私</h3>
+  <p>见 §7.6。要点重申：<strong>零收集、零遥测、零 Cookie 追踪</strong>；所有数据仅存于浏览器；帮助中心/设置中提供《隐私说明》页（一段话讲清"你的数据从未离开这台设备"）。</p>
+
+  <h3>9.4 发布前合规检查项</h3>
+  <ul>
+    <li>无第三方追踪脚本、无外链请求（除自托管资源）；</li>
+    <li>依赖许可清单核对（KaTeX MIT、IBM Plex OFL、Preact MIT 等）并在"关于"页列出；</li>
+    <li>隐私说明与数据导出/清空入口就位；</li>
+    <li>不涉及等保/GDPR 服务端义务〔非法律意见，如需专业意见请另行评审〕。</li>
+  </ul>
+</section>
+
+<!-- ================= 10 部署与运维 ================= -->
+<section class="chapter" id="s10">
+  <h2><span class="no">10</span>部署与运维</h2>
+
+  <h3>10.1 环境</h3>
+  <table class="tbl tight">
+    <tr><th style="width:130px">环境</th><th>形态</th></tr>
+    <tr><td>开发</td><td>本地 Vite dev（Node 22 LTS，全部免费）</td></tr>
+    <tr><td>预览</td><td>每个 PR/里程碑自动生成预览 URL（托管平台自带，免费）</td></tr>
+    <tr><td>生产</td><td>Cloudflare Pages 静态托管（免费套餐；全球 CDN）</td></tr>
+  </table>
+
+  <h3>10.2 CI/CD 流水线</h3>
+  <table class="tbl tight">
+    <tr><th style="width:130px">阶段</th><th>内容</th></tr>
+    <tr><td>提交门</td><td>check（类型/语法）→ lint（安全审计 + 符号登记表 + 引用一致性）→ 单元/契约测试 → build（产物校验与体积报告）</td></tr>
+    <tr><td>集成门</td><td>E2E（12 条旅程）→ 视觉回归（双主题基线）→ 无障碍扫描 → 性能预算（Lighthouse CI）</td></tr>
+    <tr><td>部署</td><td>main 分支自动部署生产；PR 自动预览；部署后冒烟（桌面 + 移动 + 离线）</td></tr>
+  </table>
+
+  <h3>10.3 版本管理</h3>
+  <p>语义化版本 + CHANGELOG（逐版记录，含新增/修复/变更三节）；资源指纹随构建生成；<strong>页面版本 / Service Worker 缓存版本 / package 版本三方一致</strong>由构建脚本强制校验（v1 机制保留并加强）。</p>
+
+  <h3>10.4 监控、日志与告警</h3>
+  <table class="tbl tight">
+    <tr><th style="width:150px">项</th><th>方案（无服务端前提）</th></tr>
+    <tr><td>错误观测</td><td>前端自诊断：控制台零错误为质量门；"生成诊断摘要"按钮一键复制环境/版本/复现步骤（用户自愿粘贴到 Issues）</td></tr>
+    <tr><td>遥测</td><td>默认零遥测；<span class="tag p1">P1</span> 可选 Cloudflare Web Analytics（无 Cookie、无个体追踪），引入前单独说明</td></tr>
+    <tr><td>告警</td><td>无服务端 → 无告警概念；以 CI 失败通知与发布冒烟替代</td></tr>
+  </table>
+
+  <h3>10.5 备份、灾备与扩容</h3>
+  <ul>
+    <li><strong>代码</strong>：Git 仓库（多远端备份可选）；每个里程碑打 tag。</li>
+    <li><strong>用户数据</strong>：产品内一键全量备份（§7.5）；首次迁移前自动导出旧数据副本提示。</li>
+    <li><strong>扩容</strong>：静态托管自动随 CDN 扩容，无容量规划问题；Worker 计算发生在用户设备。</li>
+  </ul>
+
+  <h3>10.6 发布与回滚清单</h3>
+  <ol>
+    <li>质量门全绿（§11.2）；存量问题清单无未关闭 P0/P1；</li>
+    <li>版本号三方同步 + CHANGELOG 更新；</li>
+    <li>部署生产 → 冒烟（桌面 / 移动 / 离线 / 分享链接导入）；</li>
+    <li>回滚 = 托管平台回退到上一版本（静态资源无迁移，秒级生效）。</li>
+  </ol>
+</section>
+
+<!-- ================= 11 测试与质量 ================= -->
+<section class="chapter" id="s11">
+  <h2><span class="no">11</span>测试与质量</h2>
+
+  <h3>11.1 测试分层</h3>
+  <table class="tbl">
+    <tr><th style="width:150px">层</th><th>内容</th></tr>
+    <tr><td>内核单元（保留 + 扩充）</td><td>现有 30 个测试脚本 / 约 830 断言全部迁移；4 个新工具补"经典案例对拍"用例</td></tr>
+    <tr><td>契约测试</td><td>模块状态往返（getState/applyState）、schema 迁移（v1→v2 无损）、分享码 PX1/PX2、内容包/提交包校验</td></tr>
+    <tr><td>E2E（新增 Playwright）</td><td>12 条旅程：路径学习 / 内容分发 / 工程师速查 / 分享接收 / 报告导出 / 对比实验 / 备份恢复 / 命令面板 / 移动端 / 离线 / 主题切换 / 存量回归，覆盖桌面与移动视口 × 双主题</td></tr>
+    <tr><td>视觉回归</td><td>关键页面截图基线（双主题），像素级差异阈值告警</td></tr>
+    <tr><td>性能</td><td>Lighthouse CI 预算门（性能/无障碍/最佳实践）；包体报告；动画帧率自动化采样</td></tr>
+    <tr><td>无障碍</td><td>axe 自动扫描（0 critical）+ 键盘全流程人工走查</td></tr>
+    <tr><td>符号一致性</td><td>lint 扫描全站文案/图表标签/报告模板对照《符号登记表》，别名违规即失败</td></tr>
+    <tr><td>动画确定性</td><td>演示剧场时间轴可指定帧序导出 → 回归比对（防止"动画漂移"）</td></tr>
+    <tr><td>跨工具一致性走查</td><td>输入控件与显示格式逐工具对照《输入与显示统一契约》（§8.5.1）+ lint 扫描自造控件；14/14 通过为发布条件</td></tr>
+  </table>
+
+  <h3>11.2 发布质量门（全部满足）</h3>
+  <ul>
+    <li><code>verify</code> 全绿（check + lint + 单元 + build）；E2E 全部通过；</li>
+    <li>Console 零错误；Lighthouse ≥95〔建议目标〕；</li>
+    <li>包体与帧率预算达标（§5.1）；双主题视觉基线通过；</li>
+    <li>存量问题清单无未关闭 P0/P1；无障碍扫描无 critical。</li>
+  </ul>
+
+  <h3>11.3 测试数据与对拍策略</h3>
+  <ul>
+    <li>确定性种子（随机场景可复现）；</li>
+    <li>经典案例已知答案对拍：Ku=6 / Tu=4.443（ZN）、Parseval 比值=1、卷积定理误差 ~1e-15、Tustin DC 增益守恒；</li>
+    <li>覆盖目标：内核关键路径 ≥85%〔建议，随 M0 基线确认〕。</li>
+  </ul>
+
+  <h3>11.4 缺陷管理</h3>
+  <p>Issue 模板：复现步骤 / 预期 / 实际 / 诊断摘要（版本、环境、浏览器）；严重度分级 P0–P2；每个里程碑交付单附"缺陷状态 + 修复清单 + 回归用例"，未关闭 P0/P1 不得进入下一里程碑验收。</p>
+</section>
+
+<!-- ================= 12 项目管理 ================= -->
+<section class="chapter" id="s12">
+  <h2><span class="no">12</span>项目管理</h2>
+
+  <h3>12.1 角色与协作机制</h3>
+  <table class="tbl tight">
+    <tr><th style="width:150px">角色</th><th>职责</th></tr>
+    <tr><td>AI 开发（我）</td><td>规划、设计、开发、测试、文档、部署准备——全流程执行</td></tr>
+    <tr><td>项目所有者（你）</td><td>验收与方向：已授权"按最推荐执行"，执行期不再逐项等待；每个里程碑接收交付报告并验收</td></tr>
+  </table>
+
+  <h3>12.2 预算（0 元清单）</h3>
+  <table class="tbl tight">
+    <tr><th style="width:220px">项目</th><th>方案</th><th style="width:90px">费用</th></tr>
+    <tr><td>开发工具链</td><td>Vite / TypeScript / Preact / Playwright（全部开源）</td><td>0 元</td></tr>
+    <tr><td>CI/CD</td><td>GitHub Actions（公开仓库免费）</td><td>0 元</td></tr>
+    <tr><td>托管</td><td>Cloudflare Pages 免费套餐</td><td>0 元</td></tr>
+    <tr><td>字体与公式库</td><td>IBM Plex（OFL）/ KaTeX（MIT）自托管</td><td>0 元</td></tr>
+    <tr><td>可选</td><td>自定义域名（如需，自行购买）</td><td>可选自费</td></tr>
+  </table>
+
+  <h3>12.3 里程碑（不含日历工期，按批次推进）</h3>
+  <table class="tbl">
+    <tr><th style="width:70px">批次</th><th style="width:200px">目标</th><th>主要交付</th><th style="width:110px">验收点</th></tr>
+    <tr><td><strong>M0</strong></td><td>基线与设计冻结</td><td>存量审计启动 + 回归网迁移 + 设计系统 v2（令牌/组件/动效/符号登记表）+ 架构骨架（Vite+TS+Preact）</td><td>验收 1</td></tr>
+    <tr><td><strong>M1</strong></td><td>新外壳 + 旗舰工具</td><td>命令中心 / 导航 / 工作区骨架 + 系统分析·PID·Z 三工具迁移 + 符号体系落地 + 存量 P0 修复第一批</td><td>验收 2</td></tr>
+    <tr><td><strong>M2</strong></td><td>全量迁移 + 新工具 + 路径</td><td>存量 10 工具迁移升级 + 4 个新工具（滤波器/随机/调制/控制设计）+ 学习路径与自测</td><td>验收 3</td></tr>
+    <tr><td><strong>M3</strong></td><td>产出与体验</td><td>报告 / 内容包 / 对比 / 笔记 / 设置 / 帮助 + 移动端一等公民 + 存量 P1 修复</td><td>验收 4</td></tr>
+    <tr><td><strong>M4</strong></td><td>剧场与极致</td><td>电影级演示剧场全线 + 性能/无障碍/兼容加固 + 存量问题清零 + 发布</td><td>验收 5（发布）</td></tr>
+  </table>
+  <p class="caption">每个里程碑交付 = 可运行版本 + 验收单（功能 / 质量 / 缺陷 / 遗留）+ 预览 URL；验收以"勾选清单"形式进行，未通过项修复后复验。</p>
+
+  <h3>12.4 风险与应对</h3>
+  <table class="tbl">
+    <tr><th style="width:200px">风险</th><th>应对</th></tr>
+    <tr><td>大范围迁移引入回归</td><td>回归网先行（30 脚本迁移 + E2E）；分批迁移；里程碑门拦截</td></tr>
+    <tr><td>电影级动画性能不达标</td><td>预算前置（≥55fps）；离屏缓存/分帧；分级降级策略；帧率自动化采样</td></tr>
+    <tr><td>工具扩张导致范围失控</td><td>P0 锁定 4 个新工具；其余进 P1 池；每个新工具必须过"对拍 + 剧场 + 符号"三项验收</td></tr>
+    <tr><td>新工具数值错误</td><td>经典案例对拍 + 与现有内核交叉验证（如滤波器 ⇄ 系统分析频响对照）</td></tr>
+    <tr><td>需求持续追加</td><td>一律进入 P1/P2 池并记录，不打断当前里程碑；按版本节奏吸收</td></tr>
+    <tr><td>单人（AI）依赖</td><td>文档化 + CHANGELOG + 测试即知识；任何模块可独立回归与替换</td></tr>
+    <tr><td>免费额度触顶</td><td>静态托管免费额度对本站量级充裕；必要时可平移至其他免费静态托管（产物无锁定）</td></tr>
+  </table>
+
+  <h3>12.5 变更与范围管理</h3>
+  <p>任何新增想法先记入"变更池"（P1/P2），随版本评审吸收；每个版本冻结后不再插入新需求，保证交付节奏与质量。本次追加的四项要求已正式进入 P0（§0.4）。</p>
+</section>
+
+<!-- ================= 13 交付与验收 ================= -->
+<section class="chapter" id="s13">
+  <h2><span class="no">13</span>交付与验收</h2>
+
+  <h3>13.1 交付物清单</h3>
+  <table class="tbl tight">
+    <tr><th style="width:220px">交付物</th><th>说明</th></tr>
+    <tr><td>v2 代码库（分支）</td><td>完整源码 + 构建配置 + CI 配置，可直接构建与部署</td></tr>
+    <tr><td>规划书（本文档）</td><td>产品与执行基线</td></tr>
+    <tr><td>设计系统文档</td><td>令牌 / 组件 / 动效 / 无障碍细则（M0 交付）</td></tr>
+    <tr><td>符号登记表</td><td>全站唯一符号来源（§8.11，随 M0 定稿）</td></tr>
+    <tr><td>平台文档 v2</td><td>架构 / 数据契约 / 安全基线 / 模块接入指引</td></tr>
+    <tr><td>存量问题清单与结案表</td><td>审计结果、修复记录、回归用例（M0 起持续更新）</td></tr>
+    <tr><td>测试套件</td><td>单元 + 契约 + E2E + 视觉基线，可一键运行</td></tr>
+    <tr><td>报告模板与用户帮助内容</td><td>实验报告样式 + 帮助中心文案</td></tr>
+    <tr><td>CHANGELOG</td><td>逐版记录（新增 / 修复 / 变更）</td></tr>
+  </table>
+
+  <h3>13.2 验收指标</h3>
+  <table class="tbl">
+    <tr><th style="width:110px">类别</th><th>验收内容</th><th style="width:150px">方式</th></tr>
+    <tr><td>功能</td><td>19 项 FR 全过；14 个工具可用；4 条旅程走通</td><td>验收单逐项勾选</td></tr>
+    <tr><td>数据</td><td>v1 数据零丢失迁移；PX1 可读；备份恢复闭环</td><td>迁移用例 + 实测</td></tr>
+    <tr><td>性能</td><td>§5.1 预算全部达标（含动画帧率）</td><td>Lighthouse + 采样</td></tr>
+    <tr><td>安全</td><td>§9 基线全项通过；零动态执行；CSP 生效</td><td>扫描 + 人工核对</td></tr>
+    <tr><td>体验</td><td>双主题一致精致；键盘全通；无障碍关键项；零 console 错误</td><td>走查 +自动扫描</td></tr>
+    <tr><td>动画</td><td>每工具剧场动画可播放/暂停/逐帧/循环，操作可打断，降级正确</td><td>逐工具验收</td></tr>
+    <tr><td>符号</td><td>登记表全站一致（lint 通过 + 抽样人工核对）</td><td>自动 + 抽样</td></tr>
+    <tr><td>一致性</td><td>输入控件与显示格式对照《输入与显示统一契约》（§8.5.1）逐工具走查，14/14 通过</td><td>走查 + lint</td></tr>
+    <tr><td>存量</td><td>问题清单清零（无未关闭 P0/P1）</td><td>结案表</td></tr>
+  </table>
+
+  <h3>13.3 维护与支持</h3>
+  <p>发布后进入持续迭代（§14）：缺陷修复随小版本发布；新功能走 P1 池；文档与 CHANGELOG 每版同步；维护方式 = GitHub Issues + 每版发布清单。</p>
+</section>
+
+<!-- ================= 14 运营与迭代 ================= -->
+<section class="chapter" id="s14">
+  <h2><span class="no">14</span>运营与迭代</h2>
+
+  <h3>14.1 上线后观测（无遥测前提）</h3>
+  <table class="tbl tight">
+    <tr><th style="width:170px">观测面</th><th>方式</th></tr>
+    <tr><td>技术指标</td><td>CI 报告 / 包体与帧率预算 / Lighthouse 分数随版本趋势（本地留存）</td></tr>
+    <tr><td>使用反馈</td><td>用户自愿提交的 Issues 与分享链接回访；"诊断摘要"降低反馈门槛</td></tr>
+    <tr><td>可用性走查</td><td>每版本由审批者按§13.2 走查一遍核心旅程（替代埋点）</td></tr>
+  </table>
+
+  <h3>14.2 反馈闭环</h3>
+  <p>反馈 → 归入变更池或缺陷列表 → 分级排期 → 修复/实现 → 随版本发布并在 CHANGELOG 标注 → 必要时邀请反馈者复验。全程无账号、无服务器：反馈走 Issues，数据走用户自愿导出。</p>
+
+  <h3>14.3 A/B 测试</h3>
+  <p><span class="tag na">不适用</span>：无遥测即无分流与统计基础。替代方案：小范围可用性走查 + 直接反馈；涉及交互的大改动以"对比演示（双方案预览）"方式请审批者主观选择后再实现。</p>
+
+  <h3>14.4 迭代路线</h3>
+  <table class="tbl">
+    <tr><th style="width:110px">版本</th><th>主题</th><th>内容（P1 池按优先级吸收）</th></tr>
+    <tr><td>v2.1</td><td>工具继续扩充</td><td>音频信号实验室 · 2D 信号视觉化 · 数据实验室独立化；i18n 地基；WebM 动画导出</td></tr>
+    <tr><td>v2.2</td><td>深度与协作</td><td>题库与路径扩展 · 错题回顾 · 报告批注；云同步可行性评审（免费额度内、默认关闭）</td></tr>
+    <tr><td>长期</td><td>生态与极致</td><td>更多剧场动画与工具品类；色盲友好配色；Windows 高对比度完整适配；性能持续压榨</td></tr>
+  </table>
+</section>
+
+<!-- ================= 附录 ================= -->
+<section class="chapter" id="sapx">
+  <h2><span class="no">§</span>附录</h2>
+
+  <h3>附录 A · 决策记录</h3>
+  <table class="tbl tight">
+    <tr><th style="width:60px">编号</th><th>决策</th><th style="width:220px">结论（2026-10-12 已批准）</th></tr>
+    <tr><td>D1</td><td>技术路线</td><td>A · 渐进式现代化（Vite + TypeScript + Preact，内核与基线复用）</td></tr>
+    <tr><td>D2</td><td>视觉方向</td><td>A · 精密仪器（纸感浅色为主 + 夜景深色，跟随系统）</td></tr>
+    <tr><td>D3</td><td>功能批次</td><td>A · 全量 P0（19 项 FR，含追加要求的四项）</td></tr>
+    <tr><td>D4</td><td>兼容策略</td><td>A · 自动迁移 + 旧链接兼容（零丢失）</td></tr>
+    <tr><td>追加</td><td>四项新要求</td><td>电影级动画 / 符号标准化 / 工具扩充 / 存量重修 → 全部进入 P0</td></tr>
+  </table>
+
+  <h3>附录 B · 术语表</h3>
+  <table class="tbl tight">
+    <tr><th style="width:150px">术语</th><th>定义</th></tr>
+    <tr><td>工具</td><td>平台的功能单元（v1 称"模块"；v2 统一称"工具"，总数 14）</td></tr>
+    <tr><td>实验</td><td>一份可保存/分享/恢复的工作状态（schema v2，localStorage/IndexedDB）</td></tr>
+    <tr><td>对比组</td><td>同一工具下的命名参数快照（A/B/C/D），用于叠加对比</td></tr>
+    <tr><td>学习路径 / 步骤</td><td>可选的结构化学习单元：导读 + 预置实验 + 自测；步骤可完成、可重做（不强制，专业用户可不用）</td></tr>
+    <tr><td>内容包 / 提交包</td><td>分发者发布的一组内容 / 接收方回传的成果（无账号、链接或文件流通；课堂布置、团队协作、教程分发皆可）</td></tr>
+    <tr><td>演示剧场</td><td>电影级叙事动画（镜头编排 + 旁白 + 时间轴控制）</td></tr>
+    <tr><td>符号登记表</td><td>全站唯一符号来源（§8.11），构建期校验</td></tr>
+    <tr><td>拒绝式校验</td><td>非法数据一律拒绝并说明原因，不静默修复</td></tr>
+  </table>
+
+  <h3>附录 C · v1 资产复用清单</h3>
+  <table class="tbl tight">
+    <tr><th style="width:110px">处置</th><th>对象</th></tr>
+    <tr><td>直接复用</td><td>数学内核（DSP/TR/BLKSOLVE/ODE/SS/FX_LIB 等算法实现）、30 个测试脚本的用例与期望值、数据校验哲学、CSP/PWA/CI 基线、Worker 池机制</td></tr>
+    <tr><td>改造复用</td><td>绘图引擎（Plot/ComplexPlane → 新设计语言 + 动效接口）、输入组件（MI → 新组件体系）、命令面板、工具栏、复平面交互</td></tr>
+    <tr><td>重建</td><td>应用外壳、导航与 IA、全部工具的界面与交互、设计系统、状态与撤销、存储层（IndexedDB）</td></tr>
+  </table>
+
+  <h3>附录 D · 里程碑交付物清单</h3>
+  <table class="tbl tight">
+    <tr><th style="width:60px">批次</th><th>交付物</th></tr>
+    <tr><td>M0</td><td>设计系统文档 · 符号登记表 · 架构骨架仓库 · 回归网（迁移完成的测试）· 存量问题清单（第一版）</td></tr>
+    <tr><td>M1</td><td>新外壳可用版本 · 3 个旗舰工具 · 符号体系落地 · 存量 P0 修复批次</td></tr>
+    <tr><td>M2</td><td>14 工具全集 · 学习路径与自测 · 新工具对拍报告</td></tr>
+    <tr><td>M3</td><td>报告/内容包/对比/笔记/设置/帮助 · 移动端版本 · 存量 P1 修复批次</td></tr>
+    <tr><td>M4</td><td>演示剧场全集 · 性能与无障碍报告 · 存量结案表 · 发布版（tag）</td></tr>
+  </table>
+</section>
+
+<footer class="doc">
+  <p><strong>信号与控制实验平台 v2 · 重构规划书</strong> · 已批准（2026-10-12）· 全部决策按推荐方案执行 · 全程 0 元成本 · 由 AI 完整开发、所有者逐里程碑验收。</p>
+  <p>下一步：进入 M0（存量审计 + 设计系统冻结 + 架构基线）。本规划书随执行进展滚动更新。</p>
+</footer>
+
+</main></div></div>
+<script>
+/* 规划书自身的最小脚本：主题切换 + 目录高亮 */
+(function(){
+  var root=document.documentElement;
+  var saved=null; try{saved=localStorage.getItem('plan-theme');}catch(e){}
+  if(saved) root.dataset.theme=saved;
+  var label=document.getElementById('themeLabel');
+  function sync(){ if(label) label.textContent = root.dataset.theme==='dark' ? '深色预览' : '浅色预览'; }
+  sync();
+  var btn=document.getElementById('btnTheme');
+  if(btn) btn.addEventListener('click',function(){
+    root.dataset.theme = root.dataset.theme==='dark' ? 'light' : 'dark';
+    try{localStorage.setItem('plan-theme',root.dataset.theme);}catch(e){}
+    sync();
+  });
+  var links=[].slice.call(document.querySelectorAll('nav.toc a'));
+  var secs=links.map(function(a){return document.querySelector(a.getAttribute('href'));}).filter(Boolean);
+  if('IntersectionObserver' in window){
+    var io=new IntersectionObserver(function(es){
+      es.forEach(function(e){ if(e.isIntersecting){ links.forEach(function(a){a.classList.toggle('on', a.getAttribute('href')==='#'+e.target.id); }); } });
+    },{rootMargin:'-15% 0px -75% 0px'});
+    secs.forEach(function(s){io.observe(s);});
+  }
+})();
+</script>
+<script>
+/* ===== 规划书内嵌演示脚本（A / B / C / D）===== */
+(function(){
+  function mkToast(el){
+    var t=null;
+    return function(msg){
+      if(!el) return;
+      el.textContent=msg; el.classList.add('show');
+      clearTimeout(t); t=setTimeout(function(){ el.classList.remove('show'); },1500);
+    };
+  }
+
+  /* 演示 A · 首页命令中心 + 命令面板 */
+  (function(){
+    var root=document.querySelector('[data-demo="A"]'); if(!root) return;
+    var pal=root.querySelector('[data-da-pal]'), q=root.querySelector('[data-da-q]'),
+        list=root.querySelector('[data-da-list]'), openBtn=root.querySelector('[data-da-open]');
+    var show=mkToast(root.querySelector('[data-da-toastbox]'));
+    var CMDS=[
+      {n:'根轨迹', d:'系统分析 · 工具', t:'工具'},
+      {n:'学习路径：控制系统入门', d:'共 10 步 · 已完成 4 步', t:'路径'},
+      {n:'PID 整定向导', d:'ZN / Cohen–Coon / CHR', t:'工具'},
+      {n:'滤波器设计器', d:'Butterworth / Chebyshev / 窗函数法', t:'工具'},
+      {n:'演示剧场：卷积的翻转与平移', d:'电影级动画 · 约 90 秒', t:'剧场'},
+      {n:'导出实验报告', d:'当前实验：二阶系统整定', t:'动作'},
+      {n:'打开分享 PX2-8F3K', d:'来自张老师 · 3 天前', t:'分享'}
+    ];
+    var items=[], hi=0;
+    function render(){
+      var s=(q.value||'').trim().toLowerCase();
+      var arr=CMDS.filter(function(c){ return !s || (c.n+c.d).toLowerCase().indexOf(s)>=0; });
+      if(hi>=arr.length) hi=Math.max(0, arr.length-1);
+      list.innerHTML='';
+      arr.forEach(function(c,i){
+        var el=document.createElement('div');
+        el.className='pi'+(i===hi?' hi':'');
+        el.innerHTML='<span>'+c.n+'</span><small>'+c.t+' · '+c.d+'</small>';
+        el.addEventListener('click',function(){ exec(c); });
+        list.appendChild(el);
+      });
+      items=arr;
+    }
+    function exec(c){ pal.classList.remove('open'); show('已执行：'+c.n+'（示意）'); }
+    function openPal(){ pal.classList.add('open'); q.value=''; hi=0; render(); q.focus(); }
+    if(openBtn) openBtn.addEventListener('click', openPal);
+    if(q){
+      q.addEventListener('input', function(){ hi=0; render(); });
+      q.addEventListener('keydown', function(e){
+        if(e.key==='ArrowDown'){ hi=Math.min(hi+1, items.length-1); render(); e.preventDefault(); }
+        else if(e.key==='ArrowUp'){ hi=Math.max(hi-1, 0); render(); e.preventDefault(); }
+        else if(e.key==='Enter' && items[hi]){ exec(items[hi]); }
+        else if(e.key==='Escape'){ pal.classList.remove('open'); }
+      });
+    }
+    root.querySelectorAll('[data-da-toast]').forEach(function(b){
+      b.addEventListener('click', function(){ show(b.getAttribute('data-da-toast')); });
+    });
+  })();
+
+  /* 演示 B · 学习路径步骤 */
+  (function(){
+    var root=document.querySelector('[data-demo="B"]'); if(!root) return;
+    var stepsEl=root.querySelector('[data-db-steps]'), detail=root.querySelector('[data-db-detail]'),
+        bar=root.querySelector('[data-db-bar]'), progText=root.querySelector('[data-db-progtext]');
+    var show=mkToast(root.querySelector('[data-db-toastbox]'));
+    var STEPS=[
+      {t:'认识信号：正弦与谐波', s:'时域波形与谐波成分', d:'从一条正弦出发，看频率与相位如何决定波形；再把三个谐波叠在一起，发现"复杂信号 = 简单信号之和"。', done:true, exp:'傅立叶级数 · 正弦叠加'},
+      {t:'傅立叶级数：方波合成', s:'奇次谐波逐项逼近', d:'用 1、3、5、7 次谐波逐项逼近方波，观察 Gibbs 过冲，理解"级数逼近"的极限与代价。', done:true, exp:'傅立叶级数 · 方波'},
+      {t:'采样与混叠', s:'奈奎斯特判据的直观版', d:'把正弦以不同采样率采样，观察混叠频率的出现；找到刚好"够用"的采样率边界。', done:false, exp:'傅立叶变换 · 采样与重建'},
+      {t:'拉普拉斯：极点与响应', s:'极点位置决定一切', d:'拖动极点穿过虚轴，看阶跃响应从衰减振荡到发散；体会"稳定性"的几何含义。', done:false, exp:'拉普拉斯 · s 平面'},
+      {t:'系统分析：波特图与裕度', s:'裕度的工程意义', d:'给二阶系统画波特图，读出相位裕度；改变增益看裕度如何缩水到不稳定。', done:false, exp:'系统分析 · 波特图'},
+      {t:'PID 整定入门', s:'从振荡到恰到好处', d:'先只加比例增益看超调，再补积分消除稳态误差，最后加微分压住振荡；对照 ZN 整定结果。', done:false, exp:'PID 整定 · 环路仿真'}
+    ];
+    var cur=0;
+    function renderSteps(){
+      stepsEl.innerHTML='';
+      STEPS.forEach(function(st,i){
+        var el=document.createElement('div');
+        el.className='d-step'+(i===cur?' on':'')+(st.done?' done':'');
+        el.innerHTML='<span class="bub">'+(st.done?'✓':(i+1))+'</span><span><span class="st">'+st.t+'</span><br><span class="ss">'+st.s+'</span></span>';
+        el.addEventListener('click',function(){ cur=i; renderSteps(); renderDetail(); });
+        stepsEl.appendChild(el);
+      });
+    }
+    function renderDetail(){
+      var st=STEPS[cur];
+      detail.innerHTML='<div style="font-weight:700;margin-bottom:4px">'+st.t+'</div>'
+        +'<div class="caption" style="margin-bottom:8px">导读</div>'
+        +'<div style="font-size:13.5px;color:var(--ink-2);margin-bottom:10px">'+st.d+'</div>'
+        +'<div class="caption" style="margin-bottom:6px">关联实验</div>'
+        +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"><span class="pill">'+st.exp+'</span><span class="pill">自测 3 题</span></div>'
+        +'<div style="display:flex;gap:8px;flex-wrap:wrap">'
+        +'<button class="btn primary" data-db-open>打开预置实验</button>'
+        +'<button class="btn" data-db-quiz>开始自测</button>'
+        +'<button class="btn" data-db-done>'+(st.done?'本步已完成 ✓':'标记完成（演示）')+'</button>'
+        +'</div>';
+      detail.querySelector('[data-db-open]').addEventListener('click',function(){ show('已打开：'+st.exp+'（示意）'); });
+      detail.querySelector('[data-db-quiz]').addEventListener('click',function(){ show('进入自测：3 题（示意）'); });
+      detail.querySelector('[data-db-done]').addEventListener('click',function(){
+        if(STEPS[cur].done){ show('本步此前已完成'); return; }
+        STEPS[cur].done=true; renderSteps(); renderDetail(); updateProgress();
+        show('已标记完成：'+STEPS[cur].t);
+      });
+    }
+    function updateProgress(){
+      var n=STEPS.filter(function(s){return s.done;}).length;
+      progText.textContent=n+' / '+STEPS.length+' 完成';
+      bar.style.width=Math.round(n/STEPS.length*100)+'%';
+    }
+    renderSteps(); renderDetail(); updateProgress();
+  })();
+
+  /* 演示 C · 工作区骨架 */
+  (function(){
+    var root=document.querySelector('[data-demo="C"]'); if(!root) return;
+    var L=root.querySelector('[data-dc-left]'), R=root.querySelector('[data-dc-right]'),
+        B=root.querySelector('[data-dc-b]'), badge=root.querySelector('[data-dc-badge]');
+    var show=mkToast(root.querySelector('[data-dc-toastbox]'));
+    var tl=root.querySelector('[data-dc-tl]'), tr=root.querySelector('[data-dc-tr]'),
+        tz=root.querySelector('[data-dc-tz]'), tb=root.querySelector('[data-dc-tb]');
+    function toggle(el){ el.style.display = (el.style.display==='none') ? '' : 'none'; }
+    tl.addEventListener('click',function(){ toggle(L); show(L.style.display==='none'?'参数栏已折叠':'参数栏已展开'); });
+    tr.addEventListener('click',function(){ toggle(R); show(R.style.display==='none'?'分析栏已折叠':'分析栏已展开'); });
+    tz.addEventListener('click',function(){
+      var hide = (L.style.display!=='none');
+      L.style.display = hide?'none':''; R.style.display = hide?'none':'';
+      show(hide?'已进入专注模式':'已退出专注模式（示意）');
+    });
+    var on=false;
+    tb.addEventListener('click',function(){
+      on=!on;
+      B.style.display = on?'':'none';
+      badge.style.display = on?'':'none';
+      show(on?'已叠加对比组 B · K=6.4':'已退出对比');
+    });
+  })();
+
+  /* 演示 D · 设计语言（主题切换） */
+  (function(){
+    var root=document.querySelector('[data-demo="D"]'); if(!root) return;
+    function setTheme(mode){
+      document.documentElement.dataset.theme=mode;
+      try{ localStorage.setItem('plan-theme',mode); }catch(e){}
+      var lbl=document.getElementById('themeLabel');
+      if(lbl) lbl.textContent = mode==='dark' ? '深色预览' : '浅色预览';
+    }
+    var bl=root.querySelector('[data-dd-light]'), bd=root.querySelector('[data-dd-dark]');
+    if(bl) bl.addEventListener('click',function(){ setTheme('light'); });
+    if(bd) bd.addEventListener('click',function(){ setTheme('dark'); });
+  })();
+})();
+</script>
+</body>
+</html>

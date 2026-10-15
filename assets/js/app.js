@@ -5,6 +5,15 @@
  *   自动保存 = 切换模块/刷新前捕获 + 防抖落盘；手动保存 = 工具栏💾。
  * ============================================================ */
 (() => {
+  /* 移动端底部标签栏的分类定义（与侧栏 data-group 一一对应） */
+  const TAB_CATS = [
+    { cat: 'home', modules: ['home'] },
+    { cat: 'sig', modules: ['fs', 'ft', 'la', 'zt'] },
+    { cat: 'ctrl', modules: ['sys', 'pid', 'blk'] },
+    { cat: 'tools', modules: ['explore', 'derive'] }
+  ];
+  const catOf = (name) => (TAB_CATS.find((c) => c.modules.includes(name)) || TAB_CATS[0]).cat;
+
   const App = {
     modules: {},      // name -> factory
     current: null,    // { name, api } active instance
@@ -38,20 +47,52 @@
       if (mask) mask.addEventListener('click', closeDrawer);
       this._closeDrawer = closeDrawer;
 
-      // 主题切换（深/浅），持久化到 localStorage
-      const savedTheme = localStorage.getItem('flt-theme') === 'light' ? 'light' : 'dark';
+      // 主题（浅色为默认，body.dark 切换深色）
+      // 历史存储迁移：旧版存 'light'/'dark' 同名值，按 'dark'→深色、其余→浅色映射
+      const savedTheme = localStorage.getItem('flt-theme') === 'dark' ? 'dark' : 'light';
       this.applyTheme(savedTheme);
       this.$theme.addEventListener('click', () => {
-        const next = document.body.classList.contains('light') ? 'dark' : 'light';
+        const next = document.body.classList.contains('dark') ? 'light' : 'dark';
         localStorage.setItem('flt-theme', next);
         this.applyTheme(next);
       });
+
+      // 移动端底部标签栏（≤900px）：点分类 → 展开/收起该类模块 chips 行；
+      // 当前模块所属分类高亮。抽屉（☰）保留为完整索引。
+      this.tabbar = document.getElementById('tabbar');
+      this.tabChips = document.getElementById('tab-chips');
+      if (this.tabbar && this.tabChips) {
+        this.tabbar.addEventListener('click', (e) => {
+          const b = e.target.closest('.tab-item');
+          if (!b) return;
+          if (this._openCat === b.dataset.cat && !this.tabChips.classList.contains('hidden')) {
+            this.tabChips.classList.add('hidden');
+          } else {
+            this._openCat = b.dataset.cat;
+            this.renderTabChips(this._openCat);
+            this.tabChips.classList.remove('hidden');
+          }
+        });
+        this.tabChips.addEventListener('click', (e) => {
+          const c = e.target.closest('[data-module]');
+          if (c) { this.open(c.dataset.module); this.tabChips.classList.add('hidden'); }
+        });
+      }
 
       // 帮助
       const mk = document.getElementById('about-mask');
       document.getElementById('about-trigger').addEventListener('click', (e) => { e.preventDefault(); mk.classList.remove('hidden'); });
       document.getElementById('about-close').addEventListener('click', () => mk.classList.add('hidden'));
+      const aboutX = document.getElementById('about-x');
+      if (aboutX) aboutX.addEventListener('click', () => mk.classList.add('hidden'));
       mk.addEventListener('click', (e) => { if (e.target === mk) mk.classList.add('hidden'); });
+      // 迷你目录锚点滚动（不写 location.hash，避免干扰 #exp= 分享路由）
+      const toc = document.getElementById('about-toc');
+      if (toc) toc.addEventListener('click', (e) => {
+        const b = e.target.closest('button[data-target]');
+        const sec = b && document.getElementById(b.dataset.target);
+        if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
 
       // 启动路由优先级：
       //   #exp=<分享码> → 导入并打开   ·  旧版模块 hash（#hn/#ex/#lan/...）→ 直达模块
@@ -80,7 +121,7 @@
             if (lastExp) { App.exps._use(lastExp); first = lastExp.module || 'home'; restored = true; }
           }
         }
-      } catch (e) { }
+      } catch (e) { console.warn('hash route:', e.message); }
       if (first) this.open(first);
       if (restored && first && this.current && this.current.name === first) App.exps.applyTo(first);
 
@@ -107,6 +148,7 @@
           this.$theme.click();
         } else if (e.key === 'Escape') {
           if (this._closeDrawer) this._closeDrawer();
+          if (this.tabChips) this.tabChips.classList.add('hidden');
           const mk = document.getElementById('about-mask');
           if (mk && !mk.classList.contains('hidden')) mk.classList.add('hidden');
         } else if (e.key >= '1' && e.key <= '9') {
@@ -117,12 +159,34 @@
     },
 
     applyTheme(t) {
-      document.body.classList.toggle('light', t === 'light');
-      this.$theme.textContent = t === 'light' ? '🌙' : '☀️';
-      this.$theme.title = t === 'light' ? '切换到深色主题' : '切换到浅色主题';
+      const dark = t === 'dark';
+      const root = document.documentElement;
+      // 短暂启用全局颜色过渡（尊重系统减少动效设置）
+      let animOk = false;
+      try { animOk = !window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { }
+      if (animOk) root.classList.add('theme-anim');
+      document.body.classList.toggle('dark', dark);
+      this.$theme.title = dark ? '切换到浅色主题' : '切换到深色主题';
+      const meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute('content', dark ? '#0b0e14' : '#f4f2ec');
+      clearTimeout(this._themeAnimT);
+      this._themeAnimT = setTimeout(() => root.classList.remove('theme-anim'), 260);
       FX.refreshTheme();
       // 当前模块重绘（canvas 颜色跟随主题）
       this._call('onTheme');
+    },
+
+    /* 底部标签栏的 chips 行：渲染某分类下的模块，当前模块高亮 */
+    renderTabChips(cat) {
+      if (!this.tabChips) return;
+      const def = TAB_CATS.find((c) => c.cat === cat);
+      if (!def) return;
+      this.tabChips.innerHTML = '';
+      def.modules.forEach((k) => {
+        const active = this.current && this.current.name === k;
+        this.tabChips.appendChild(U.el('button', { class: 'chip' + (active ? ' active' : ''), 'data-module': k }, U.MODULE_NAMES[k] || k));
+      });
+      if (this.tabbar) this.tabbar.querySelectorAll('.tab-item').forEach((b) => b.classList.toggle('open', b.dataset.cat === cat));
     },
 
     _call(method) {
@@ -143,12 +207,21 @@
         try { this.current.api.dispose(); } catch (e) { console.error(e); }
       }
       this.navButtons.forEach((b) => b.classList.toggle('active', b.dataset.module === name));
+      // 底部标签栏同步：分类高亮 + chips 行跟随当前分类
+      const cat = catOf(name);
+      if (this.tabbar) {
+        this.tabbar.querySelectorAll('.tab-item').forEach((b) => b.classList.toggle('active', b.dataset.cat === cat));
+        if (this.tabChips && !this.tabChips.classList.contains('hidden')) { this._openCat = cat; this.renderTabChips(cat); }
+      }
       this.content.innerHTML = '';
       const mod = factory(this.content);
       if (FX.enablePlotChrome) FX.enablePlotChrome(this.content);
       const api = mod.api || mod;
       const group = (this.navButtons.find((b) => b.dataset.module === name) || {}).dataset?.group || '';
-      this.title.innerHTML = mod.title + (mod.subtitle ? '<small>' + mod.subtitle + '</small>' : '') + (group ? '<small style="margin-left:10px;color:var(--text-faint)">· ' + group + '</small>' : '');
+      // 面包屑式标题：分组 / 模块名（+ 副标题）
+      this.title.innerHTML = (group ? '<span class="crumb">' + group + '</span><span class="crumb-sep" aria-hidden="true">/</span>' : '')
+        + '<span class="crumb-cur">' + mod.title + '</span>'
+        + (mod.subtitle ? '<small>' + mod.subtitle + '</small>' : '');
       this.current = { name, api };
     }
   };
@@ -164,8 +237,8 @@
       toastEl.setAttribute('role', 'status');
       toastEl.setAttribute('aria-live', 'polite');
       toastEl.style.cssText = 'position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:999;'
-        + 'padding:9px 16px;border-radius:9px;background:var(--panel-2,#1c2534);color:var(--text,#e8eef8);'
-        + 'border:1px solid var(--line-2,#2c384d);box-shadow:0 6px 24px rgba(0,0,0,.35);'
+        + 'padding:9px 16px;border-radius:var(--r-md,10px);background:var(--panel-2,#1c2534);color:var(--text,#e8eef8);'
+        + 'border:1px solid var(--line-2,#2c384d);box-shadow:var(--shadow-2,0 6px 24px rgba(0,0,0,.35));'
         + 'font-size:13px;max-width:80vw;transition:opacity .25s;opacity:0';
       document.body.appendChild(toastEl);
     }
@@ -182,9 +255,9 @@
     const MAX = 20;
     let seq = 0;
     const load = () => {
-      try { const a = JSON.parse(localStorage.getItem(KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
+      try { const a = JSON.parse(localStorage.getItem(KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { console.warn('localStorage read:', e.message); return []; }
     };
-    const persist = (a) => { try { localStorage.setItem(KEY, JSON.stringify(a)); } catch (e) { } };
+    const persist = (a) => { try { localStorage.setItem(KEY, JSON.stringify(a)); } catch (e) { console.warn('localStorage persist:', e.message); } };
     return {
       list: () => load(),
       save({ name, kind, data }) {
@@ -235,7 +308,7 @@
 
     function _use(exp) {
       current = exp;
-      try { localStorage.setItem(LAST_KEY, exp ? exp.id : ''); } catch (e) { }
+      try { localStorage.setItem(LAST_KEY, exp ? exp.id : ''); } catch (e) { console.warn('localStorage setItem:', e.message); }
     }
 
     function schedulePersist() { clearTimeout(saveTimer); saveTimer = setTimeout(persistNow, 700); }
@@ -259,7 +332,7 @@
         current.moduleStates[key] = { savedAt: Date.now(), data };
         current.module = key;
         schedulePersist();
-      } catch (e) { /* getState 抛错视为该状态暂不可保存 */ }
+      } catch (e) { console.warn('getState capture:', e.message); }
     }
 
     // 打开模块后把实验里保存的状态回放给它（模块需提供 api.applyState）
@@ -296,7 +369,7 @@
       captureState();
       persistNow();
       let snap = null;
-      try { snap = PX.addSnapshot(current, label || ('保存 ' + new Date().toLocaleTimeString()), App.current && App.current.name); } catch (e) { }
+      try { snap = PX.addSnapshot(current, label || ('保存 ' + new Date().toLocaleTimeString()), App.current && App.current.name); } catch (e) { console.warn('addSnapshot:', e.message); }
       App.toast('已保存实验「' + current.name + '」');
       return snap;
     }
@@ -345,38 +418,62 @@
       window.addEventListener('beforeunload', () => {
         if (!current) return;
         captureState();
-        try { PX.save(current); } catch (e) { }
+        try { PX.save(current); } catch (e) { console.warn('beforeunload save:', e.message); }
       });
     }
 
     return { cur, _use, openById, createAndOpen, applyTo, captureState, saveNow, shareLink, importFromShare, importJSONText, resetCurrent, persistNow };
   })();
 
-  /* ---------- CDN 回退（备用源动态加载；失败给出可理解提示） ---------- */
-  function ensureCdnLibs() {
-    if (typeof document === 'undefined') return;
-    const need = [];
-    if (!window.katex) need.push('https://unpkg.com/katex@0.16.21/dist/katex.min.js');
-    if (!window.math) need.push('https://unpkg.com/mathjs@12.4.3/lib/browser/math.js');
-    need.forEach((src) => {
-      const s = document.createElement('script');
-      s.src = src;
-      s.async = false;
-      s.onerror = () => {
-        try {
-          document.body.appendChild(U.el('div', {
-            role: 'alert',
-            style: 'position:fixed;left:12px;right:12px;bottom:12px;z-index:999;padding:10px 14px;border-radius:9px;'
-              + 'background:var(--panel-2,#1c2534);border:1px solid var(--danger,#ff6b6b);color:var(--text,#e8eef8);font-size:13px'
-          }, '⚠ 公式库 CDN 不可用（已尝试备用源）：数值计算不受影响，公式可能显示为源码。检查网络后刷新可恢复。'));
-        } catch (e) { console.warn('CDN 回退加载失败', src); }
-      };
-      document.head.appendChild(s);
+  /* ---------- 公式排版库（KaTeX）CDN 回退 ----------
+   * 主源在 index.html（jsdelivr + SRI）；失败时按镜像顺序补载 CSS + JS。
+   * 只影响「公式排版」：缺库时各模块经 FX.katex 自动降级为纯文本公式，
+   * 全部数值计算、曲线与交互不受影响 —— 因此提示是一次性、可关闭的小角标，
+   * 不做常驻整宽横幅（旧版每次失败叠一条、且永久遮挡页面底部）。 */
+  const KATEX_VER = '0.16.21';
+  // 主源在 index.html（fastly.jsdelivr）；此处按可达性依次补载「CSS + JS」（两者必须同源，
+  // 否则 CSS 内的字体相对路径会指向不可达的 host）
+  const CDN_MIRRORS = [
+    'https://cdn.jsdelivr.net/npm/katex@' + KATEX_VER + '/dist/',
+    'https://unpkg.com/katex@' + KATEX_VER + '/dist/',
+    'https://cdnjs.cloudflare.com/ajax/libs/KaTeX/' + KATEX_VER + '/'
+  ];
+  function loadAsset(tag, url) {
+    return new Promise((resolve) => {
+      const el = document.createElement(tag);
+      if (tag === 'link') { el.rel = 'stylesheet'; el.href = url; }
+      else { el.src = url; el.async = false; }
+      el.onload = () => resolve(true);
+      el.onerror = () => { if (el.parentNode) el.parentNode.removeChild(el); resolve(false); };
+      document.head.appendChild(el);
     });
+  }
+  // 一次性提示（同一提示只出现一条；可手动关闭；15s 后自动淡出）
+  function cdnNotice(text) {
+    if (typeof document === 'undefined' || document.getElementById('cdn-notice')) return;
+    try {
+      const x = U.el('button', { class: 'cdn-notice-x', 'aria-label': '关闭提示' }, '✕');
+      const box = U.el('div', { id: 'cdn-notice', class: 'cdn-notice', role: 'status' }, [U.el('span', {}, text), x]);
+      x.addEventListener('click', () => box.remove());
+      document.body.appendChild(box);
+      setTimeout(() => { if (box.parentNode) box.remove(); }, 15000);
+    } catch (e) { console.warn('CDN 提示渲染失败', e.message); }
+  }
+  async function ensureCdnLibs() {
+    if (typeof document === 'undefined' || window.katex) return;
+    for (const base of CDN_MIRRORS) {
+      if (!(await loadAsset('link', base + 'katex.min.css'))) continue;
+      if (!(await loadAsset('script', base + 'katex.min.js'))) continue;
+      // 备用源回填成功：广播给已渲染的模块（公式推导等据此用真实 KaTeX 重绘，替换先前的兜底文本）
+      try { document.dispatchEvent(new CustomEvent('libs-ready', { detail: { src: base } })); } catch (e) { }
+      return;
+    }
+    cdnNotice('公式排版库（KaTeX）加载不到：公式将以纯文本显示，数值计算与曲线不受影响；联网后刷新即可恢复排版。');
   }
 
   // PWA：Service Worker 注册（仅安全上下文；新版本就绪时提示刷新）
-  if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator && location.protocol === 'https:' || (typeof navigator !== 'undefined' && 'serviceWorker' in navigator && ['localhost', '127.0.0.1'].includes(location.hostname))) {
+  const swSupported = typeof navigator !== 'undefined' && 'serviceWorker' in navigator;
+  if (swSupported && (location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname))) {
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('sw.js').then((reg) => {
         reg.addEventListener('updatefound', () => {
@@ -386,7 +483,7 @@
             if (sw.state === 'installed' && navigator.serviceWorker.controller) App.toast('新版本已就绪，刷新页面即可启用');
           });
         });
-      }).catch(() => { });
+      }).catch((e) => { console.warn('SW register:', e.message); });
     });
   }
 
