@@ -202,10 +202,6 @@ export function FilterTool(props: ToolViewProps) {
     setParams((p) => ({ ...p, ...next }));
     props.onChange();
   };
-  const applyLive = (next: Partial<FilterParams>): void => {
-    setParams((p) => ({ ...p, ...next }));
-    props.onChange();
-  };
 
   const spec: Spec = useMemo(
     () => ({
@@ -438,13 +434,17 @@ export function FilterTool(props: ToolViewProps) {
             <FieldGroup title="原型与规格" desc="经典 IIR 原型 + 双线性变换（已频率预畸变）；阶数由规格自动估计。">
               <SegmentedChips options={FAMILIES} value={params.family} onChange={(v) => apply({ family: v })} ariaLabel="原型" />
               <div class="row">
+                <span class="muted">通带 fp</span>
                 <NumField value={params.fp} onChange={(v) => apply({ fp: v })} min={1} max={1e6} step={10} precision={1} unit="Hz" ariaLabel="通带边界频率" width={72} />
+              </div>
+              <div class="row">
+                <span class="muted">阻带 fstop</span>
                 <NumField value={params.fstop} onChange={(v) => apply({ fstop: v })} min={1} max={1e6} step={10} precision={1} unit="Hz" ariaLabel="阻带边界频率" width={72} />
+              </div>
+              <div class="row">
+                <span class="muted">采样率 fs</span>
                 <NumField value={params.fsamp} onChange={(v) => apply({ fsamp: v })} min={10} max={1e7} step={100} precision={0} unit="Hz" ariaLabel="采样率" width={72} />
               </div>
-              <p class="muted">
-                通带边界 {params.fp}Hz · 阻带边界 {params.fstop}Hz · 采样率 {params.fsamp}Hz
-              </p>
               {params.family !== 'butter' ? (
                 <div class="row">
                   {params.family === 'cheby1' ? (
@@ -468,10 +468,10 @@ export function FilterTool(props: ToolViewProps) {
             </FieldGroup>
           )}
 
-          <FieldGroup title="视图" onReset={() => apply(DEFAULT)} defaultOpen={false}>
+          <FieldGroup title="视图" onReset={() => apply({ view: DEFAULT.view })} defaultOpen={false}>
             <SegmentedChips options={viewOpts} value={params.view} onChange={(v) => apply({ view: v })} ariaLabel="视图" />
             {params.view === 'quant' ? (
-              <SliderField label="系数字长" value={params.bits} onChange={(v) => applyLive({ bits: Math.round(v) })} min={4} max={24} step={1} precision={0} unit="bit" />
+              <SliderField label="系数字长" value={params.bits} onChange={(v) => apply({ bits: Math.round(v) })} min={4} max={32} step={1} precision={0} unit="bit" />
             ) : null}
           </FieldGroup>
         </aside>
@@ -493,7 +493,7 @@ export function FilterTool(props: ToolViewProps) {
         {/* 幅频 · 相频 · 群时延 */}
         {iir && design.ok && fr && params.view === 'mag' ? (
           <div class="card stack">
-            <h3>幅频响应 |H(e^jω)|（dB）· 规格掩膜 @ fp={params.fp}Hz / fstop={params.fstop}Hz</h3>
+            <h3>幅频响应 |H(e^jω)|（dB）· 蓝 = 实测，橙色虚线 = 通带 / 阻带掩膜</h3>
             <Chart
               series={[
                 { xs: fr.w.map(toHz), ys: fr.magDb, glow: 2 },
@@ -579,7 +579,7 @@ export function FilterTool(props: ToolViewProps) {
                 <Metric label="ρmax" value={rhoMax} precision={4} />
                 <Metric label="1−ρmax" value={1 - rhoMax} precision={4} />
               </div>
-              <p class="muted">极点由分母系数求根（core.filterPoles）；零点 {markers.filter((m) => m.kind === 'zero').length} 个。</p>
+              <p class="muted">极点由分母系数求根；零点 {markers.filter((m) => m.kind === 'zero').length} 个。</p>
             </div>
             <div class="card stack">
               <h3>模拟原型零极点（s 平面 · 预畸变域）</h3>
@@ -706,7 +706,7 @@ export function FilterTool(props: ToolViewProps) {
             {iir && design.ok ? (
               <>
                 <Metric label="阶数 n" value={design.n} />
-                <Metric label="数字截止 ωc" value={design.wc} precision={4} unit="rad" />
+                <Metric label="数字截止 ωc" value={design.wc} precision={4} unit="rad/样本" />
                 <Metric label="通带边缘实测" value={magAt(params.fp) ?? '—'} precision={2} unit="dB" />
                 <Metric label="阻带边缘实测" value={magAt(params.fstop) ?? '—'} precision={2} unit="dB" />
               </>
@@ -723,7 +723,7 @@ export function FilterTool(props: ToolViewProps) {
           {iir && design.ok ? (
             <div class="card stack">
               <h3>数字传函 H(z)</h3>
-              <div class="formula-block">
+              <div class="tex-line">
                 <TeX tex={`H(z)=\\dfrac{${polyTex(design.num, 'z')}}{${polyTex(design.den, 'z')}}`} />
               </div>
               <p class="muted">系数（b / a，z 正幂次降序）：</p>
@@ -734,10 +734,10 @@ export function FilterTool(props: ToolViewProps) {
           {iir && design.ok ? (
             <div class="card stack">
               <h3>模拟原型 H(s)</h3>
-              <div class="formula-block">
+              <div class="tex-line">
                 <TeX tex={`H(s)=\\dfrac{${polyTex(design.analog.num, 's')}}{${polyTex(design.analog.den, 's')}}`} />
               </div>
-              <p class="muted">预畸变域 Ω=tan(ω/2)；可经「交接系统分析」进入系统分析工具查看波特图 / 根轨迹。</p>
+              <p class="muted">可交接至「系统分析」查看波特图 / 根轨迹。</p>
             </div>
           ) : null}
 

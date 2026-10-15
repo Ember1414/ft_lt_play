@@ -28,15 +28,15 @@ interface TemplateDef {
   reason?: string;
 }
 
-/* M1 内置模板（规划建议 12 个，随 M2/M3 扩充；参数结构由各工具自行校验） */
+/** 内置快速开始模板：state 为对应工具的模块参数（由各工具 sanitize 校验，字段名见各工具 Params） */
 const TEMPLATES: TemplateDef[] = [
-  { id: 'tpl-2nd', name: '二阶系统 · 阶跃响应', toolId: 'sys', blurb: 'ωn=3.16, ζ=0.32 的欠阻尼响应与指标', state: { num: [10], den: [1, 1, 10] } },
-  { id: 'tpl-margin', name: '相位裕度扫描', toolId: 'sys', blurb: 'K 滑杆与 PM/GM 实时读数', state: { num: [1], den: [1, 3, 3, 1] } },
-  { id: 'tpl-ss', name: '状态空间 · 极点配置', toolId: 'sys', blurb: 'A/B/C 矩阵与 Ackermann 配置', state: { mode: 'ss' } },
-  { id: 'tpl-zn', name: 'ZN 临界比例度', toolId: 'pid', blurb: '从 Ku/Tu 到 PID 增益一键试算', state: { num: [1], den: [1, 3, 3, 1] } },
-  { id: 'tpl-aw', name: 'PID 抗饱和对比', toolId: 'pid', blurb: '限幅 + back-calculation 前后对比', state: { aw: 'back', uMax: 5 } },
-  { id: 'tpl-reso', name: '数字谐振器', toolId: 'z', blurb: '单位圆极点与频响峰值', state: { num: [1], den: [1, -1.5, 0.5] } },
-  { id: 'tpl-jury', name: 'Jury 稳定性扫描', toolId: 'z', blurb: '特征表逐行判据与 ρmax 裕度', state: { mode: 'jury' } },
+  { id: 'tpl-2nd', name: '二阶系统 · 阶跃响应', toolId: 'sys', blurb: 'ωn=3.16, ζ=0.32 的欠阻尼响应与指标', state: { expr: '10/(s^2+2s+10)', K: 1, view: 'step' } },
+  { id: 'tpl-margin', name: '相位裕度扫描', toolId: 'sys', blurb: 'K 滑杆与 PM/GM 实时读数（L = K/(s+1)³）', state: { expr: '1/(s^3+3s^2+3s+1)', K: 2, view: 'bode' } },
+  { id: 'tpl-ss', name: '状态空间 · 极点配置', toolId: 'control', blurb: '可控标准型 + Ackermann 极点配置', state: { view: 'place' } },
+  { id: 'tpl-zn', name: 'ZN 临界比例度', toolId: 'pid', blurb: 'L=1/(s+1)³（Ku=8）→ 一键试算 PID 增益', state: { expr: '1/(s^3+3s^2+3s+1)' } },
+  { id: 'tpl-aw', name: 'PID 抗饱和对比', toolId: 'pid', blurb: '执行器限幅 + back-calculation 前后对比', state: { aw: 'back', uOn: true, uMax: 5 } },
+  { id: 'tpl-reso', name: '极点逼近单位圆', toolId: 'z', blurb: 'ρ=0.95 的极点与 |X(e^jω)| 峰值 · 稳定裕度', state: { expr: '0.95^n*u[n]', view: 'freq' } },
+  { id: 'tpl-jury', name: 'Jury 稳定性扫描', toolId: 'z', blurb: '特征表逐行判据与 ρmax 裕度', state: { view: 'jury' } },
   { id: 'tpl-sampled', name: '采样回路（框图）', toolId: 'block', blurb: '误差点采样 + ZOH 的 z 域归约与闭环极点', state: {
     nodes: [
       { id: 1, kind: 'sum', x: 180, y: 250, src: true },
@@ -187,9 +187,7 @@ export function Home(props: HomeProps) {
             </button>
           ))}
         </div>
-        <p class="muted">
-          路径为可选体验：专业用户可完全不进路径，直接使用工具（规划书 §4.3）。点卡片进入「学习路径」页查看每步目标并跟踪进度。
-        </p>
+        <p class="muted">路径为可选体验：可直接使用工具，不进路径。点卡片进入「学习路径」页查看每步目标并跟踪进度。</p>
       </section>
 
       {/* —— 演示剧场 / 对比实验 —— */}
@@ -262,7 +260,7 @@ export function Home(props: HomeProps) {
         )}
         <p class="muted">
           符号与公式渲染：{'\u00A0'}
-          <TeX tex="H(s)=\dfrac{1}{s^2+2\zeta\omega_n s+\omega_n^2}" /> {'\u00A0'}· 全站同源（符号登记表）。
+          <TeX tex="H(s)=\dfrac{1}{s^2+2\zeta\omega_n s+\omega_n^2}" /> {'\u00A0'}（全站同一套符号与 KaTeX 排版）。
         </p>
       </section>
     </div>

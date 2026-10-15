@@ -71,8 +71,6 @@ export function CommandPalette(props: CommandPaletteProps) {
     list.push({ id: 'page:theater', title: '演示剧场', hint: '页面 · 一键播放叙事演示（可暂停/变速）', run: () => navigate({ page: 'theater' }) });
     list.push({ id: 'page:experiments', title: '实验管理', hint: '页面 · 列表 / 快照 / 分享', run: () => navigate({ page: 'experiments' }) });
     list.push({ id: 'page:settings', title: '设置中心', hint: '页面 · 外观 / 存储 / 备份', run: () => navigate({ page: 'settings' }) });
-    list.push({ id: 'page:baseline', title: '基线与符号表', hint: '页面 · 设计令牌 + 符号登记表', run: () => navigate({ page: 'baseline' }) });
-    list.push({ id: 'page:gallery', title: '控件画廊', hint: '页面 · 统一输入显示契约', run: () => navigate({ page: 'gallery' }) });
     // 动作
     list.push({
       id: 'act:continue',

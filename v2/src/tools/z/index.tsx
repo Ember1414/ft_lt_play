@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Chart } from '../../chart/Chart';
 import { ComplexPlane, type CPMarker } from '../../chart/ComplexPlane';
 import { fmtTickAt } from '../../chart/canvas';
-import { ExprField, FieldGroup, Metric, NumField, SegmentedChips, SliderField, StatePanel, StatusBadge } from '../../ui/components';
+import { ExprField, FieldGroup, Metric, SegmentedChips, SliderField, StatePanel, StatusBadge } from '../../ui/components';
 import { TeX } from '../../ui/TeX';
 import {
   combineFracs,
@@ -27,9 +27,9 @@ import { useExperimentSync } from '../useSync';
 import type { ToolViewProps } from '../api';
 
 /**
- * Z 变换（z）— M1 旗舰工具
- * 序列 → X(z)：单位圆（零极点拖拽）/ 频响 |X(e^jω)| / 序列 x[n] / Jury 稳定性 / s→z 三映射。
- * 序列语法（与 v1 一致）：0.5^n*u[n]、n*u[n]、n*2^n*u[n]、cos(w n)u[n]、u[n]、delta[n]、常数。
+ * Z 变换（z）
+ * 序列 → X(z)：单位圆零极点 / 频响 |X(e^jω)| / 序列 x[n] / Jury 稳定性 / s→z 三映射。
+ * 序列语法：0.5^n*u[n]、n*u[n]、n*2^n*u[n]、cos(w n)u[n]、u[n]、delta[n]、常数及其线性组合。
  */
 
 type ViewId = 'plane' | 'freq' | 'seq' | 'jury' | 'map';
@@ -53,7 +53,7 @@ const VIEWS: ReadonlyArray<{ value: ViewId; label: string }> = [
 
 const PRESETS: ReadonlyArray<{ label: string; expr: string }> = [
   { label: '0.8^n', expr: '0.8^n*u[n]' },
-  { label: '谐振器', expr: 'cos(pi/3*n)u[n]' },
+  { label: '谐振（临界）', expr: 'cos(pi/3*n)u[n]' },
   { label: '斜坡', expr: 'n*u[n]' },
   { label: 'n·2^n', expr: 'n*2^n*u[n]' },
   { label: '常数', expr: 'u[n]' },
@@ -110,8 +110,20 @@ export function ZTool(props: ToolViewProps) {
   const poles = useMemo(() => (X ? polyRoots(X.d) : []), [X]);
   const zeros = useMemo(() => (X ? (pTrim(X.n).length > 1 ? polyRoots(pTrim(X.n)) : []) : []), [X]);
   const rhoMax = useMemo(() => poles.reduce((m, p) => Math.max(m, Math.hypot(p.re, p.im)), 0), [poles]);
-  const stable = poles.length > 0 && rhoMax < 1 - 1e-9;
-  const critical = poles.some((p) => Math.abs(Math.hypot(p.re, p.im) - 1) <= 1e-9);
+  // 无极点（有限长序列，X(z) 为整式）→ ROC 为全平面，恒稳定；否则按最大模判决
+  const hasPoles = poles.length > 0;
+  const outside = useMemo(() => poles.filter((p) => Math.hypot(p.re, p.im) > 1 + 1e-9).length, [poles]);
+  const onCircle = useMemo(() => poles.filter((p) => Math.abs(Math.hypot(p.re, p.im) - 1) <= 1e-9).length, [poles]);
+  const stable = !hasPoles || (outside === 0 && onCircle === 0);
+  const critical = outside === 0 && onCircle > 0;
+  const stabilityText = !hasPoles
+    ? '无极点（有限长序列 · ROC 全平面）'
+    : stable
+      ? '稳定（全部极点在单位圆内）'
+      : critical
+        ? '临界（含单位圆上极点）'
+        : '不稳定（含单位圆外极点）';
+  const stabilityTone: 'ok' | 'warn' | 'err' = stable ? 'ok' : critical ? 'warn' : 'err';
 
   const markers: CPMarker[] = useMemo(
     () => [
@@ -121,22 +133,41 @@ export function ZTool(props: ToolViewProps) {
     [poles, zeros],
   );
 
-  // 频响 |X(e^jω)| 与相位（ω ∈ [1e-3, π]）
+  // 频响 |X(e^jω)| 与相位（ω ∈ [1e-3, π]）；相位解缠绕，避免 ±180° 处连线跳 360°
   const freq = useMemo(() => {
     if (!X || params.view !== 'freq') return null;
     const w: number[] = [];
     const mag: number[] = [];
     const ph: number[] = [];
     const N = 320;
+    let prev: number | null = null;
     for (let i = 0; i <= N; i++) {
       const wv = 1e-3 + (Math.PI - 1e-3) * (i / N);
       const z = { re: Math.cos(wv), im: Math.sin(wv) };
       const h = cdiv(horner(X.n, z), horner(X.d, z));
       w.push(wv);
       mag.push(20 * Math.log10(Math.hypot(h.re, h.im) + 1e-12));
-      ph.push((180 / Math.PI) * Math.atan2(h.im, h.re));
+      let deg = (180 / Math.PI) * Math.atan2(h.im, h.re);
+      if (prev != null) {
+        while (deg - prev > 180) deg -= 360;
+        while (deg - prev < -180) deg += 360;
+      }
+      prev = deg;
+      ph.push(deg);
     }
-    return { w, mag, ph };
+    let magMax = -Infinity;
+    let magMin = Infinity;
+    let phMax = -Infinity;
+    let phMin = Infinity;
+    for (const v of mag) {
+      if (v > magMax) magMax = v;
+      if (v < magMin) magMin = v;
+    }
+    for (const v of ph) {
+      if (v > phMax) phMax = v;
+      if (v < phMin) phMin = v;
+    }
+    return { w, mag, ph, magMax, magMin, phMax, phMin };
   }, [X, params.view]);
 
   // 序列 x[n]（n = 0..40）
@@ -179,11 +210,16 @@ export function ZTool(props: ToolViewProps) {
       },
       canUndo: () => undoRef.current.canUndo(),
       canRedo: () => undoRef.current.canRedo(),
-      subtitle: () => `|z|max=${rhoMax.toFixed(3)} · ${stable ? '稳定' : critical ? '临界' : '不稳定'}`,
+      subtitle: () => (hasPoles ? `ρmax=${rhoMax.toFixed(3)} · ${stabilityText}` : stabilityText),
       metrics: () =>
         X
           ? [
-              { label: '极点最大模 ρmax', value: rhoMax, precision: 3, tone: stable ? 'ok' : critical ? 'warn' : 'danger' },
+              {
+                label: '极点最大模 ρmax',
+                value: hasPoles ? rhoMax : '—',
+                precision: 3,
+                tone: stabilityTone === 'ok' ? 'ok' : stabilityTone === 'warn' ? 'warn' : 'danger',
+              },
               { label: 'ROC · 收敛域', value: lines ? lines.rocTex.replace('\\text{ROC}: ', '') : '—' },
               { label: '阶次', value: `${poles.length} 极点 / ${zeros.length} 零点` },
             ]
@@ -221,13 +257,13 @@ export function ZTool(props: ToolViewProps) {
       ],
     });
     return () => props.api(null);
-  }, [params, X, rhoMax, stable, critical, lines, poles.length, zeros.length, items]);
+  }, [params, X, rhoMax, stable, critical, hasPoles, stabilityText, stabilityTone, lines, poles.length, zeros.length, items]);
 
   return (
     <>
       {props.leftOpen ? (
         <aside class="ws-left">
-          <FieldGroup title="序列 x[n]" desc="因果序列；语法与 v1 一致（a^n、n、n·a^n、cos/sin(w n)、u[n]、delta[n]）。">
+          <FieldGroup title="序列 x[n]" desc="因果序列；支持 a^n、n、n·a^n、cos/sin(w n)、u[n]、delta[n] 及其线性组合。">
             <ExprField
               label="x[n]"
               value={params.expr}
@@ -245,11 +281,9 @@ export function ZTool(props: ToolViewProps) {
             </div>
           </FieldGroup>
 
-          <FieldGroup title="视图" onReset={() => apply(DEFAULT)}>
+          <FieldGroup title="视图" onReset={() => apply({ view: DEFAULT.view })}>
             <SegmentedChips options={VIEWS} value={params.view} onChange={(v) => apply({ view: v })} ariaLabel="视图" />
-            <p class="muted">
-              解析结果：x(n) 与 X(z) 由 core.parseZCombo + 有理通分得到（与 v1 数值一致，回归网保障）。
-            </p>
+            <p class="muted">x(n) 与 X(z) 由序列表达式自动解析（有理通分，支持线性组合）。</p>
           </FieldGroup>
 
           {params.view === 'map' ? (
@@ -265,11 +299,8 @@ export function ZTool(props: ToolViewProps) {
           ) : null}
 
           <FieldGroup title="采样周期" defaultOpen={false}>
-            <SliderField label="T · 采样周期" value={params.T} onChange={(v) => applyLive({ T: v })} min={0.001} max={1} step={0.001} precision={3} unit="s" />
-            <div class="row">
-              <NumField value={params.T} onChange={(v) => apply({ T: v })} min={0.001} max={2} step={0.01} precision={3} unit="s" ariaLabel="采样周期 T" />
-            </div>
-            <p class="muted">用于 s→z 映射；频响与单位圆视图与 T 无关（离散域本身）。</p>
+            <SliderField label="T · 采样周期" value={params.T} onChange={(v) => applyLive({ T: v })} min={0.001} max={2} step={0.001} precision={3} unit="s" />
+            <p class="muted">仅 s→z 映射视图使用；频响与单位圆视图在离散域本身，与 T 无关。</p>
           </FieldGroup>
         </aside>
       ) : null}
@@ -287,15 +318,17 @@ export function ZTool(props: ToolViewProps) {
         {items && X && params.view === 'plane' ? (
           <div class="grid2">
             <div class="card stack">
-              <h3>单位圆 · 极点 ✕ / 零点 ○（只读：由序列表达式决定）</h3>
+              <h3>单位圆 · 极点 ✕ / 零点 ○（随序列表达式实时更新）</h3>
               <ComplexPlane markers={markers} mode="unit" height={300} halfW={2.2} />
               <p class="muted">滚轮缩放 · 拖动空白平移；零极点位置随左侧序列表达式变化。</p>
               <div class="row">
-                <StatusBadge kind={stable ? 'ok' : critical ? 'warn' : 'err'}>
-                  {stable ? '稳定（全部极点在单位圆内）' : critical ? '临界（含单位圆上极点）' : '不稳定（含单位圆外极点）'}
-                </StatusBadge>
-                <Metric label="ρmax" value={rhoMax} precision={3} />
-                <Metric label="1−ρmax 裕度" value={1 - rhoMax} precision={3} />
+                <StatusBadge kind={stabilityTone}>{stabilityText}</StatusBadge>
+                {hasPoles ? (
+                  <>
+                    <Metric label="ρmax" value={rhoMax} precision={3} />
+                    <Metric label="1−ρmax 裕度" value={1 - rhoMax} precision={3} />
+                  </>
+                ) : null}
               </div>
             </div>
             <div class="card stack">
@@ -309,9 +342,7 @@ export function ZTool(props: ToolViewProps) {
               <div class="tex-line">
                 <TeX tex={lines?.rocTex ?? ''} />
               </div>
-              <p class="muted">
-                极点 {poles.length} 个 · 零点 {zeros.length} 个；解析由 core.parseZCombo + 有理通分给出，与 v1 数值一致（回归网保障）。
-              </p>
+              <p class="muted">极点 {poles.length} 个 · 零点 {zeros.length} 个。</p>
             </div>
           </div>
         ) : null}
@@ -322,7 +353,7 @@ export function ZTool(props: ToolViewProps) {
             <Chart
               series={[{ xs: freq.w, ys: freq.mag }]}
               xRange={[0, Math.PI]}
-              yRange={[-60, Math.max(10, ...freq.mag.slice(0, 200)) + 6]}
+              yRange={[Math.min(-20, freq.magMin - 6), freq.magMax + 6]}
               height={240}
               xTickFmt={(v, step) => (Math.abs(v) < 1e-9 ? '0' : Math.abs(v - Math.PI) < 1e-9 ? 'π' : fmtTickAt(v, step))}
               xLabel="ω (rad)"
@@ -331,7 +362,7 @@ export function ZTool(props: ToolViewProps) {
             <Chart
               series={[{ xs: freq.w, ys: freq.ph, color: 'var(--series-3)' }]}
               xRange={[0, Math.PI]}
-              yRange={[-270, 90]}
+              yRange={[freq.phMin - 12, freq.phMax + 12]}
               height={200}
               xTickFmt={(v, step) => (Math.abs(v) < 1e-9 ? '0' : Math.abs(v - Math.PI) < 1e-9 ? 'π' : fmtTickAt(v, step))}
               xLabel="ω (rad)"
@@ -354,7 +385,7 @@ export function ZTool(props: ToolViewProps) {
               xLabel="n"
               yLabel="x[n]"
             />
-            <p class="muted">数值由 core.xNumeric 逐点给出（与 v1 完全一致）。</p>
+            <p class="muted">逐点按序列表达式数值求值（n = 0…40）。</p>
           </div>
         ) : null}
 
@@ -368,7 +399,12 @@ export function ZTool(props: ToolViewProps) {
                   {jr.stable ? 'Jury 判据：稳定' : jr.margin != null && Math.abs(jr.margin) <= 1e-9 ? 'Jury 判据：临界（含圆上极点）' : 'Jury 判据：不稳定'}
                 </StatusBadge>
                   <Metric label="ρmax" value={jr.rhoMax ?? '—'} precision={4} />
-                  <Metric label="稳定裕度 1−ρmax" value={jr.margin ?? '—'} precision={4} tone={jr.margin != null && jr.margin <= 0 ? 'danger' : 'ok'} />
+                  <Metric
+                    label="稳定裕度 1−ρmax"
+                    value={jr.margin ?? '—'}
+                    precision={4}
+                    tone={jr.margin == null ? 'default' : jr.margin < -1e-9 ? 'danger' : jr.margin <= 1e-9 ? 'warn' : 'ok'}
+                  />
                 </div>
                 <table class="tbl scroll">
                   <thead>

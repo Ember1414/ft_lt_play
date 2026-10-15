@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="信号与控制工具箱">
+  <rect width="512" height="512" rx="112" fill="#141a26"/>
+  <circle cx="196" cy="256" r="126" fill="none" stroke="#5b9bff" stroke-width="22"/>
+  <circle cx="196" cy="256" r="62" fill="none" stroke="#b48cff" stroke-width="18"/>
+  <path d="M322 256 q30 -74 60 0 t60 0" fill="none" stroke="#37d0a0" stroke-width="22" stroke-linecap="round"/>
+  <circle cx="196" cy="256" r="10" fill="#5b9bff"/>
+</svg>

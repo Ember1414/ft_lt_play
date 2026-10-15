@@ -9,8 +9,8 @@ import { useExperimentSync } from '../useSync';
 import type { ToolViewProps } from '../api';
 
 /**
- * PID 整定（pid）— M1 旗舰工具
- * 环路仿真（限幅/抗饱和/微分先行/数字 PID/输入端扰动）+ ZN 临界比例度 + FOPDT 两点法 + 分片寻优（可取消）。
+ * PID 整定（pid）
+ * 环路仿真（限幅/抗饱和/微分先行/数字 PID/输入端扰动）+ ZN 临界比例度 + FOPDT 两点法 + 寻优（可取消）。
  * 对象 G(s) 需为严格真分式；控制器为并联式 PID（kp/ki/kd）。
  */
 
@@ -33,13 +33,16 @@ interface PidParams {
   dKind: DistKind;
   dAmp: number;
   criterion: Criterion;
+  /** 仿真时长（s）— 影响 ts 与稳态观察窗 */
+  tmax: number;
 }
 
+/** 默认：对 G=1/(s(s+1)(s+2)) 的 ISE 寻优近似最优解（Mp≈20%、终值误差≈1.5%），首屏即良阻尼响应 */
 const DEFAULT: PidParams = {
   expr: '1/(s*(s+1)*(s+2))',
-  kp: 2,
-  ki: 1,
-  kd: 0.5,
+  kp: 9,
+  ki: 2,
+  kd: 7,
   Tf: 0.05,
   dOnM: false,
   uOn: false,
@@ -50,6 +53,7 @@ const DEFAULT: PidParams = {
   dKind: 'none',
   dAmp: 0.5,
   criterion: 'ise',
+  tmax: 12,
 };
 
 const AW_OPTIONS: ReadonlyArray<{ value: AwMode; label: string }> = [
@@ -90,6 +94,7 @@ function sanitize(raw: unknown): PidParams {
     dKind: ds.includes(r.dKind as DistKind) ? (r.dKind as DistKind) : DEFAULT.dKind,
     dAmp: num(r.dAmp, DEFAULT.dAmp, -10, 10),
     criterion: cs.includes(r.criterion as Criterion) ? (r.criterion as Criterion) : DEFAULT.criterion,
+    tmax: num(r.tmax, DEFAULT.tmax, 2, 60),
   };
 }
 
@@ -146,7 +151,7 @@ export function PidTool(props: ToolViewProps) {
     if (!parsed) return null;
     if (parsed.num.length - 1 >= parsed.den.length - 1) return { ok: false as const, note: '对象需为严格真分式（分子阶次 < 分母阶次）' };
     const opts: PidSimOpts = {
-      tmax: 12,
+      tmax: params.tmax,
       steps: 1500,
       uMax: params.uOn ? params.uMax : null,
       aw: params.aw,
@@ -205,6 +210,7 @@ export function PidTool(props: ToolViewProps) {
         break;
       }
     }
+    // 终值误差：取仿真末端瞬时误差（并非解析稳态误差，故按窗口标注）
     const ess = Math.abs(r - y[y.length - 1]);
     return { ...m, Mp, ts, ess };
   }, [simOk, params.r]);
@@ -236,7 +242,7 @@ export function PidTool(props: ToolViewProps) {
     optCancel.current = cancel;
     const key = params.criterion;
     const base: PidSimOpts = {
-      tmax: 12,
+      tmax: params.tmax,
       steps: 1200,
       uMax: params.uOn ? params.uMax : null,
       aw: params.aw,
@@ -310,8 +316,8 @@ export function PidTool(props: ToolViewProps) {
         met
           ? [
               { label: '超调 Mp', value: met.Mp, unit: '%', precision: 1, tone: met.Mp > 25 ? 'warn' : 'default', hint: '峰值相对设定的百分比' },
-              { label: '调节时间 ts', value: met.ts ?? '—', unit: 's', precision: 2, hint: '进入 ±2% 带' },
-              { label: '稳态误差 ess', value: met.ess, precision: 4, tone: met.ess > 0.02 ? 'warn' : 'ok' },
+              { label: '调节时间 ts', value: met.ts ?? '—', unit: 's', precision: 2, hint: `进入 ±2% 带（窗口 ${params.tmax} s）` },
+              { label: `终值误差 e(${params.tmax}s)`, value: met.ess, precision: 4, tone: met.ess > 0.02 ? 'warn' : 'ok', hint: '仿真末端 |r−y|；非解析稳态误差' },
               { label: 'ISE', value: met.ise, precision: 3, hint: '∫e²dt' },
             ]
           : [],
@@ -403,33 +409,31 @@ export function PidTool(props: ToolViewProps) {
             </div>
           </FieldGroup>
 
-          <FieldGroup title="PID 参数（并联式）" onReset={() => apply(DEFAULT)}>
-            <SliderField label="Kp · 比例增益" value={params.kp} onChange={(v) => applyLive({ kp: v })} min={0} max={20} step={0.05} precision={2} />
-            <SliderField label="Ki · 积分增益" value={params.ki} onChange={(v) => applyLive({ ki: v })} min={0} max={20} step={0.05} precision={2} />
-            <SliderField label="Kd · 微分增益" value={params.kd} onChange={(v) => applyLive({ kd: v })} min={0} max={10} step={0.02} precision={2} />
-            <div class="row">
-              <NumField value={params.kp} onChange={(v) => apply({ kp: v })} min={0} max={50} step={0.1} precision={2} ariaLabel="Kp" />
-              <NumField value={params.ki} onChange={(v) => apply({ ki: v })} min={0} max={50} step={0.1} precision={2} ariaLabel="Ki" />
-              <NumField value={params.kd} onChange={(v) => apply({ kd: v })} min={0} max={20} step={0.05} precision={2} ariaLabel="Kd" />
-            </div>
-            <SliderField label="Tf · 微分滤波时间常数（0 = 理想差分）" value={params.Tf} onChange={(v) => applyLive({ Tf: v })} min={0} max={0.5} step={0.005} precision={3} unit="s" />
+          <FieldGroup title="PID 参数（并联式）" onReset={() => apply({ kp: DEFAULT.kp, ki: DEFAULT.ki, kd: DEFAULT.kd })}>
+            <SliderField label="Kp · 比例增益" value={params.kp} onChange={(v) => applyLive({ kp: v })} min={0} max={50} step={0.05} precision={2} />
+            <SliderField label="Ki · 积分增益" value={params.ki} onChange={(v) => applyLive({ ki: v })} min={0} max={50} step={0.05} precision={2} />
+            <SliderField label="Kd · 微分增益" value={params.kd} onChange={(v) => applyLive({ kd: v })} min={0} max={20} step={0.02} precision={2} />
+            <SliderField label="Tf · 微分滤波时间常数（0 = 理想差分）" value={params.Tf} onChange={(v) => applyLive({ Tf: v })} min={0} max={2} step={0.005} precision={3} unit="s" />
             <Switch label="微分先行（D 作用于 −Δy）" checked={params.dOnM} onChange={(v) => apply({ dOnM: v })} />
           </FieldGroup>
 
           <FieldGroup title="执行器与采样" defaultOpen={false}>
             <div class="row">
               <Switch label="执行器限幅" checked={params.uOn} onChange={(v) => apply({ uOn: v })} />
-              <NumField value={params.uMax} onChange={(v) => apply({ uMax: v })} min={0.1} max={100} step={0.5} precision={1} disabled={!params.uOn} ariaLabel="限幅 uMax" />
+              {params.uOn ? (
+                <NumField value={params.uMax} onChange={(v) => apply({ uMax: v })} min={0.1} max={100} step={0.5} precision={1} unit="u" ariaLabel="限幅 uMax" />
+              ) : null}
             </div>
             <div class="row">
               <span class="muted">抗饱和</span>
               <SegmentedChips options={AW_OPTIONS} value={params.aw} onChange={(v) => apply({ aw: v })} ariaLabel="抗饱和模式" />
             </div>
-            <SliderField label="Ts · 采样周期（0 = 连续）" value={params.Ts} onChange={(v) => applyLive({ Ts: v })} min={0} max={0.5} step={0.005} precision={3} unit="s" />
+            <SliderField label="Ts · 采样周期（0 = 连续）" value={params.Ts} onChange={(v) => applyLive({ Ts: v })} min={0} max={1} step={0.005} precision={3} unit="s" />
+            <SliderField label="tmax · 仿真时长" value={params.tmax} onChange={(v) => applyLive({ tmax: v })} min={2} max={60} step={1} precision={0} unit="s" hint="决定 ts 与终值误差的观察窗口" />
           </FieldGroup>
 
           <FieldGroup title="参考与扰动" defaultOpen={false}>
-            <SliderField label="设定值 r（单位阶跃参考）" value={params.r} onChange={(v) => applyLive({ r: v })} min={-2} max={5} step={0.1} precision={2} />
+            <SliderField label="设定值 r（单位阶跃参考）" value={params.r} onChange={(v) => applyLive({ r: v })} min={-10} max={10} step={0.1} precision={2} />
             <div class="row">
               <span class="muted">输入端扰动</span>
               <SegmentedChips options={DIST_OPTIONS} value={params.dKind} onChange={(v) => apply({ dKind: v })} ariaLabel="扰动类型" />
@@ -444,13 +448,13 @@ export function PidTool(props: ToolViewProps) {
         {simOk ? (
           <>
             <div class="card stack">
-              <h3>闭环响应 y(t) 与设定 r（单位负反馈 · RK4）</h3>
+              <h3>闭环响应 y(t) 与设定 r（单位负反馈）</h3>
               <Chart
                 series={[
                   { xs: simOk.t, ys: simOk.y, glow: 3, width: 2.2 },
-                  { xs: [0, 12], ys: [params.r, params.r], dash: [5, 4], width: 1.2, color: 'var(--ink-3)' },
+                  { xs: [0, params.tmax], ys: [params.r, params.r], dash: [5, 4], width: 1.2, color: 'var(--ink-3)' },
                 ]}
-                xRange={[0, 12]}
+                xRange={[0, params.tmax]}
                 yRange={ranges ? ranges.y : [0, 2]}
                 height={260}
                 xLabel="t (s)"
@@ -462,7 +466,7 @@ export function PidTool(props: ToolViewProps) {
                 <h3>控制量 u(t)</h3>
                 <Chart
                   series={[{ xs: simOk.t, ys: simOk.u, color: 'var(--series-3)' }]}
-                  xRange={[0, 12]}
+                  xRange={[0, params.tmax]}
                   yRange={ranges ? ranges.u : [0, 2]}
                   height={180}
                   xLabel="t (s)"
@@ -473,7 +477,7 @@ export function PidTool(props: ToolViewProps) {
                 <h3>误差 e(t) = r − y</h3>
                 <Chart
                   series={[{ xs: simOk.t, ys: simOk.e, color: 'var(--series-2)' }]}
-                  xRange={[0, 12]}
+                  xRange={[0, params.tmax]}
                   yRange={ranges ? ranges.e : [0, 1]}
                   height={180}
                   xLabel="t (s)"
@@ -504,7 +508,13 @@ export function PidTool(props: ToolViewProps) {
               <Metric label="调节时间 ts" value={met?.ts ?? '—'} unit="s" precision={2} />
             </div>
             <div class="row">
-              <Metric label="稳态误差 ess" value={met ? met.ess : '—'} precision={4} tone={met && met.ess > 0.02 ? 'warn' : 'ok'} />
+              <Metric
+                label={`终值误差 e(${params.tmax}s)`}
+                value={met ? met.ess : '—'}
+                precision={4}
+                tone={met && met.ess > 0.02 ? 'warn' : 'ok'}
+                hint="仿真末端 |r−y|；非解析稳态误差"
+              />
               <Metric label="ISE" value={met ? met.ise : '—'} precision={3} />
             </div>
             <div class="row">
@@ -523,7 +533,7 @@ export function PidTool(props: ToolViewProps) {
                   <Metric label="ωpc" value={zn.wpc} unit="rad/s" precision={3} />
                 </div>
                 <div class="row">
-                  <button class="btn primary" onClick={applyZN}>
+                  <button class="btn primary" onClick={applyZN} title="ZN 整定偏激进（超调通常 40% 以上），可用右侧「寻优」进一步改善">
                     应用 ZN PID（0.6Ku / 0.5Tu / 0.125Tu）
                   </button>
                 </div>
@@ -534,7 +544,7 @@ export function PidTool(props: ToolViewProps) {
           </div>
 
           <div class="card stack">
-            <h4 class="card-h">整定器 · FOPDT 两点法</h4>
+            <h4 class="card-h">整定器 · FOPDT 两点法辨识</h4>
             {fopdt && fopdt.ok ? (
               <div class="row">
                 <Metric label="K · 增益" value={fopdt.K} precision={3} />
@@ -548,7 +558,15 @@ export function PidTool(props: ToolViewProps) {
 
           <div class="card stack">
             <h4 class="card-h">寻优（坐标下降 · 可取消）</h4>
-            <SegmentedChips options={CRIT_OPTIONS} value={params.criterion} onChange={(v) => apply({ criterion: v })} ariaLabel="寻优指标" />
+            <SegmentedChips
+              options={CRIT_OPTIONS}
+              value={params.criterion}
+              onChange={(v) => {
+                setOpt({ running: false, sims: 0, value: null, note: '' });
+                apply({ criterion: v });
+              }}
+              ariaLabel="寻优指标"
+            />
             <div class="row">
               {opt.running ? (
                 <button
@@ -572,7 +590,7 @@ export function PidTool(props: ToolViewProps) {
                 </StatusBadge>
               ) : null}
             </div>
-            <p class="muted">从当前 Kp/Ki/Kd 出发，最小化所选指标；每轮让出主线程（进度实时、可随时取消）。</p>
+            <p class="muted">从当前 Kp/Ki/Kd 出发最小化所选指标；运行中可随时取消（取消不改动参数）。</p>
           </div>
         </aside>
       ) : null}

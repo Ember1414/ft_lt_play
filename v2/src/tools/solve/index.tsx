@@ -32,9 +32,8 @@ import type { ToolViewProps } from '../api';
  * 交互求解（solve）— M2 存量迁移升级
  * 五视图：表达式求解（曲线 + 关键指标）/ 微分方程（解析 + 仿真互验）/ 差分方程（解析 + 递推互验）/
  *        数据与滤波（粘贴数据 + 三种滤波 + 频谱）/ 符号变换（ℒ/ℱ/𝒵 变换对）。
- * 数值与 v1 一致（core.odesolve / core.transforms 回归网保障）。
- * 说明：v1「手绘画圈」页签已统一并入「傅立叶级数」工具（去重，§4.11 升级清单）；
- *      语音输入依赖在线 Web Speech API，与 local-first/离线目标冲突，列入 M3 可选增强。
+ * 数值路径：表达式/ODE/差分方程解析 = 符号变换 + 留数法，数值对照 = RK4 与逐拍递推。
+ * 语音输入依赖浏览器在线识别服务（Web Speech API），离线环境不可用。
  */
 
 type ViewId = 'expr' | 'ode' | 'diffeq' | 'data' | 'sym';
@@ -53,6 +52,10 @@ interface SolveParams {
   N: number;
   raw: string;
   filt: FiltId;
+  /** FIR 滑动平均窗长（奇数，默认 5） */
+  maLen: number;
+  /** IIR 一阶低通系数 α（默认 0.2） */
+  alpha: number;
   sig: string;
   sigKind: 'auto' | 'cont' | 'disc';
 }
@@ -70,6 +73,8 @@ const DEFAULT: SolveParams = {
   N: 30,
   raw: '1 3 2 4 1 -1 -2 0 2 3',
   filt: 'none',
+  maLen: 5,
+  alpha: 0.2,
   sig: 'exp(-2*t)*u(t)',
   sigKind: 'auto',
 };
@@ -87,7 +92,7 @@ const VIEW_HINTS: Record<ViewId, string> = {
   ode: '常微分方程 + 初值：解析解（零输入 / 零状态 / 全解）与 RK4 仿真叠加互验。',
   diffeq: '差分方程 + 初值：解析解（z 域通道）与逐拍递推叠加互验。',
   data: '粘贴数据（单列或两列 t y）→ 统计与频谱；FIR 滑动平均 / 差分 / IIR 一阶低通对比。',
-  sym: '连续或离散信号 → ℒ / ℱ / 𝒵 变换对与 ROC（节点记法同 v1）。',
+  sym: '连续或离散信号 → ℒ / ℱ / 𝒵 变换对与 ROC。',
 };
 
 const FILTS: ReadonlyArray<{ value: FiltId; label: string }> = [
@@ -159,6 +164,8 @@ function sanitize(raw: unknown): SolveParams {
     N: Number.isFinite(r.N) ? Math.max(4, Math.min(200, Math.round(r.N as number))) : DEFAULT.N,
     raw: typeof r.raw === 'string' ? r.raw : DEFAULT.raw,
     filt: filts.includes(r.filt as FiltId) ? (r.filt as FiltId) : DEFAULT.filt,
+    maLen: Number.isFinite(r.maLen) ? Math.max(3, Math.min(21, Math.round(r.maLen as number) | 1)) : DEFAULT.maLen,
+    alpha: Number.isFinite(r.alpha) ? Math.max(0.01, Math.min(1, r.alpha as number)) : DEFAULT.alpha,
     sig: typeof r.sig === 'string' && r.sig.trim() ? r.sig : DEFAULT.sig,
     sigKind: kinds.includes(r.sigKind as 'auto') ? (r.sigKind as 'auto') : DEFAULT.sigKind,
   };
@@ -312,12 +319,17 @@ export function SolveTool(props: ToolViewProps) {
     if (!dataParsed || !dataParsed.ok || !dataParsed.values.length) return null;
     const x = dataParsed.values;
     let filt: number[];
-    if (params.filt === 'ma5') filt = convSame(x, [0.2, 0.2, 0.2, 0.2, 0.2]);
-    else if (params.filt === 'diff') filt = convSame(x, [1, -1]);
+    if (params.filt === 'ma5') {
+      const L = Math.max(3, Math.round(params.maLen) | 1);
+      filt = convSame(
+        x,
+        Array.from({ length: L }, () => 1 / L),
+      );
+    } else if (params.filt === 'diff') filt = convSame(x, [1, -1]);
     else if (params.filt === 'iir1') filt = convSame(x, [1]); // 占位，下面用递推覆盖
     else filt = x.slice();
     if (params.filt === 'iir1') {
-      const a = 0.2;
+      const a = params.alpha;
       let prev = 0;
       filt = x.map((v) => {
         prev = (1 - a) * prev + a * v;
@@ -363,7 +375,7 @@ export function SolveTool(props: ToolViewProps) {
       mx,
       mn,
     };
-  }, [dataParsed, params.filt]);
+  }, [dataParsed, params.filt, params.maLen, params.alpha]);
 
   /* ================= E. 符号变换 ================= */
 
@@ -450,7 +462,7 @@ export function SolveTool(props: ToolViewProps) {
             ? [
                 { label: '阶次', value: deSolved.n, precision: 0 },
                 { label: '稳定性', value: deSolved.stableText, tone: /不稳定/.test(deSolved.stableText) ? 'danger' : /临界/.test(deSolved.stableText) ? 'warn' : 'ok' },
-                { label: '稳态 y[N]', value: deRecur ? deRecur[deRecur.length - 1] : '—', precision: 4 },
+                { label: '末拍 y[N]', value: deRecur ? deRecur[deRecur.length - 1] : '—', precision: 4, hint: `N=${params.N} 递推末值` },
                 { label: '极点最大模', value: deSolved.poles.reduce((m, p) => Math.max(m, Math.hypot(p.re, p.im)), 0), precision: 4 },
               ]
             : [];
@@ -484,7 +496,7 @@ export function SolveTool(props: ToolViewProps) {
         {
           id: 'csv',
           label: 'CSV',
-          disabled: (view === 'expr' && !exprData) || (view === 'data' && !dataView),
+          disabled: !((view === 'expr' && !!exprData) || (view === 'data' && !!dataView)),
           reason: '当前视图无数据表（方程视图请用 JSON）',
           run: () => {
             if (view === 'expr' && exprData) {
@@ -499,7 +511,6 @@ export function SolveTool(props: ToolViewProps) {
           },
         },
         { id: 'json', label: 'JSON', run: () => downloadText('solve-experiment.json', JSON.stringify(params, null, 2)) },
-        { id: 'png', label: 'PNG', disabled: true, reason: 'PNG 导出随报告系统交付' },
       ],
     });
     return () => props.api(null);
@@ -546,8 +557,27 @@ export function SolveTool(props: ToolViewProps) {
                 <VoiceInput onResult={(v) => apply({ expr: v })} label="语音输入 f(t)" />
                 <span class="muted">口述示例：「sin 3 t 乘以 e 的负零点五 t」→ sin3t*e-0.5t</span>
               </div>
-              <SliderField label="起始 t₀" value={params.t0} onChange={(v) => applyLive({ t0: v })} min={-20} max={20} step={0.1} precision={2} unit="s" />
-              <SliderField label="终止 t₁" value={params.t1} onChange={(v) => applyLive({ t1: v })} min={-20} max={60} step={0.1} precision={2} unit="s" />
+              <SliderField
+                label="起始 t₀"
+                value={params.t0}
+                onChange={(v) => applyLive({ t0: Math.min(v, params.t1 - 1e-3) })}
+                min={-20}
+                max={20}
+                step={0.1}
+                precision={2}
+                unit="s"
+              />
+              <SliderField
+                label="终止 t₁"
+                value={params.t1}
+                onChange={(v) => applyLive({ t1: Math.max(v, params.t0 + 1e-3) })}
+                min={-20}
+                max={60}
+                step={0.1}
+                precision={2}
+                unit="s"
+                hint="t₁ 恒大于 t₀（互锁）"
+              />
             </FieldGroup>
           ) : null}
 
@@ -575,7 +605,7 @@ export function SolveTool(props: ToolViewProps) {
                     </div>
                   ))
                 : null}
-              <SliderField label="仿真时长 tmax" value={params.tmax} onChange={(v) => applyLive({ tmax: v })} min={0.5} max={30} step={0.5} precision={1} unit="s" />
+              <SliderField label="仿真时长 tmax" value={params.tmax} onChange={(v) => applyLive({ tmax: v })} min={0.5} max={60} step={0.5} precision={1} unit="s" />
             </FieldGroup>
           ) : null}
 
@@ -617,12 +647,29 @@ export function SolveTool(props: ToolViewProps) {
                 value={params.raw}
                 onInput={(e) => apply({ raw: (e.currentTarget as HTMLTextAreaElement).value })}
               />
-              <StatusBadge kind={dataParsed && dataParsed.ok ? 'ok' : 'err'}>
-                {dataParsed && dataParsed.ok ? '已解析 ' + dataParsed.values.length + ' 点' : dataParsed ? dataParsed.note : '待输入'}
-              </StatusBadge>
+              {dataParsed ? (
+                <StatusBadge kind={dataParsed.ok ? 'ok' : 'err'}>
+                  {dataParsed.ok ? '已解析 ' + dataParsed.values.length + ' 点' : dataParsed.note}
+                </StatusBadge>
+              ) : null}
               <SegmentedChips options={FILTS} value={params.filt} onChange={(v) => apply({ filt: v })} ariaLabel="滤波" />
+              {params.filt === 'ma5' ? (
+                <SliderField
+                  label="滑动平均窗长"
+                  value={params.maLen}
+                  onChange={(v) => apply({ maLen: Math.max(3, Math.round(v) | 1) })}
+                  min={3}
+                  max={21}
+                  step={2}
+                  precision={0}
+                  unit="点"
+                />
+              ) : null}
+              {params.filt === 'iir1' ? (
+                <SliderField label="IIR 系数 α" value={params.alpha} onChange={(v) => apply({ alpha: v })} min={0.01} max={1} step={0.01} precision={2} />
+              ) : null}
               <p class="muted">
-                FIR 滑动平均 h=[1,1,1,1,1]/5；一阶差分 h=[1,−1]；IIR 一阶低通 y[k]=(1−α)y[k−1]+α·x[k]，α=0.2（与 v1 同参数）。
+                差分 h=[1,−1]（一阶）；IIR 一阶低通 y[k]=(1−α)y[k−1]+α·x[k]。滤波结果与原始序列同图对照。
               </p>
             </FieldGroup>
           ) : null}
@@ -712,7 +759,7 @@ export function SolveTool(props: ToolViewProps) {
                       <TeX tex={odeSolved.full.tex ?? ''} />
                     </div>
                   </div>
-                  <p class="muted">左式由 core.solveODE 给出（拉氏变换 + 留数法反变换）；与 RK4 仿真逐点互验。</p>
+                  <p class="muted">左式为解析解（拉氏变换 + 留数法反变换），与右侧数值仿真逐点互验。</p>
                 </div>
               </>
             ) : (
@@ -742,7 +789,7 @@ export function SolveTool(props: ToolViewProps) {
                   <div class="row">
                     <Metric label="阶次" value={deSolved.n} precision={0} />
                     <Metric label="稳定性" value={deSolved.stableText} tone={/不稳定/.test(deSolved.stableText) ? 'danger' : 'ok'} />
-                    <Metric label="稳态 y[N]" value={deRecur[deRecur.length - 1]} precision={4} />
+                    <Metric label="末拍 y[N]" value={deRecur[deRecur.length - 1]} precision={4} />
                     <Metric label="极点最大模" value={deSolved.poles.reduce((m, p) => Math.max(m, Math.hypot(p.re, p.im)), 0)} precision={4} />
                   </div>
                   {deSolved.note ? <p class="muted">{deSolved.note}</p> : null}
@@ -852,9 +899,7 @@ export function SolveTool(props: ToolViewProps) {
                     </>
                   )}
                 </div>
-                <p class="muted">
-                  节点记法与 v1 完全一致；连续侧同时给出 ℒ 与 ℱ（含 δ 冲激项的标注）。
-                </p>
+                <p class="muted">连续侧同时给出 ℒ 与 ℱ（含 δ 冲激项标注）；离散侧给 𝒵 与 ROC。</p>
               </div>
             </>
           ) : (
@@ -890,19 +935,13 @@ export function SolveTool(props: ToolViewProps) {
               </p>
             ) : view === 'sym' ? (
               <p class="muted" style="margin-top:0">
-                ℒ/ℱ 闭式由 core.transforms（与 v1 一致，含闭式真值钉保障）；𝒵 侧同源。
+                连续信号给 ℒ/ℱ 闭式（含冲激项标注），离散序列给 𝒵 变换与 ROC。
               </p>
             ) : (
               <p class="muted" style="margin-top:0">
-                f(t) 由白名单解析器求值（零外部依赖、离线可用）；关键指标按 1200 点采样计算。
+                f(t) 按内置解析器求值（零外部依赖、离线可用）；关键指标按 1200 点采样计算。
               </p>
             )}
-          </div>
-          <div class="card stack">
-            <h4 class="card-h">与旧版差异</h4>
-            <p class="muted" style="margin-top:0">
-              v1「手绘画圈」页签已并入「傅立叶级数」工具（避免两处重复）；语音输入依赖在线识别服务，列入 M3 可选增强（离线优先取舍）。
-            </p>
           </div>
         </aside>
       ) : null}

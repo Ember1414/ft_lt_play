@@ -125,17 +125,6 @@ export function Sidebar(props: SidebarProps) {
           </span>
           <span class="side-label">设置</span>
         </button>
-        <button
-          type="button"
-          class={'side-item' + (route.page === 'baseline' || route.page === 'gallery' ? ' is-on' : '')}
-          onClick={() => navigate({ page: 'baseline' })}
-          title="基线与符号表 / 控件画廊"
-        >
-          <span class="side-glyph" aria-hidden="true">
-            ⊞
-          </span>
-          <span class="side-label">基线与契约</span>
-        </button>
       </div>
 
       <div class="side-meta" aria-hidden="true">

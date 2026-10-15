@@ -8,10 +8,10 @@ import { useExperimentSync } from '../useSync';
 import type { ToolViewProps } from '../api';
 
 /**
- * 公式推导（derive）— M2 存量迁移升级
- * 三视图：性质表（ℱ/ℒ/𝒵 性质与常用变换对）/ 逐步推导（分步展示，可逐步骤播放）/
+ * 公式推导（derive）
+ * 三视图：性质表（ℱ/ℒ/𝒵 性质与常用变换对）/ 逐步推导（分步展示，可逐步展开）/
  *        自定义推导（输入 f(t) → 定义积分 → 逐项变换对 → 合并 + ROC + ℱ 对照 + 数值自检）。
- * 表格与推导步骤内容自 v1 derive.js 迁移；公式渲染走 KaTeX（§8.11 符号登记表）。
+ * 公式渲染走 KaTeX（缺失时自动纯文本降级）。
  */
 
 type ViewId = 'tables' | 'steps' | 'custom';
@@ -40,7 +40,7 @@ const VIEW_HINTS: Record<ViewId, string> = {
   custom: '输入 f(t)：定义积分 → 逐项变换对 → 线性合并 F(s) + ROC → ℱ 对照 → 数值自检。',
 };
 
-/* ---------- 性质表数据（自 v1 derive.js 迁移） ---------- */
+/* ---------- 性质表数据 ---------- */
 interface TableDef {
   name: string;
   head: [string, string, string, string?];
@@ -80,16 +80,16 @@ const TABLES: Record<TableId, TableDef> = {
   },
   lt: {
     name: '常用拉普拉斯变换对',
-    head: ['', 'f(t)', 'F(s)'],
+    head: ['序号', 'f(t)', 'F(s)'],
     rows: [
-      ['', '\\delta(t)', '1'],
-      ['', 'u(t)', '\\frac{1}{s}'],
-      ['', 't^{n}\\,u(t)', '\\frac{n!}{s^{n+1}}'],
-      ['', 'e^{-at}u(t)', '\\frac{1}{s+a}'],
-      ['', '\\cos(\\omega_0 t)u(t)', '\\frac{s}{s^2+\\omega_0^2}'],
-      ['', '\\sin(\\omega_0 t)u(t)', '\\frac{\\omega_0}{s^2+\\omega_0^2}'],
-      ['', 'e^{-at}\\cos(\\omega_0 t)u(t)', '\\frac{s+a}{(s+a)^2+\\omega_0^2}'],
-      ['', 'e^{-at}\\sin(\\omega_0 t)u(t)', '\\frac{\\omega_0}{(s+a)^2+\\omega_0^2}'],
+      ['1', '\\delta(t)', '1'],
+      ['2', 'u(t)', '\\frac{1}{s}'],
+      ['3', 't^{n}\\,u(t)', '\\frac{n!}{s^{n+1}}'],
+      ['4', 'e^{-at}u(t)', '\\frac{1}{s+a}'],
+      ['5', '\\cos(\\omega_0 t)u(t)', '\\frac{s}{s^2+\\omega_0^2}'],
+      ['6', '\\sin(\\omega_0 t)u(t)', '\\frac{\\omega_0}{s^2+\\omega_0^2}'],
+      ['7', 'e^{-at}\\cos(\\omega_0 t)u(t)', '\\frac{s+a}{(s+a)^2+\\omega_0^2}'],
+      ['8', 'e^{-at}\\sin(\\omega_0 t)u(t)', '\\frac{\\omega_0}{(s+a)^2+\\omega_0^2}'],
     ],
   },
   zt: {
@@ -108,20 +108,20 @@ const TABLES: Record<TableId, TableDef> = {
   },
   ztp: {
     name: '常用 Z 变换对',
-    head: ['', 'x[n]', 'X(z)', 'ROC'],
+    head: ['序号', 'x[n]', 'X(z)', 'ROC'],
     rows: [
-      ['', '\\delta[n]', '1', '\\text{全 }z\\text{ 平面}'],
-      ['', 'u[n]', '\\frac{z}{z-1}', '|z|>1'],
-      ['', 'a^{n}u[n]', '\\frac{z}{z-a}', '|z|>|a|'],
-      ['', 'n\\,a^{n}u[n]', '\\frac{az}{(z-a)^2}', '|z|>|a|'],
-      ['', '\\cos(\\omega_0 n)u[n]', '\\frac{z(z-\\cos\\omega_0)}{z^2-2z\\cos\\omega_0+1}', '|z|>1'],
-      ['', '\\sin(\\omega_0 n)u[n]', '\\frac{z\\sin\\omega_0}{z^2-2z\\cos\\omega_0+1}', '|z|>1'],
-      ['', 'r^{n}\\cos(\\omega_0 n)u[n]', '\\frac{z(z-r\\cos\\omega_0)}{z^2-2rz\\cos\\omega_0+r^2}', '|z|>r'],
+      ['1', '\\delta[n]', '1', '\\text{全 }z\\text{ 平面}'],
+      ['2', 'u[n]', '\\frac{z}{z-1}', '|z|>1'],
+      ['3', 'a^{n}u[n]', '\\frac{z}{z-a}', '|z|>|a|'],
+      ['4', 'n\\,a^{n}u[n]', '\\frac{az}{(z-a)^{2}}', '|z|>|a|'],
+      ['5', '\\cos(\\omega_0 n)u[n]', '\\frac{z(z-\\cos\\omega_0)}{z^2-2z\\cos\\omega_0+1}', '|z|>1'],
+      ['6', '\\sin(\\omega_0 n)u[n]', '\\frac{z\\sin\\omega_0}{z^2-2z\\cos\\omega_0+1}', '|z|>1'],
+      ['7', 'r^{n}\\cos(\\omega_0 n)u[n]', '\\frac{z(z-r\\cos\\omega_0)}{z^2-2rz\\cos\\omega_0+r^2}', '|z|>r'],
     ],
   },
 };
 
-/* ---------- 逐步推导数据（自 v1 derive.js 迁移） ---------- */
+/* ---------- 逐步推导数据 ---------- */
 interface Step {
   t: string;
   desc?: string;
@@ -383,14 +383,13 @@ export function DeriveTool(props: ToolViewProps) {
         {
           id: 'tex',
           label: 'TeX',
-          disabled: !lap,
-          reason: '自定义推导视图下可导出（当前信号未解析）',
+          disabled: view !== 'custom' || !lap,
+          reason: '仅在「自定义推导」视图且信号已解析时可导出',
           run: () => {
             if (!lap) return;
             downloadText('derive-latex.txt', [lap.fLine, lap.fsLine, lap.rocTex].join('\n'));
           },
         },
-        { id: 'png', label: 'PNG', disabled: true, reason: 'PNG 导出随报告系统交付' },
       ],
     });
     return () => props.api(null);
@@ -421,14 +420,6 @@ export function DeriveTool(props: ToolViewProps) {
             <FieldGroup title="推导主题">
               <SegmentedChips options={DERIV_CHIPS} value={params.deriv} onChange={(v) => apply({ deriv: v, shown: 1 })} ariaLabel="推导" />
               <p class="muted">{d.desc}</p>
-              <div class="row">
-                <button class="btn" onClick={() => apply({ shown: 1 })}>
-                  回到第一步
-                </button>
-                <button class="btn" onClick={() => apply({ shown: d.steps.length })}>
-                  全部展开
-                </button>
-              </div>
               <SliderField
                 label="显示到第几步"
                 value={shown}
@@ -442,7 +433,7 @@ export function DeriveTool(props: ToolViewProps) {
           ) : null}
 
           {view === 'custom' ? (
-            <FieldGroup title="信号 f(t)" desc="支持 exp/sin/cos/t^n/u(t)/常数及线性组合（与 v1 同语法）。">
+            <FieldGroup title="信号 f(t)" desc="支持 exp/sin/cos/t^n/u(t)/常数及其线性组合。">
               <ExprField
                 label="f(t)"
                 value={params.sig}
@@ -494,7 +485,7 @@ export function DeriveTool(props: ToolViewProps) {
                 ))}
               </tbody>
             </table>
-            <p class="muted">单位与符号遵循《符号登记表》：ω (rad/s)、f (Hz)、s = σ + jω、z 变换 ROC 以 |z| 表述。</p>
+            <p class="muted">单位约定：ω (rad/s)、f (Hz)、s = σ + jω；z 变换收敛域以 |z| 表述。</p>
           </div>
         ) : null}
 
@@ -526,7 +517,7 @@ export function DeriveTool(props: ToolViewProps) {
                 </div>
               </div>
             ))}
-            <p class="muted">用「下一步 / 上一步」逐步跟读；步骤顺序与 v1 一致（含"为什么这么做"的说明）。</p>
+            <p class="muted">用「下一步 / 上一步」逐步展开，或用左栏滑杆直接跳到第 k 步。</p>
           </div>
         ) : null}
 
@@ -633,14 +624,14 @@ export function DeriveTool(props: ToolViewProps) {
       {props.rightOpen ? (
         <aside class="ws-right">
           <div class="card stack">
-            <h4 class="card-h">速度与提示</h4>
+            <h4 class="card-h">说明</h4>
             {view === 'custom' ? (
               <p class="muted" style="margin-top:0">
-                变换对由 core.transforms 逐项生成（与「拉普拉斯变换」工具同源）；u(t) 项按常数项处理（u(t) ↔ 1/s）。
+                逐项生成变换对，再线性合并（u(t) ↔ 1/s）；结果同时给出 F(s)、ROC 与 ℱ 对照。
               </p>
             ) : view === 'steps' ? (
               <p class="muted" style="margin-top:0">
-                推导内容自 v1 迁移，未增删步骤；公式一律 KaTeX 排版，缺失时自动纯文本降级。
+                推导按步骤展开，每步给出依据与关键公式；公式缺失 KaTeX 时自动纯文本降级。
               </p>
             ) : (
               <p class="muted" style="margin-top:0">
@@ -652,7 +643,6 @@ export function DeriveTool(props: ToolViewProps) {
             <div class="card stack">
               <h4 class="card-h">进度</h4>
               <Metric label="已展示步骤" value={shown + ' / ' + d.steps.length} />
-              <p class="muted">全部展开后可对照 v1 讲义逐步核对。</p>
             </div>
           ) : null}
           {view === 'custom' && items ? (

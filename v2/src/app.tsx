@@ -6,13 +6,11 @@ import { Sidebar } from './ui/Sidebar';
 import { Home } from './pages/Home';
 import { Workspace } from './pages/Workspace';
 import { Experiments } from './pages/Experiments';
-import { Baseline } from './pages/Baseline';
-import { Gallery } from './pages/Gallery';
 import { Paths } from './pages/Paths';
 import { Compare } from './pages/Compare';
 import { Theater } from './pages/Theater';
 import { Settings } from './pages/Settings';
-import { ImportPage } from './pages/EmptyPage';
+import { ImportPage } from './pages/ImportPage';
 import { toolById } from './tools/registry';
 import { flushSave, getCurrent, storageAvailable } from './state/experiments';
 
@@ -38,10 +36,6 @@ function crumbs(route: Route): string {
       return '演示剧场';
     case 'settings':
       return '设置';
-    case 'baseline':
-      return '基线与符号表';
-    case 'gallery':
-      return '控件画廊';
     case 'import':
       return '导入分享码';
   }
@@ -113,10 +107,6 @@ export function App() {
         return <Workspace toolId={route.toolId} onToast={showToast} onCommand={() => setPaletteOpen(true)} />;
       case 'experiments':
         return <Experiments onToast={showToast} />;
-      case 'baseline':
-        return <Baseline />;
-      case 'gallery':
-        return <Gallery />;
       case 'paths':
         return <Paths onToast={showToast} />;
       case 'compare':
@@ -227,15 +217,6 @@ export function App() {
             <div class="row">
               <button class="btn" onClick={() => setHelpOpen(false)}>
                 关闭
-              </button>
-              <button
-                class="btn"
-                onClick={() => {
-                  setHelpOpen(false);
-                  navigate({ page: 'gallery' });
-                }}
-              >
-                查看控件契约
               </button>
             </div>
           </div>

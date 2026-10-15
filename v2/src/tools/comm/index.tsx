@@ -162,6 +162,8 @@ export function CommTool(props: ToolViewProps) {
   const N = 2048;
   const dt = 1 / params.fs;
   const t = useMemo(() => Array.from({ length: N }, (_, i) => i * dt), [dt]);
+  /** 时域显示窗口：至少覆盖 3 个消息周期与 20 个载波周期，且不超过数据长度 */
+  const tWin = Math.min(t.length ? t[t.length - 1] : 0.15, 0.15, Math.max(3 / params.fm, 20 / params.fc));
 
   const msg = useMemo(() => sineWave(N, params.fm, params.fs, 1), [N, params.fm, params.fs]);
 
@@ -182,7 +184,9 @@ export function CommTool(props: ToolViewProps) {
     const expected = msg.map((v) => params.fc + params.kf * v);
     const deltaF = params.kf; // 峰值频偏（msg 幅值 1）
     const carson = 2 * (deltaF + params.fm);
-    return { x, fi, expected, spec: spectrum(x, dt), deltaF, carson };
+    let maxDev = 0;
+    for (let i = 0; i < fi.length; i++) maxDev = Math.max(maxDev, Math.abs(fi[i] - expected[i]));
+    return { x, fi, expected, spec: spectrum(x, dt), deltaF, carson, maxDev };
   }, [params.view, msg, params.fc, params.fs, params.kf, params.fm, dt]);
 
   // 采样定理视图
@@ -195,13 +199,17 @@ export function CommTool(props: ToolViewProps) {
     const ns = params.nsamp;
     const xs = Array.from({ length: ns }, (_, k) => Math.sin((2 * Math.PI * params.f0 * k) / params.fsamp));
     const ts = Array.from({ length: ns }, (_, k) => k / params.fsamp);
-    const held = sampleHold(xs, Math.max(1, Math.round(params.fsamp * (Ttotal / M))));
+    // 零阶保持：每个样点保持 1/fsamp 秒 → 稠密栅格上的重复次数 = 1/(fsamp·stepDt)
+    const stepDt = Ttotal / M;
+    const holdFactor = Math.max(1, Math.round(1 / (params.fsamp * stepDt)));
+    const held = sampleHold(xs, holdFactor).held;
+    const heldT = held.map((_, i) => i * stepDt);
     const rec = sincReconstruct(xs, params.fsamp, td);
     let worst = 0;
     for (let i = 0; i < M; i++) worst = Math.max(worst, Math.abs(rec[i] - dense[i]));
     const nyq = params.fsamp / 2;
     const alias = Math.abs(((params.f0 + nyq) % params.fsamp) - nyq); // 折叠频率
-    return { dense, td, xs, ts, held, rec, worst, nyq, alias, ratio: params.fsamp / params.f0 };
+    return { dense, td, xs, ts, held, heldT, rec, worst, nyq, alias, ratio: params.fsamp / params.f0 };
   }, [params.view, params.f0, params.fsamp, params.nsamp]);
 
   // 眼图视图
@@ -211,7 +219,8 @@ export function CommTool(props: ToolViewProps) {
     const bits = Array.from({ length: params.bitsN }, () => (rnd() > 0.5 ? 1 : 0));
     const span = 2;
     const stream = shapeNRZ(bits, params.sps, span, params.alpha, 1);
-    const traces = eyeTraces(stream, params.sps, span, 24);
+    // 轨迹数随符号数增长（上限 64，避免过度绘制）
+    const traces = eyeTraces(stream, params.sps, span, Math.max(8, Math.min(64, params.bitsN)));
     // 眼高：判决时刻 x=span/2 处各轨迹插值值，眼高 = min(正) − max(负)
     const x0 = span / 2;
     const vals: number[] = [];
@@ -277,6 +286,8 @@ export function CommTool(props: ToolViewProps) {
         {
           id: 'csv',
           label: '波形 CSV',
+          disabled: !(params.view === 'am' ? amData?.am : params.view === 'fm' ? fmData?.x : null),
+          reason: '当前视图无时域波形（采样 / 眼图视图请用 JSON）',
           run: () => {
             const rows = ['t,x'];
             const arr = params.view === 'am' ? amData?.am : params.view === 'fm' ? fmData?.x : null;
@@ -308,7 +319,11 @@ export function CommTool(props: ToolViewProps) {
           {params.view === 'am' || params.view === 'fm' ? (
             <FieldGroup title="载波与调制参数">
               <div class="row">
+                <span class="muted">采样率 fs</span>
                 <NumField value={params.fs} onChange={(v) => apply({ fs: v })} min={100} max={1e6} step={100} precision={0} unit="Hz" ariaLabel="仿真采样率" width={72} />
+              </div>
+              <div class="row">
+                <span class="muted">载波 fc</span>
                 <NumField value={params.fc} onChange={(v) => apply({ fc: v })} min={1} max={1e6} step={10} precision={0} unit="Hz" ariaLabel="载波频率" width={72} />
               </div>
               <SliderField label="消息频率 f_m" value={params.fm} onChange={(v) => applyLive({ fm: v })} min={1} max={Math.max(2, params.fc / 3)} step={1} precision={0} unit="Hz" />
@@ -328,8 +343,15 @@ export function CommTool(props: ToolViewProps) {
           {params.view === 'sample' ? (
             <FieldGroup title="采样定理参数" desc="对单音正弦采样：fs > 2f₀ 时不混叠；sinc 重建恢复带限信号。">
               <div class="row">
+                <span class="muted">信号 f₀</span>
                 <NumField value={params.f0} onChange={(v) => apply({ f0: v })} min={0.1} max={1e4} step={1} precision={1} unit="Hz" ariaLabel="信号频率" width={72} />
+              </div>
+              <div class="row">
+                <span class="muted">采样率 fs</span>
                 <NumField value={params.fsamp} onChange={(v) => apply({ fsamp: v })} min={0.5} max={1e5} step={5} precision={1} unit="Hz" ariaLabel="采样率" width={72} />
+              </div>
+              <div class="row">
+                <span class="muted">采样点 N</span>
                 <NumField value={params.nsamp} onChange={(v) => apply({ nsamp: Math.round(v) })} min={4} max={256} step={1} precision={0} unit="点" ariaLabel="采样点数" width={64} />
               </div>
             </FieldGroup>
@@ -338,7 +360,11 @@ export function CommTool(props: ToolViewProps) {
           {params.view === 'eye' ? (
             <FieldGroup title="基带与成形">
               <div class="row">
+                <span class="muted">符号数</span>
                 <NumField value={params.bitsN} onChange={(v) => apply({ bitsN: Math.round(v) })} min={8} max={400} step={4} precision={0} unit="符号" ariaLabel="符号数" width={70} />
+              </div>
+              <div class="row">
+                <span class="muted">码流种子</span>
                 <NumField value={params.bitsSeed} onChange={(v) => apply({ bitsSeed: Math.round(v) })} min={0} max={1e9} step={1} precision={0} ariaLabel="码流种子" width={70} />
               </div>
               <SliderField label="每符号样点 sps" value={params.sps} onChange={(v) => apply({ sps: Math.round(v) })} min={4} max={64} step={1} precision={0} />
@@ -363,7 +389,7 @@ export function CommTool(props: ToolViewProps) {
                 { xs: t, ys: amData.env, color: 'var(--series-4)', dash: [4, 3], width: 1.4 },
                 { xs: t, ys: amData.env.map((v) => -v), color: 'var(--series-4)', dash: [4, 3], width: 1.4 },
               ]}
-              xRange={[0, 0.15]}
+              xRange={[0, tWin]}
               yRange={[-1 - params.m, 1 + params.m]}
               height={220}
               xLabel="t (s)"
@@ -371,8 +397,8 @@ export function CommTool(props: ToolViewProps) {
             />
             <Chart
               series={[{ xs: t, ys: amData.dsb, color: 'var(--series-2)', width: 1.1, glow: 1.6 }]}
-              xRange={[0, 0.15]}
-              yRange={[-(1 + params.m), 1 + params.m]}
+              xRange={[0, tWin]}
+              yRange={[-1.2, 1.2]}
               height={150}
               xLabel="t (s)"
               yLabel="DSB-SC"
@@ -388,7 +414,7 @@ export function CommTool(props: ToolViewProps) {
                   xLabel="频率 (Hz)"
                   yLabel="幅度"
                 />
-                <p class="muted">载波 fc 与 fc±f_m；边带/载波幅度比 = m/2（真值钉）。</p>
+                <p class="muted">载波 fc 与边带 fc±f_m；理论边带/载波幅度比 = m/2。</p>
               </div>
               <div class="card stack">
                 <h3>DSB-SC 频谱（抑制载波）</h3>
@@ -414,7 +440,7 @@ export function CommTool(props: ToolViewProps) {
             <h3>调频 FM 时域与瞬时频率（fc={params.fc}Hz · Δf={fmData.deltaF}Hz · β={(fmData.deltaF / params.fm).toFixed(2)}）</h3>
             <Chart
               series={[{ xs: t, ys: fmData.x, color: 'var(--series-2)', width: 1.1, glow: 1.6 }]}
-              xRange={[0, 0.1]}
+              xRange={[0, tWin]}
               yRange={[-1.1, 1.1]}
               height={180}
               xLabel="t (s)"
@@ -425,14 +451,16 @@ export function CommTool(props: ToolViewProps) {
                 { xs: t, ys: fmData.fi, color: 'var(--series-1)', glow: 2 },
                 { xs: t, ys: fmData.expected, color: 'var(--series-4)', dash: [4, 3], width: 1.4 },
               ]}
-              xRange={[0, 0.1]}
+              xRange={[0, tWin]}
               yRange={[Math.min(params.fc - params.kf, 0), params.fc + params.kf + Math.abs(params.kf) * 0.15]}
               height={200}
               xLabel="t (s)"
               yLabel="瞬时频率 (Hz)"
             />
             <div class="row">
-              <StatusBadge kind="ok">瞬时频率（解析信号法）与 fc+k_f·m(t)（虚线）重合</StatusBadge>
+              <StatusBadge kind={fmData.maxDev < 0.05 * Math.max(1, params.kf) ? 'ok' : 'warn'}>
+                瞬时频率与 fc+k_f·m(t) 的最大偏差 = {fmData.maxDev.toFixed(3)} Hz
+              </StatusBadge>
               <Metric label="Carson 带宽" value={fmData.carson} precision={0} unit="Hz" />
               <Metric label="调制指数 β" value={fmData.deltaF / params.fm} precision={2} />
             </div>
@@ -465,6 +493,7 @@ export function CommTool(props: ToolViewProps) {
               series={[
                 { xs: sampleData.td, ys: sampleData.dense, color: 'var(--series-4)', width: 1.1, alpha: 0.8 },
                 { xs: sampleData.ts, ys: sampleData.xs, color: 'var(--series-1)', width: 0, glow: 3 },
+                { xs: sampleData.heldT, ys: sampleData.held, color: 'var(--series-3)', width: 1.3, dash: [4, 3] },
               ]}
               markers={sampleData.xs.map((v, i) => ({ x: sampleData.ts[i], y: v, kind: 'point' as const, color: 'var(--series-1)', size: 3 }))}
               xRange={[0, 0.25]}
@@ -473,6 +502,7 @@ export function CommTool(props: ToolViewProps) {
               xLabel="t (s)"
               yLabel="原信号 / 采样点"
             />
+            <p class="muted">灰 = 原信号 · 蓝点 = 采样点 · 紫虚线 = 零阶保持（ZOH）重建。</p>
             <Chart
               series={[
                 { xs: sampleData.td, ys: sampleData.dense, color: 'var(--series-4)', width: 1, alpha: 0.6 },
@@ -494,7 +524,7 @@ export function CommTool(props: ToolViewProps) {
           <div class="card stack">
             <h3>眼图雏形（NRZ + 升余弦成形 · sps={params.sps} · α={params.alpha.toFixed(2)}）</h3>
             <Chart
-              series={eyeData.traces.map((tr, i) => ({ xs: tr.xs, ys: tr.ys, color: `var(--series-${(i % 5) + 1})`, width: 1, alpha: 0.5 }))}
+              series={eyeData.traces.map((tr) => ({ xs: tr.xs, ys: tr.ys, color: 'var(--series-1)', width: 1, alpha: 0.35 }))}
               xRange={[0, eyeData.span]}
               yRange={[-1.3, 1.3]}
               height={280}
@@ -504,7 +534,14 @@ export function CommTool(props: ToolViewProps) {
             <div class="card stack">
               <h3>成形后基带波形（前 12 符号）</h3>
               <Chart
-                series={[{ xs: eyeData.stream.map((_, i) => i / params.sps), ys: eyeData.stream.slice(0, 12 * params.sps), color: 'var(--series-1)', glow: 2 }]}
+                series={[
+                  {
+                    xs: eyeData.stream.slice(0, 12 * params.sps + 1).map((_, i) => i / params.sps),
+                    ys: eyeData.stream.slice(0, 12 * params.sps + 1),
+                    color: 'var(--series-1)',
+                    glow: 2,
+                  },
+                ]}
                 xRange={[0, 12]}
                 yRange={[-1.3, 1.3]}
                 height={170}

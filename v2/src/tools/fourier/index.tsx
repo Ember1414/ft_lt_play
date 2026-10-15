@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Chart, type ChartSeries } from '../../chart/Chart';
-import { FieldGroup, Metric, NumField, SegmentedChips, SliderField, StatusBadge, Switch } from '../../ui/components';
+import { FieldGroup, Metric, SegmentedChips, SliderField, StatusBadge, Switch } from '../../ui/components';
 import { TeX } from '../../ui/TeX';
 import { conv, fft, ftSignals, spectrum, type FtSignal } from '../../core';
 import { createUndoStack } from '../../state/undo';
@@ -55,7 +55,7 @@ const DEFAULT: FParams = {
   ct: 0,
   speed: 1,
   sSig: 'sine2',
-  fs: 12,
+  fs: 20,
   method: 'lin',
 };
 
@@ -102,12 +102,13 @@ const SAMP_SIGS: Record<string, { name: string; f: (t: number) => number; B: num
   sine2: { name: '双正弦 3+7 Hz', f: (t) => Math.sin(2 * Math.PI * 3 * t) + 0.6 * Math.sin(2 * Math.PI * 7 * t), B: 7 },
   sine5: { name: '正弦 5 Hz', f: (t) => Math.sin(2 * Math.PI * 5 * t), B: 5 },
   sinc: {
-    name: 'sinc (B=4 Hz)',
+    // sinc(4t) = sin(4πt)/(4πt) ↔ (1/4)·rect(f/4)：单边带宽 2 Hz
+    name: 'sinc (B=2 Hz)',
     f: (t) => {
       const x = Math.PI * 4 * t;
       return Math.abs(x) < 1e-9 ? 1 : Math.sin(x) / x;
     },
-    B: 4,
+    B: 2,
   },
   gauss: { name: '高斯脉冲 (B≈3 Hz)', f: (t) => Math.exp(-2 * t * t), B: 3 },
 };
@@ -298,8 +299,10 @@ export function FourierTool(props: ToolViewProps) {
 
   const magSeries = useMemo((): ChartSeries[] => {
     const toY = (m: number): number => (params.logMag ? 20 * Math.log10(m + 1e-12) : m);
-    const cur: ChartSeries = { xs: sp.f, ys: sp.mag.map(toY), fill: 'rgba(36,86,204,.13)', fillAlpha: 1, width: 2 };
-    if (!params.logMag) cur.fill = 'rgba(36,86,204,.13)';
+    // 线性谱填充到基线，意义明确；dB 谱不填充（基线在 0 dB 之外，会涂满整片）
+    const cur: ChartSeries = params.logMag
+      ? { xs: sp.f, ys: sp.mag.map(toY), width: 2 }
+      : { xs: sp.f, ys: sp.mag.map(toY), fill: 'rgba(36,86,204,.13)', fillAlpha: 1, width: 2 };
     const out: ChartSeries[] = [cur];
     if (pinData) {
       const sp2 = spectrum(pinData.s.x, pinData.s.dt);
@@ -308,20 +311,40 @@ export function FourierTool(props: ToolViewProps) {
     return out;
   }, [sp, params.logMag, pinData]);
 
+  /** 幅度/相位谱可视频率上界：按累计能量 95% 分位取（脉冲类信号不再只剩左边缘一根竖线） */
+  const specRange = useMemo((): [number, number] => {
+    const fmax = sp.f[sp.f.length - 1] ?? 1;
+    let total = 0;
+    for (const m of sp.mag) total += m * m;
+    if (!(total > 0)) return [0, fmax];
+    let acc = 0;
+    let f95 = fmax;
+    for (let i = 0; i < sp.mag.length; i++) {
+      acc += sp.mag[i] * sp.mag[i];
+      if (acc >= 0.95 * total) {
+        f95 = sp.f[i];
+        break;
+      }
+    }
+    return [0, Math.min(fmax, Math.max(f95 * 1.6, 2))];
+  }, [sp]);
+
   /* ================= B. 卷积定理 ================= */
 
   const convData = useMemo(() => {
     const fs = KERNELS[params.fid] ?? KERNELS[KERNEL_IDS[0]];
     const gs = KERNELS[params.gid] ?? KERNELS[KERNEL_IDS[0]];
+    // 公共采样栅格：两核必须同 dt，卷积的幅值与时间轴才成立（核跨度不同 → 各自取整到栅格）
+    const DT = 2.4 / (NCONV - 1);
     const samp = (k: (t: number) => number, t0: number, t1: number): { a: number[]; dt: number; t0: number; t1: number } => {
-      const dt = (t1 - t0) / (NCONV - 1);
+      const n = Math.max(1, Math.round((t1 - t0) / DT));
       const a: number[] = [];
-      for (let i = 0; i < NCONV; i++) a.push(k(t0 + i * dt));
-      return { a, dt, t0, t1 };
+      for (let i = 0; i <= n; i++) a.push(k(t0 + i * DT));
+      return { a, dt: DT, t0, t1: t0 + n * DT };
     };
     const F = samp(fs.f, fs.t0, fs.t1);
     const G = samp(gs.f, gs.t0, gs.t1);
-    const dt = F.dt;
+    const dt = DT;
     const h = conv(F.a, G.a); // 长度 2N−1（离散求和）
     const hT0 = fs.t0 + gs.t0;
     const hArr = h.map((v) => v * dt); // 数值积分值
@@ -337,10 +360,8 @@ export function FourierTool(props: ToolViewProps) {
     const Fim = new Float64Array(L);
     const Gre = new Float64Array(L);
     const Gim = new Float64Array(L);
-    for (let i = 0; i < NCONV; i++) {
-      Fre[i] = F.a[i];
-      Gre[i] = G.a[i];
-    }
+    for (let i = 0; i < F.a.length; i++) Fre[i] = F.a[i];
+    for (let i = 0; i < G.a.length; i++) Gre[i] = G.a[i];
     fft(Fre, Fim);
     fft(Gre, Gim);
     const df = 1 / (L * dt);
@@ -547,10 +568,10 @@ export function FourierTool(props: ToolViewProps) {
             { label: '当前 h(t)', value: hNow, precision: 3 },
             { label: '面积法读数', value: slice.area, precision: 3, hint: '重叠面积（梯形积分）应与 h(t) 一致' },
             {
-              label: '定理验证（谱）',
+              label: '谱一致性',
               value: tiny(convData.specErr),
               tone: convData.specErr < 1e-6 ? 'ok' : 'warn',
-              hint: '|FFT{f∗g}| vs |F·G| 的最大相对偏差',
+              hint: '离散卷积定理自检：|FFT{f∗g}| vs |F·G| 的最大相对偏差（结构性恒等，非独立验证）',
             },
             { label: '卷积时长', value: convData.hT1 - convData.hT0, unit: 's', precision: 2 },
           ];
@@ -594,7 +615,6 @@ export function FourierTool(props: ToolViewProps) {
           label: 'JSON',
           run: () => downloadText('fourier-experiment.json', JSON.stringify(params, null, 2)),
         },
-        { id: 'png', label: 'PNG', disabled: true, reason: 'PNG 导出随报告系统交付' },
       ],
     });
     return () => props.api(null);
@@ -732,9 +752,6 @@ export function FourierTool(props: ToolViewProps) {
                   unit="Hz"
                   hint="拖到 2B 附近观察重建波形先恶化、再恢复"
                 />
-                <div class="row">
-                  <NumField value={params.fs} onChange={(v) => apply({ fs: v })} min={1} max={60} step={0.5} precision={1} unit="Hz" ariaLabel="采样率 fs" />
-                </div>
                 <SegmentedChips options={METHODS} value={params.method} onChange={(v) => apply({ method: v })} ariaLabel="重建方式" />
               </FieldGroup>
             </>
@@ -763,7 +780,7 @@ export function FourierTool(props: ToolViewProps) {
               <h3>幅度谱 |X(f)|{params.logMag ? '（dB）' : ''}</h3>
               <Chart
                 series={magSeries}
-                xRange={[0, sp.f[sp.f.length - 1]]}
+                xRange={specRange}
                 yRange={params.logMag ? [-80, 20] : [0, peak.mag * 1.12 || 1]}
                 height={190}
                 xLabel="f (Hz)"
@@ -774,7 +791,7 @@ export function FourierTool(props: ToolViewProps) {
               <h3>相位谱 ∠X(f)</h3>
               <Chart
                 series={[{ xs: sp.f, ys: sp.ph, color: 'var(--series-3)', width: 1.6 }]}
-                xRange={[0, sp.f[sp.f.length - 1]]}
+                xRange={specRange}
                 yRange={[-Math.PI - 0.3, Math.PI + 0.3]}
                 height={150}
                 xLabel="f (Hz)"
@@ -817,6 +834,9 @@ export function FourierTool(props: ToolViewProps) {
                   t = {nf(convT, 2)} s
                 </span>
                 <span class="spacer" />
+                <span class="muted" style="margin:0">
+                  卷积时刻
+                </span>
                 <input
                   class="c-slider-track"
                   style="flex:1 1 240px;min-width:160px"
@@ -884,11 +904,11 @@ export function FourierTool(props: ToolViewProps) {
         {view === 'samp' ? (
           <>
             <div class="card stack">
-              <h3>时域：原信号（蓝）· 采样点（橙）· 重建（绿）</h3>
+              <h3>时域：原信号（蓝 · 实线）· 采样点（橙）· 重建（绿 · 虚线）</h3>
               <Chart
                 series={[
-                  { xs: sampData.t, ys: sampData.r, width: 1.6, glow: 2 },
                   { xs: sampData.t, ys: sampData.x, width: 2 },
+                  { xs: sampData.t, ys: sampData.r, width: 1.6, dash: [5, 4], glow: 2, color: 'var(--series-2)' },
                 ]}
                 markers={sampData.sT.map((tv, i) => ({ x: tv, y: sampData.sV[i], kind: 'point' as const, color: '#A15C06', size: 3 }))}
                 xRange={[-1, 1]}

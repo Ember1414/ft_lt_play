@@ -36,7 +36,23 @@ const PATHS: PathDef[] = [
       { id: 's3', title: '拉普拉斯变换：s 平面与 ROC', desc: '拖拽零极点观察 ROC 条带；用留数反变换核对解析解。', toolId: 'laplace', state: { view: 'plane' } },
       { id: 's4', title: 'Z 变换：单位圆与 Jury 判据', desc: '观察极点在单位圆内外对稳定性的影响，并用 Jury 特征表逐条判据。', toolId: 'z', state: { view: 'plane' } },
       { id: 's5', title: '系统分析：波特图与稳定裕度', desc: '读取 PM/GM 与穿越频率；理解裕度与阻尼的关系。', toolId: 'sys', state: { expr: '1/(s*(s+1)*(s+2))', view: 'bode' } },
-      { id: 's6', title: '系统框图：负反馈与传函求解', desc: '搭建 G/(1+GH) 拓扑，核对闭环极点与理论一致。', toolId: 'block', state: {} },
+      {
+        id: 's6',
+        title: '系统框图：负反馈与传函求解',
+        desc: '搭建 G/(1+GH) 拓扑，核对闭环极点与理论一致。',
+        toolId: 'block',
+        state: {
+          nodes: [
+            { id: 1, kind: 'sum', x: 240, y: 220, src: true, f: { n: [1], d: [1] } },
+            { id: 2, kind: 'box', x: 480, y: 220, expr: '10/(s+1)', dom: 's', out: true },
+          ],
+          edges: [
+            { from: 1, to: 2, sign: 1 },
+            { from: 2, to: 1, sign: -1 },
+          ],
+          seq: 2,
+        },
+      },
       { id: 's7', title: '交互求解：微分方程与数据滤波', desc: '解析解与数值仿真互验；对数据做移动平均/一阶滤波。', toolId: 'solve', state: { view: 'ode' } },
       { id: 's8', title: '滤波器设计器：Butterworth 低通', desc: '按规格自动定阶，看幅频/群时延与零极点，并做系数量化对比。', toolId: 'filter', state: { kind: 'iir', family: 'butter', band: 'lp', view: 'mag' } },
       { id: 's9', title: '随机信号实验室：噪声 PSD 与自相关', desc: '对比周期图与 Welch；观察滤波后自相关展宽。', toolId: 'random', state: { view: 'psd' } },
@@ -50,13 +66,33 @@ const PATHS: PathDef[] = [
     steps: [
       { id: 'c1', title: '二阶系统的时域指标', desc: '从 ζ、ωn 读出超调量、峰值时间、调节时间。', toolId: 'sys', state: { expr: '10/(s^2+2s+10)', view: 'step' } },
       { id: 'c2', title: '根轨迹与极点走向', desc: '随 K 增大观察闭环极点移动与稳定性边界。', toolId: 'sys', state: { expr: '1/(s*(s+1)*(s+2))', view: 'locus' } },
-      { id: 'c3', title: 'PID 整定：ZN 临界比例度', desc: '从 Ku/Tu 一键试算 PID 增益并仿真；对比抗饱和方案。', toolId: 'pid', state: { num: [1], den: [1, 3, 3, 1] } },
+      { id: 'c3', title: 'PID 整定：ZN 临界比例度', desc: '从 Ku/Tu 一键试算 PID 增益并仿真；对比抗饱和方案。', toolId: 'pid', state: { expr: '1/(s^3+3s^2+3s+1)' } },
       { id: 'c4', title: '超前校正：提高相位裕度', desc: '给定目标 PM 与 ωm，自动求 C(s)=Kc(s+z)/(s+p) 并对比校正前后波特图。', toolId: 'control', state: { view: 'lead', plant: '1/(s*(s+1))' } },
       { id: 'c5', title: '滞后校正：提升低频增益', desc: '降低穿越频率换取裕度，同时提高低频增益以减小静差。', toolId: 'control', state: { view: 'lag', plant: '1/(s*(s+1))' } },
       { id: 'c6', title: '极点配置：状态反馈 K', desc: '由 ζ、ωn 期望极点出发，经 Ackermann 求 K，核对闭环极点。', toolId: 'control', state: { view: 'place', plant: '1/(s*(s+1))' } },
       { id: 'c7', title: '灵敏度校核：Ms 与鲁棒性', desc: '读取 |S|、|T| 峰值，评估对对象摄动的敏感度。', toolId: 'control', state: { view: 'sens', plant: '1/(s*(s+1))' } },
       { id: 'c8', title: '前置滤波器：抗混叠与噪声抑制', desc: '控制系统中的前置滤波：设计低通并检查相位代价。', toolId: 'filter', state: { kind: 'iir', family: 'butter', band: 'lp', view: 'mag' } },
-      { id: 'c9', title: '采样系统：误差点采样 + ZOH', desc: '在框图中搭建采样回路，核对 z 域闭环极点与理论。', toolId: 'block', state: {} },
+      {
+        id: 'c9',
+        title: '采样系统：误差点采样 + ZOH',
+        desc: '在框图中搭建采样回路，核对 z 域闭环极点与理论。',
+        toolId: 'block',
+        state: {
+          nodes: [
+            { id: 1, kind: 'sum', x: 180, y: 250, src: true },
+            { id: 2, kind: 'sample', x: 360, y: 250, dom: 'z' },
+            { id: 3, kind: 'zoh', x: 480, y: 250, dom: 'z' },
+            { id: 4, kind: 'box', x: 640, y: 250, expr: '2/(s+1)', dom: 's', out: true },
+          ],
+          edges: [
+            { from: 1, to: 2, sign: 1 },
+            { from: 2, to: 3, sign: 1 },
+            { from: 3, to: 4, sign: 1 },
+            { from: 4, to: 1, sign: -1 },
+          ],
+          seq: 4,
+        },
+      },
       { id: 'c10', title: '采样定理与眼图', desc: '观察欠采样混叠与 sinc 重建；看 NRZ 成形眼图张开度。', toolId: 'comm', state: { view: 'sample' } },
     ],
   },
@@ -215,7 +251,7 @@ export function Paths(props: PathsProps) {
             清除全部进度
           </button>
         </div>
-        <p class="muted">路径为可选体验：专业用户可完全不进路径，直接使用工具（规划书 §4.3）。</p>
+        <p class="muted">路径为可选体验：也可以完全跳过路径，直接用 ⌘K 打开任意工具。</p>
       </section>
     </div>
   );

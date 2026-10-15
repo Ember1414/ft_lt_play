@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { spring } from '../../anim/easing';
 import { Chart } from '../../chart/Chart';
 import { ComplexPlane, type CPMarker } from '../../chart/ComplexPlane';
-import { ExprField, FieldGroup, Metric, NumField, SegmentedChips, SliderField, StatePanel, StatusBadge, Switch } from '../../ui/components';
+import { ExprField, FieldGroup, Metric, SegmentedChips, SliderField, StatePanel, StatusBadge, Switch } from '../../ui/components';
 import { TeX } from '../../ui/TeX';
 import {
   combineFracs,
@@ -28,17 +28,17 @@ import { useExperimentSync } from '../useSync';
 import type { ToolViewProps } from '../api';
 
 /**
- * 拉普拉斯变换（laplace）— M2 存量迁移升级
- * 五视图：s 平面（极零点拖拽 + ROC 遮罩 + 弹簧联动响应）/ 反变换（留数解析 vs 数值叠加）/
+ * 拉普拉斯变换（laplace）
+ * 五视图：s 平面（极零点拖拽 + ROC 遮罩）/ 反变换（留数解析 vs 数值叠加）/
  *        多 ROC 分析（收敛域条带可视化）/ 时域 → 复频域（闭式 + 数值自检）/ 性质验证。
- * 数值与 v1 一致（core.transforms 回归网保障）；符号遵循《符号登记表》（σ、jω、ζ、ωn、ROC）。
+ * 符号约定：σ、jω、ζ、ωn、ROC。
  */
 
 type ViewId = 'plane' | 'inverse' | 'rocs' | 'transform' | 'props';
 type PropId = 'shift' | 'freq' | 'scale' | 'diff';
 type MetricTone = 'default' | 'ok' | 'warn' | 'danger';
 
-/** 极/零 spec：im ≥ 0；im > 1e-6 表示共轭对（与 v1 约定一致） */
+/** 极/零 spec：im ≥ 0；im > 1e-6 表示共轭对 */
 interface PZ {
   re: number;
   im: number;
@@ -709,7 +709,6 @@ export function LaplaceTool(props: ToolViewProps) {
           label: 'JSON',
           run: () => downloadText('laplace-experiment.json', JSON.stringify(params, null, 2)),
         },
-        { id: 'png', label: 'PNG', disabled: true, reason: 'PNG 导出随报告系统交付' },
       ],
     });
     return () => props.api(null);
@@ -747,7 +746,7 @@ export function LaplaceTool(props: ToolViewProps) {
           ) : null}
 
           {sigInput ? (
-            <FieldGroup title="信号 f(t)" desc="因果组合信号（与 v1 语法一致）：指数 / 正弦 / 余弦 / 幂 / 阶跃及线性组合。">
+            <FieldGroup title="信号 f(t)" desc="因果组合信号：指数 / 正弦 / 余弦 / 幂 / 阶跃及其线性组合。">
               <ExprField
                 label="f(t)"
                 value={params.signal}
@@ -782,24 +781,13 @@ export function LaplaceTool(props: ToolViewProps) {
                     step={PROP_CFG[params.prop].step}
                     precision={2}
                   />
-                  <div class="row">
-                    <NumField
-                      value={params.propParam}
-                      onChange={(v) => apply({ propParam: v })}
-                      min={PROP_CFG[params.prop].min}
-                      max={PROP_CFG[params.prop].max}
-                      step={PROP_CFG[params.prop].step}
-                      precision={2}
-                      ariaLabel={PROP_CFG[params.prop].label}
-                    />
-                  </div>
                 </>
               )}
             </FieldGroup>
           ) : null}
 
           {sysInput ? (
-            <FieldGroup title="增益与显示" onReset={() => apply(DEFAULT)}>
+            <FieldGroup title="增益与显示" onReset={() => apply({ gain: DEFAULT.gain, showROC: DEFAULT.showROC })}>
               <SliderField
                 label="增益 K · H(s) 幅值"
                 value={params.gain}
@@ -810,9 +798,6 @@ export function LaplaceTool(props: ToolViewProps) {
                 precision={2}
                 hint="K 改变响应幅值与直流增益；不改变极零点与 ROC"
               />
-              <div class="row">
-                <NumField value={params.gain} onChange={(v) => apply({ gain: v })} min={-100} max={100} step={0.1} precision={2} ariaLabel="增益 K（扩展范围）" />
-              </div>
               <Switch label="显示收敛域 ROC" checked={params.showROC} onChange={(v) => apply({ showROC: v })} hint="在 s 平面高亮 Re(s) > 最右极点实部" />
             </FieldGroup>
           ) : null}
@@ -899,9 +884,7 @@ export function LaplaceTool(props: ToolViewProps) {
                 <Metric label="y_step 终值" value={dcGain ?? '∞'} precision={4} hint="终值定理：H(0)" />
                 <Metric label="仿真窗口" value={tmax} unit="s" precision={3} />
               </div>
-              <p class="muted">
-                数值 = core.ltiResponse（RK4 状态空间）；解析 = core.invLaplace（重极点部分分式 + 留数）。两者一致即反变换正确（与 v1 数值一致，回归网保障）。
-              </p>
+              <p class="muted">解析解由留数法部分分式（含重极点）给出，数值解由状态空间仿真给出；两条曲线一致即反变换正确。</p>
             </div>
           </>
         ) : null}
@@ -968,7 +951,7 @@ export function LaplaceTool(props: ToolViewProps) {
           items && lap && F ? (
             <>
               <div class="card stack">
-                <h3>时域 → 复频域（闭式由 core.transforms 给出，与 v1 数值一致）</h3>
+                <h3>时域 → 复频域（闭式 + 数值自检）</h3>
                 <div class="formula-block">
                   <div class="tex-line">
                     <TeX tex={lap.fLine} />
@@ -1015,7 +998,7 @@ export function LaplaceTool(props: ToolViewProps) {
                   ) : (
                     <p class="muted">等待信号解析。</p>
                   )}
-                  <p class="muted">验证点取 ROC 右缘 + 1.5；ε &lt; 1e-3 视为一致（积分区间 60/σ，40000 步）。</p>
+                  <p class="muted">验证点取 ROC 右缘 + 1.5；数值积分与闭式偏差 ε &lt; 1e-3 视为一致。</p>
                 </div>
               </div>
             </>
@@ -1069,9 +1052,7 @@ export function LaplaceTool(props: ToolViewProps) {
                     </StatusBadge>
                     <Metric label="最大相对误差" value={tiny(propRun.maxRel)} tone={propRun.passed ? 'ok' : 'danger'} />
                   </div>
-                  <p class="muted">
-                    定义积分由复合梯形法给出（120000 步）；公式值由 F(s) 闭式代入同一验证点。两侧独立计算，一致即性质成立。
-                  </p>
+                  <p class="muted">定义积分与符号公式在同一验证点独立计算，结果一致即性质成立。</p>
                 </>
               ) : (
                 <StatePanel kind="error" title="性质验证不可用" desc={propRun && !propRun.ok ? propRun.note : '信号非法。'} />

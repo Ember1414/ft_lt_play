@@ -12,8 +12,6 @@ export type Route =
   | { page: 'compare' }
   | { page: 'theater' }
   | { page: 'settings' }
-  | { page: 'baseline' }
-  | { page: 'gallery' }
   | { page: 'import'; code: string };
 
 export function parseHash(hash: string): Route {
@@ -29,8 +27,6 @@ export function parseHash(hash: string): Route {
   if (head === 'compare') return { page: 'compare' };
   if (head === 'theater') return { page: 'theater' };
   if (head === 'settings') return { page: 'settings' };
-  if (head === 'baseline') return { page: 'baseline' };
-  if (head === 'gallery') return { page: 'gallery' };
   return { page: 'home' };
 }
 
@@ -51,10 +47,6 @@ export function routeHash(route: Route): string {
       return '#/theater';
     case 'settings':
       return '#/settings';
-    case 'baseline':
-      return '#/baseline';
-    case 'gallery':
-      return '#/gallery';
     case 'import':
       return '#exp=' + route.code;
   }

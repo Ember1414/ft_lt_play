@@ -108,11 +108,11 @@ function sanitize(raw: unknown): FtParams {
     view: views.includes(r.view as ViewId) ? (r.view as ViewId) : DEFAULT.view,
     shape: shapeOk ? (r.shape as string) : DEFAULT.shape,
     custom,
-    terms: Number.isFinite(r.terms) ? Math.max(1, Math.min(120, Math.round(r.terms as number))) : DEFAULT.terms,
+    terms: Number.isFinite(r.terms) ? Math.max(1, Math.min(60, Math.round(r.terms as number))) : DEFAULT.terms,
     speed: Number.isFinite(r.speed) ? Math.max(0.25, Math.min(2, r.speed as number)) : DEFAULT.speed,
     showCircles: r.showCircles !== false,
     compare: r.compare === true,
-    cmpTerms: Number.isFinite(r.cmpTerms) ? Math.max(1, Math.min(120, Math.round(r.cmpTerms as number))) : DEFAULT.cmpTerms,
+    cmpTerms: Number.isFinite(r.cmpTerms) ? Math.max(1, Math.min(60, Math.round(r.cmpTerms as number))) : DEFAULT.cmpTerms,
     playing: r.playing !== false,
   };
 }
@@ -174,6 +174,7 @@ function DrawPad(props: { initial: Pt[]; onDone: (pts: Pt[]) => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const ptsRef = useRef<Pt[]>(props.initial.slice());
   const drawingRef = useRef(false);
+  const [note, setNote] = useState('');
   const H = 170;
 
   const repaint = (): void => {
@@ -229,6 +230,11 @@ function DrawPad(props: { initial: Pt[]; onDone: (pts: Pt[]) => void }) {
 
   return (
     <div class="chart" ref={wrapRef} style={{ height: H + 'px' }}>
+      {note ? (
+        <p class="muted" style="margin:0 0 4px">
+          {note}
+        </p>
+      ) : null}
       <canvas
         ref={canvasRef}
         title="按住拖动绘制闭合曲线；松手后自动重采样并分解为相量"
@@ -260,8 +266,11 @@ function DrawPad(props: { initial: Pt[]; onDone: (pts: Pt[]) => void }) {
           let L = 0;
           for (let i = 1; i < P.length; i++) L += Math.hypot(P[i].x - P[i - 1].x, P[i].y - P[i - 1].y);
           if (L >= 40) {
+            setNote('');
             const stride = Math.max(1, Math.ceil(P.length / 256));
             props.onDone(P.filter((_, i) => i % stride === 0));
+          } else {
+            setNote('笔迹太短（< 40 px），请画一条更长的闭合曲线');
           }
         }}
         onPointerCancel={() => {
@@ -949,7 +958,7 @@ export function FtTool(props: ToolViewProps) {
         if (params.view === 'circles') {
           return [
             { label: '圈数（相量）', value: Math.min(params.terms, phasors.length), precision: 0 },
-            { label: '最大幅值 |c₁|', value: phasors[0]?.amp ?? '—', precision: 4 },
+            { label: '最大幅值 max|cₖ|', value: phasors[0]?.amp ?? '—', precision: 4 },
             { label: '有效谱线', value: spec.count, precision: 0 },
             ...(params.compare ? [{ label: '对比项数', value: Math.min(params.cmpTerms, phasors.length), precision: 0 }] : []),
           ];
@@ -996,7 +1005,6 @@ export function FtTool(props: ToolViewProps) {
           label: 'JSON',
           run: () => downloadText('ft-experiment.json', JSON.stringify({ ...params, custom: params.custom.length }, null, 2)),
         },
-        { id: 'png', label: 'PNG', disabled: true, reason: 'PNG 导出随报告系统交付' },
       ],
     });
     return () => props.api(null);
@@ -1044,10 +1052,10 @@ export function FtTool(props: ToolViewProps) {
               value={params.terms}
               onChange={(v) => applyLive({ terms: Math.round(v) })}
               min={1}
-              max={120}
+              max={60}
               step={1}
               precision={0}
-              hint="相量链长度：越多越贴合目标路径"
+              hint="相量链长度（1…60）：越多越贴合目标路径；瀑布视图绘制前 20 层"
             />
             <SliderField
               label="动画速度"
@@ -1071,7 +1079,7 @@ export function FtTool(props: ToolViewProps) {
                   value={params.cmpTerms}
                   onChange={(v) => applyLive({ cmpTerms: Math.round(v) })}
                   min={1}
-                  max={120}
+                  max={60}
                   step={1}
                   precision={0}
                   hint="紫色轨迹 = 该项数的合成路径"
@@ -1175,7 +1183,7 @@ export function FtTool(props: ToolViewProps) {
                 xRange={[0, 2]}
                 yRange={[-1.7, 1.7]}
                 height={300}
-                xLabel="t (s)"
+                xLabel="t（T = 1 s，0–2 为两个周期）"
                 yLabel="Sₙ(t)"
               />
               <div class="row">
@@ -1212,7 +1220,7 @@ export function FtTool(props: ToolViewProps) {
               <Metric label="当前圈数" value={Math.min(params.terms, phasors.length)} precision={0} />
             </div>
             <div class="row">
-              <Metric label="|c₁| · 最大幅值" value={phasors[0]?.amp ?? '—'} precision={4} />
+              <Metric label="max|cₖ| · 最大幅值" value={phasors[0]?.amp ?? '—'} precision={4} />
               <Metric label="有效谱线" value={spec.count} precision={0} hint="幅值 > 1e-6 的谐波数" />
             </div>
           </div>
@@ -1229,13 +1237,7 @@ export function FtTool(props: ToolViewProps) {
               )}
             </div>
           ) : null}
-          <div class="card stack">
-            <h4 class="card-h">Tips</h4>
-            <p class="muted" style="margin-top:0">
-              每个相量 cₖ 贡献一个以原点为中心、半径 |cₖ|、初相 ∠cₖ 的旋转圆；相量链末端画出的曲线即目标笔画。
-              低频相量决定整体形状，高频相量补充尖角细节。
-            </p>
-          </div>
+
         </aside>
       ) : null}
     </>

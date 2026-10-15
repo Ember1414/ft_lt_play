@@ -54,11 +54,11 @@ jobs:
           apiToken: ${{ env.CF_API_TOKEN }}
           accountId: ${{ env.CF_ACCOUNT_ID }}
           workingDirectory: v2
-          command: pages deploy dist --project-name=ft-lt-play-v2 --branch=${{ github.head_ref || github.ref_name }}
+          command: pages deploy dist --project-name=ft-lt-play --branch=${{ github.head_ref || github.ref_name }}
       - name: 部署地址
         if: env.CF_API_TOKEN != '' && env.CF_ACCOUNT_ID != ''
         working-directory: .
-        run: echo "已发布：https://ft-lt-play-v2.pages.dev（分支预览形式见 Cloudflare Pages 控制台）"
+        run: echo "已发布：https://ft-lt-play.pages.dev（分支预览形式见 Cloudflare Pages 控制台）"
       - name: 未配置密钥 → 跳过部署
         if: env.CF_API_TOKEN == '' || env.CF_ACCOUNT_ID == ''
         run: echo "跳过部署：未配置 CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID（见 docs/v2/部署说明.md §2）"

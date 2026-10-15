@@ -19,13 +19,39 @@ import { useExperimentSync } from '../useSync';
 import type { ToolViewProps } from '../api';
 
 /**
- * 随机信号实验室（random）— M2 新工具
+ * 随机信号实验室（random）
  * 噪声（白/均匀/正弦+噪声）· 自/互相关 · 周期图 / Welch 功率谱密度 · 线性滤波前后对比。
- * 内核：core/randomsig.ts（确定性 seed 可复现；PSD 满足 Parseval，真值钉保障）。
+ * 全部随机量由 seed 确定性生成，可复现。
  */
 
 type ViewId = 'time' | 'psd' | 'corr' | 'filter';
 type Kind = 'white' | 'uniform' | 'sine';
+
+/** PSD 纵轴：dB 下限统一到 −120（避免零 bin 的 −300 dB 把坐标拉平） */
+const toDb = (v: number): number => Math.max(-120, 10 * Math.log10(v + 1e-300));
+
+/** 去均值标准差 */
+function stdOf(y: number[]): number {
+  if (!y.length) return 0;
+  const m = y.reduce((s, v) => s + v, 0) / y.length;
+  return Math.sqrt(y.reduce((s, v) => s + (v - m) * (v - m), 0) / y.length);
+}
+
+/** 纵轴范围（去 NaN、零跨度保底） */
+function yRangeOf(y: ArrayLike<number>, pad = 0.12): [number, number] {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (let i = 0; i < y.length; i++) {
+    const v = y[i];
+    if (!Number.isFinite(v)) continue;
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+  }
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return [-1, 1];
+  if (hi - lo < 1e-9) return [lo - 1, hi + 1];
+  const m = (hi - lo) * pad;
+  return [lo - m, hi + m];
+}
 
 interface RandomParams {
   kind: Kind;
@@ -208,6 +234,39 @@ export function RandomTool(props: ToolViewProps) {
     return psd.per.f[bi];
   }, [psd]);
 
+  // Welch 退化：段长超过样本数时无法分段平均
+  const welchDegraded = params.view === 'psd' && params.seg > params.N;
+
+  /** PSD 纵轴范围（dB，下限 −120） */
+  const psdRange = useMemo((): [number, number] => {
+    if (!psd) return [-120, 0];
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const v of psd.per.p) {
+      const d = toDb(v);
+      if (d > hi) hi = d;
+      if (d < lo) lo = d;
+    }
+    for (const v of psd.wel.p) {
+      const d = toDb(v);
+      if (d > hi) hi = d;
+      if (d < lo) lo = d;
+    }
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) return [-120, 0];
+    return [Math.max(-120, lo - 4), hi + 8];
+  }, [psd]);
+
+  /** Parseval 自检：∫P df 应 ≈ mean(x²) */
+  const parseval = useMemo(() => {
+    if (!psd || psd.per.p.length < 2) return null;
+    const df = psd.per.f[1] - psd.per.f[0];
+    let sum = 0;
+    for (const v of psd.per.p) sum += v;
+    const integral = sum * df;
+    const ms = sig.reduce((s, v) => s + v * v, 0) / (sig.length || 1);
+    return { integral, ms, rel: Math.abs(integral - ms) / (Math.abs(ms) || 1) };
+  }, [psd, sig]);
+
   useEffect(() => {
     props.api({
       undo: () => {
@@ -259,13 +318,30 @@ export function RandomTool(props: ToolViewProps) {
           <FieldGroup title="随机信号源" desc="确定性伪随机源（mulberry32）：给定 seed 完全可复现。">
             <SegmentedChips options={KINDS} value={params.kind} onChange={(v) => apply({ kind: v })} ariaLabel="信号类型" />
             <div class="row">
+              <span class="muted">样本数 N</span>
               <NumField value={params.N} onChange={(v) => apply({ N: Math.round(v) })} min={64} max={8192} step={64} precision={0} ariaLabel="样本数" width={70} />
+            </div>
+            <div class="row">
+              <span class="muted">随机种子</span>
               <NumField value={params.seed} onChange={(v) => apply({ seed: Math.round(v) })} min={0} max={1e9} step={1} precision={0} ariaLabel="随机种子" width={70} />
+            </div>
+            <div class="row">
+              <span class="muted">采样率 fs</span>
               <NumField value={params.fs} onChange={(v) => apply({ fs: v })} min={1} max={1e6} step={10} precision={0} unit="Hz" ariaLabel="采样率" width={70} />
             </div>
             <SliderField label="标准差 σ" value={params.sigma} onChange={(v) => applyLive({ sigma: v })} min={0} max={5} step={0.05} precision={2} />
-            {params.kind === 'sine' ? (
-              <SliderField label="正弦频率 f₀" value={params.f0} onChange={(v) => applyLive({ f0: v })} min={1} max={200} step={1} precision={0} unit="Hz" />
+            {params.kind === 'sine' || params.view === 'corr' ? (
+              <SliderField
+                label={params.kind === 'sine' ? '正弦频率 f₀' : '参考正弦频率 f₀'}
+                value={params.f0}
+                onChange={(v) => applyLive({ f0: v })}
+                min={1}
+                max={200}
+                step={1}
+                precision={0}
+                unit="Hz"
+                hint={params.kind === 'sine' ? undefined : '互相关视图的参考信号频率'}
+              />
             ) : null}
             <div class="row">
               <button class="btn" onClick={() => apply({ seed: Math.floor(Math.random() * 1e9) })}>
@@ -277,19 +353,47 @@ export function RandomTool(props: ToolViewProps) {
             </div>
           </FieldGroup>
 
-          <FieldGroup title="视图与参数" onReset={() => apply(DEFAULT)} defaultOpen={false}>
+          <FieldGroup title="视图与参数" onReset={() => apply({ view: DEFAULT.view, win: DEFAULT.win, seg: DEFAULT.seg, alpha: DEFAULT.alpha, maxLag: DEFAULT.maxLag })}>
             <SegmentedChips options={VIEWS} value={params.view} onChange={(v) => apply({ view: v })} ariaLabel="视图" />
             {params.view === 'psd' ? (
               <>
                 <SegmentedChips options={WINDOWS} value={params.win} onChange={(v) => apply({ win: v })} ariaLabel="窗函数" />
-                <SliderField label="Welch 段长" value={params.seg} onChange={(v) => applyLive({ seg: Math.round(v) })} min={64} max={1024} step={32} precision={0} unit="点" />
+                <SliderField
+                  label="Welch 段长"
+                  value={params.seg}
+                  onChange={(v) => applyLive({ seg: Math.min(Math.round(v), params.N) })}
+                  min={16}
+                  max={Math.max(64, Math.min(4096, params.N))}
+                  step={16}
+                  precision={0}
+                  unit="点"
+                  hint="段长不得超过样本数 N"
+                />
               </>
             ) : null}
             {params.view === 'filter' ? (
-              <SliderField label="一阶滤波系数 α" value={params.alpha} onChange={(v) => applyLive({ alpha: v })} min={0.002} max={0.5} step={0.002} precision={3} />
+              <SliderField
+                label="一阶滤波系数 α"
+                value={params.alpha}
+                onChange={(v) => applyLive({ alpha: v })}
+                min={0.005}
+                max={1}
+                step={0.005}
+                precision={3}
+                hint="y[k]=(1−α)y[k−1]+α·x[k]；α 越小越平滑"
+              />
             ) : null}
             {params.view === 'corr' || params.view === 'filter' ? (
-              <SliderField label="最大滞后" value={params.maxLag} onChange={(v) => applyLive({ maxLag: Math.round(v) })} min={4} max={512} step={4} precision={0} unit="样本" />
+              <SliderField
+                label="最大滞后"
+                value={params.maxLag}
+                onChange={(v) => applyLive({ maxLag: Math.min(Math.round(v), params.N - 1) })}
+                min={4}
+                max={Math.max(8, Math.min(512, params.N - 1))}
+                step={4}
+                precision={0}
+                unit="样本"
+              />
             ) : null}
           </FieldGroup>
         </aside>
@@ -302,7 +406,7 @@ export function RandomTool(props: ToolViewProps) {
             <Chart
               series={[{ xs: t, ys: sig, glow: 2 }]}
               xRange={[0, params.N / params.fs]}
-              yRange={[Math.min(...sig) * 1.1, Math.max(...sig) * 1.1]}
+              yRange={yRangeOf(sig)}
               height={220}
               xLabel="t (s)"
               yLabel="x(t)"
@@ -318,14 +422,16 @@ export function RandomTool(props: ToolViewProps) {
                 yLabel="频数"
               />
               <div class="card stack">
-                <h3>统计量</h3>
-                <Metric label="均值 μ (实测)" value={stats.mean} precision={4} />
-                <Metric label="标准差 σ (实测)" value={stats.std} precision={4} />
-                <Metric label="方差 σ² (实测)" value={stats.varr} precision={4} />
-                <Metric label="方差 (理论)" value={stats.theoVar} precision={4} />
-                <p class="muted">
-                  高斯白噪声理论方差 = σ²；均匀噪声区间 ±σ√3（同方差）；正弦+噪声方差 ≈ 1/2 + σ²/2。
-                </p>
+                <h3>方差核对</h3>
+                <Metric label="实测方差 σ²" value={stats.varr} precision={4} />
+                <Metric label="理论方差" value={stats.theoVar} precision={4} />
+                <Metric
+                  label="相对偏差"
+                  value={stats.theoVar > 0 ? Math.abs(stats.varr - stats.theoVar) / stats.theoVar : '—'}
+                  precision={3}
+                  tone={stats.theoVar > 0 && Math.abs(stats.varr - stats.theoVar) / stats.theoVar < 0.2 ? 'ok' : 'default'}
+                />
+                <p class="muted">高斯白噪声理论方差 = σ²；均匀噪声区间 ±σ√3（同方差）；正弦（幅度 1）+ 高斯噪声 = 1/2 + σ²。</p>
               </div>
             </div>
           </div>
@@ -336,25 +442,26 @@ export function RandomTool(props: ToolViewProps) {
             <h3>功率谱密度（单边 PSD · 周期图 vs Welch 平均）</h3>
             <Chart
               series={[
-                { xs: psd.per.f, ys: psd.per.p.map((v) => 10 * Math.log10(v + 1e-300)), color: 'var(--series-4)', width: 1.2, alpha: 0.85 },
-                { xs: psd.wel.f, ys: psd.wel.p.map((v) => 10 * Math.log10(v + 1e-300)), color: 'var(--series-1)', glow: 2 },
+                { xs: psd.per.f, ys: psd.per.p.map(toDb), color: 'var(--series-4)', width: 1.2, alpha: 0.85 },
+                { xs: psd.wel.f, ys: psd.wel.p.map(toDb), color: 'var(--series-1)', glow: 2 },
               ]}
               xRange={[0, params.fs / 2]}
-              yRange={[
-                Math.min(-120, ...psd.per.p.map((v) => 10 * Math.log10(v + 1e-300))) - 4,
-                Math.max(...psd.per.p.map((v) => 10 * Math.log10(v + 1e-300))) + 8,
-              ]}
+              yRange={psdRange}
               height={280}
               xLabel="频率 (Hz)"
-              yLabel="PSD (dB/Hz)"
+              yLabel="10·log₁₀ PSD (dB)"
             />
             <div class="row">
-              <StatusBadge kind="ok">∫P df ≈ mean(x²)（Parseval 校验）</StatusBadge>
+              <StatusBadge kind={parseval && parseval.rel < 0.05 ? 'ok' : 'warn'}>
+                {parseval ? `∫P df / mean(x²) = ${parseval.rel < 0.05 ? '≈1' : '偏差 ' + (parseval.rel * 100).toFixed(1) + '%'}` : '∫P df ≈ mean(x²)'}
+                （Parseval 校验）
+              </StatusBadge>
               {peak != null ? <Metric label="谱峰频率" value={peak} precision={2} unit="Hz" /> : null}
-              <span class="muted">
-                （黄 = 单次周期图，方差大；蓝 = Welch 分段平均，更平滑）
-              </span>
+              <span class="muted">（黄 = 单次周期图，方差大；蓝 = Welch 分段平均，更平滑）</span>
             </div>
+            {welchDegraded ? (
+              <p class="muted">当前段长 {params.seg} 大于样本数 N={params.N}：Welch 未做分段平均，与单次周期图等价。</p>
+            ) : null}
             <div class="tex-line">
               <TeX tex={`\\hat P_{xx}(f)=\\frac{1}{f_s\\sum w^2}\\left|\\sum_n w_n x_n e^{-j2\\pi f n/f_s}\\right|^2`} />
             </div>
@@ -442,14 +549,14 @@ export function RandomTool(props: ToolViewProps) {
             </div>
             <div class="card stack">
               <h3>滤波前后统计</h3>
-              <Metric label="输入标准差" value={Math.sqrt(sig.reduce((s, v) => s + v * v, 0) / sig.length)} precision={4} />
-              <Metric label="输出标准差" value={Math.sqrt(filt.y.reduce((s, v) => s + v * v, 0) / filt.y.length)} precision={4} />
+              <Metric label="输入标准差" value={stdOf(sig)} precision={4} />
+              <Metric label="输出标准差" value={stdOf(filt.y)} precision={4} />
               <p class="muted">一阶 IIR：y[k]=(1−α)y[k−1]+αx[k]，白噪声输出方差 = α/(2−α)·σ²。</p>
             </div>
           </div>
         ) : null}
 
-        {params.view === 'time' && !hist ? <StatePanel kind="empty" title="暂无数据" desc="请调整参数。" /> : null}
+        {!sig.length ? <StatePanel kind="empty" title="暂无数据" desc="请增大样本数 N（≥ 64）。" /> : null}
       </section>
 
       {props.rightOpen ? (

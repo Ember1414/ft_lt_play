@@ -289,7 +289,7 @@ export function ControlTool(props: ToolViewProps) {
         if (params.view === 'place' && place && place.r) {
           const cl = place.metrics;
           return [
-            { label: '反馈增益 ‖K‖', value: Math.hypot(...place.r.K), precision: 3 },
+            { label: '状态反馈增益 ‖K‖₂', value: Math.hypot(...place.r.K), precision: 3 },
             { label: '闭环极点', value: place.r.poles.length },
             { label: '谐振峰 Mr', value: cl.stable && cl.Mr != null ? cl.Mr : '—', precision: 3, unit: '×' },
             { label: '闭环稳态', value: place.r.poles.every((p) => p.re < -1e-9) ? '稳定' : '不稳定' },
@@ -385,7 +385,7 @@ export function ControlTool(props: ToolViewProps) {
             </FieldGroup>
           ) : null}
 
-          <FieldGroup title="视图与仿真" onReset={() => apply(DEFAULT)} defaultOpen={false}>
+          <FieldGroup title="视图与仿真" onReset={() => apply({ view: DEFAULT.view, tmax: DEFAULT.tmax })} defaultOpen={false}>
             <SegmentedChips options={VIEWS} value={params.view} onChange={(v) => apply({ view: v })} ariaLabel="视图" />
             <SliderField label="仿真时长" value={params.tmax} onChange={(v) => applyLive({ tmax: v })} min={1} max={200} step={1} precision={0} unit="s" />
           </FieldGroup>
@@ -482,8 +482,8 @@ export function ControlTool(props: ToolViewProps) {
                 fitKey={`${params.plant}-${params.view}`}
               />
               <p class="muted">
-                实心 = 校正器零极点（z={comp && comp.ok ? -comp.z.toFixed(4) : '—'}, p={comp && comp.ok ? -comp.p.toFixed(4) : '—'}）；
-                空心 = 对象零极点。
+                × 极点 / ○ 零点（对象与校正器同图）；当前校正器零点 −z={comp && comp.ok ? -comp.z.toFixed(4) : '—'}、极点 −p=
+                {comp && comp.ok ? -comp.p.toFixed(4) : '—'}。
               </p>
             </div>
           </div>
@@ -497,7 +497,7 @@ export function ControlTool(props: ToolViewProps) {
             <div class="grid2">
               <div class="card stack">
                 <h3>状态反馈增益 K（可控标准型 + Ackermann）</h3>
-                <div class="formula-block">
+                <div class="tex-line">
                   <TeX tex={`u=-Kx,\\quad K=[${place.r.K.map((v) => v.toFixed(4)).join(', ')}]`} />
                 </div>
                 <table class="tbl">
@@ -604,7 +604,7 @@ export function ControlTool(props: ToolViewProps) {
           {G ? (
             <div class="card stack">
               <h3>对象 G(s)</h3>
-              <div class="formula-block">
+              <div class="tex-line">
                 <TeX tex={`G(s)=\\dfrac{${polyTex(G.num, 's')}}{${polyTex(G.den, 's')}}`} />
               </div>
             </div>
@@ -613,7 +613,7 @@ export function ControlTool(props: ToolViewProps) {
           {comp && comp.ok ? (
             <div class="card stack">
               <h3>校正器 C(s)</h3>
-              <div class="formula-block">
+              <div class="tex-line">
                 <TeX tex={`C(s)=\\dfrac{${polyTex(comp.num, 's')}}{${polyTex(comp.den, 's')}}`} />
               </div>
               <Metric label="零 z" value={-comp.z} precision={4} />

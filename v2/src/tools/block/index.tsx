@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Chart } from '../../chart/Chart';
 import { ComplexPlane, type CPMarker } from '../../chart/ComplexPlane';
-import { ExprField, FieldGroup, Metric, NumField, SegmentedChips, SliderField, StatusBadge, Switch } from '../../ui/components';
+import { ExprField, FieldGroup, Metric, SegmentedChips, SliderField, StatusBadge, Switch } from '../../ui/components';
 import { TeX } from '../../ui/TeX';
 import {
   deriveReadout,
@@ -23,10 +23,10 @@ import { useExperimentSync } from '../useSync';
 import type { ToolViewProps } from '../api';
 
 /**
- * 系统框图（block）— M2 存量迁移（批次 A：编辑器 + 求解 + 采样分析读数）
+ * 系统框图（block）
  * SVG 编辑器：元件库（方框/求和点/分支点/采样开关/ZOH）、拖拽布置、端口连线（正交避障布线）、
- * 结构求解（T(s) 闭式 + 极点 + 阶跃，复用 core.blocksolve）、采样系统（域传播 + z 域读数）。
- * 几何/布线语义与 v1 一致（方框 120×46、求和 R20、分支 R5、采样 56×46、ZOH 96×46、车道避障）。
+ * 结构求解（T(s) 闭式 + 极点 + 阶跃）、采样系统（域传播 + z 域读数）。
+ * 几何：方框 120×46、求和 R20、分支 R5、采样 56×46、ZOH 96×46；连线车道避障。
  */
 
 const BW = 120;
@@ -755,7 +755,6 @@ export function BlockTool(props: ToolViewProps) {
           },
         },
         { id: 'json', label: 'JSON', run: () => downloadText('block-diagram.json', JSON.stringify(params, null, 2)) },
-        { id: 'png', label: 'PNG', disabled: true, reason: 'PNG 导出随报告系统交付' },
       ],
     });
     return () => props.api(null);
@@ -769,11 +768,14 @@ export function BlockTool(props: ToolViewProps) {
       (wrapRef.current?.getBoundingClientRect().left ?? 0) + (wrapRef.current?.clientWidth ?? 600) / 2,
       (wrapRef.current?.getBoundingClientRect().top ?? 0) + 240,
     );
+    // 级联落点：连续添加时错开，避免元件完全重叠（与 v1 的抖动落点同义）
+    const k = params.nodes.length;
+    const cascade = { x: ((k % 3) - 1) * 68, y: ((Math.floor(k / 3) % 3) - 1) * 56 };
     const node: BlkNode = {
       id,
       kind,
-      x: Math.round(w.x / GRID) * GRID,
-      y: Math.round(w.y / GRID) * GRID,
+      x: Math.round((w.x + cascade.x) / GRID) * GRID,
+      y: Math.round((w.y + cascade.y) / GRID) * GRID,
       ...(kind === 'box' ? { expr: expr ?? '1/(s+1)', f: fracOf(expr ?? '1/(s+1)'), dom: 's' as const } : {}),
       ...(kind === 'sum' || kind === 'branch' ? { f: UNIT_FRAC } : {}),
       ...(kind === 'sample' || kind === 'zoh' ? { dom: 'z' as const, f: null } : {}),
@@ -781,6 +783,33 @@ export function BlockTool(props: ToolViewProps) {
     setSelNodes([id]);
     setSelEdge(-1);
     apply({ nodes: [...params.nodes, node], seq: id });
+  };
+
+  /** 复位视图：按全部元件包围盒自适应（无元件时回单位视图） */
+  const fitView = (): void => {
+    const wrap = wrapRef.current;
+    if (!wrap || !params.nodes.length) {
+      apply({ view: { s: 1, tx: 0, ty: 0 } });
+      return;
+    }
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const n of params.nodes) {
+      const g = nodeGeom(n);
+      minX = Math.min(minX, n.x - g.w / 2);
+      maxX = Math.max(maxX, n.x + g.w / 2);
+      minY = Math.min(minY, n.y - g.h / 2);
+      maxY = Math.max(maxY, n.y + g.h / 2);
+    }
+    const W = wrap.clientWidth || 600;
+    const H = wrap.clientHeight || 380;
+    const pad = 56;
+    const s = Math.max(0.35, Math.min(3, Math.min((W - pad * 2) / Math.max(1, maxX - minX), (H - pad * 2) / Math.max(1, maxY - minY))));
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    apply({ view: { s, tx: W / 2 - cx * s, ty: H / 2 - cy * s } });
   };
 
   const loadDemo = (i: DemoId | 'sampled'): void => {
@@ -831,14 +860,11 @@ export function BlockTool(props: ToolViewProps) {
           </FieldGroup>
           <FieldGroup title="采样周期 T" desc="采样开关 / 零阶保持器 / z 域元件使用。">
             <SliderField label="T · 采样周期" value={params.T} onChange={(v) => applyLive({ T: v })} min={0.01} max={2} step={0.01} precision={2} unit="s" />
-            <div class="row">
-              <NumField value={params.T} onChange={(v) => apply({ T: v })} min={T_MIN} max={T_MAX} step={0.01} precision={3} unit="s" ariaLabel="采样周期 T" />
-            </div>
           </FieldGroup>
           <FieldGroup title="编辑与视图" defaultOpen={false}>
             <Switch label="网格吸附（5 单位）" checked={params.snap} onChange={(v) => apply({ snap: v })} />
             <div class="row">
-              <button class="btn" onClick={() => apply({ view: { s: 1, tx: 0, ty: 0 } })}>
+              <button class="btn" onClick={fitView} title="按全部元件自适应（空画布回单位视图）">
                 复位视图
               </button>
               <button
@@ -870,7 +896,7 @@ export function BlockTool(props: ToolViewProps) {
               onPointerCancel={onPointerUp}
               onDblClick={(e) => {
                 const t = e.target as Element;
-                if (t && t.tagName === 'svg') apply({ view: { s: 1, tx: 0, ty: 0 } });
+                if (t && t.tagName === 'svg') fitView();
               }}
               onWheel={(e) => {
                 e.preventDefault();
@@ -1109,9 +1135,7 @@ export function BlockTool(props: ToolViewProps) {
                     </tbody>
                   </table>
                 ) : null}
-                <p class="muted">
-                  采样器下沉 / 域传播由 core.blocksolve.analyzeSampled 完成：连续段先离散化为 z 域，再与纯 z 元件统一求解。
-                </p>
+                <p class="muted">连续段先按 T 离散化为 z 域，再与纯 z 元件统一求解（采样器下沉 / 域传播）。</p>
               </>
             ) : (
               <p class="muted">

@@ -6,34 +6,6 @@ import { flushSave, setCurrent } from '../state/experiments';
 import { toolById } from '../tools/registry';
 
 /**
- * EmptyPage — 未交付页面的统一占位（空态是引导，不是死胡同）
- */
-export interface EmptyPageProps {
-  title: string;
-  desc: string;
-  milestone: string;
-}
-
-export function EmptyPage(props: EmptyPageProps) {
-  return (
-    <div class="stack">
-      <section class="hero">
-        <h1>
-          {props.title} <StatusBadge kind="info">建设中 · {props.milestone}</StatusBadge>
-        </h1>
-        <p>{props.desc}</p>
-      </section>
-      <StatePanel
-        kind="empty"
-        title="该页面将在后续里程碑交付"
-        desc="当前可先使用：命令中心（模板与最近实验）、14 个工具（建设中工具会标注）、实验管理。"
-        action={{ label: '去命令中心', onClick: () => navigate({ page: 'home' }) }}
-      />
-    </div>
-  );
-}
-
-/**
  * ImportPage — 分享码导入入口（#exp=… / #pkg=…）
  * `PX1.…` = 单个实验（校验后创建副本并打开）；`PK1.…` = 内容包（多个实验，逐个落库并可打开首个）。
  */
@@ -112,11 +84,9 @@ function PkgImport(props: { code: string }) {
   const first = items[0];
 
   const doImport = (openFirst: boolean): void => {
-    let ok = 0;
     for (const e of items) {
       try {
         save(e);
-        ok++;
       } catch {
         /* 跳过失败项（数量上限等） */
       }
