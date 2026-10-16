@@ -437,12 +437,21 @@ export function BlockTool(props: ToolViewProps) {
   const [wire, setWire] = useState<{ from: number; cur: { x: number; y: number }; target: number | null } | null>(null);
   /** 交互反馈（落点无效 / 重复连线 / 已新增 …）——顶栏无 toast，用画布下方状态行回显 */
   const [hint, setHint] = useState('');
+  /** 框选矩形（Shift+拖空白）：屏幕无关的世界坐标两端点 */
+  const [band, setBand] = useState<{ a: { x: number; y: number }; b: { x: number; y: number } } | null>(null);
+  /** 连线改接：拖动线中点徽标 → 把该连线的「终点」换到别的元件 */
+  const [relink, setRelink] = useState<{ index: number; cur: { x: number; y: number }; target: number | null; moved: boolean } | null>(null);
   const undoRef = useRef(createUndoStack<BlkParams>(50));
   const lastPush = useRef(0);
   const wrapRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const dragRef = useRef<{ ids: number[]; start: Map<number, { x: number; y: number }>; p0: { x: number; y: number }; pushed: boolean } | null>(null);
   const panRef = useRef<{ px: number; py: number; tx: number; ty: number } | null>(null);
+  const bandRef = useRef<{ a: { x: number; y: number }; sx: number; sy: number; moved: boolean } | null>(null);
+  const relinkRef = useRef<{ index: number; p0: { x: number; y: number }; sx: number; sy: number; moved: boolean } | null>(null);
+  /** 触摸：活动指针表 + 捏合缩放会话 */
+  const touchRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const pinchRef = useRef<{ d0: number; s0: number; mid: { x: number; y: number }; view: { s: number; tx: number; ty: number } } | null>(null);
 
   useEffect(() => {
     setModuleState('block', params);
@@ -620,6 +629,27 @@ export function BlockTool(props: ToolViewProps) {
   const onPointerDown = (e: PointerEvent): void => {
     if (e.button === 2) return; // 右键：不拖、不清选择（交给 onContextMenu）
     setHint('');
+    // 触摸：两指按下进入捏合缩放（取消其它手势）
+    if (e.pointerType === 'touch') {
+      touchRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touchRef.current.size === 2) {
+        const [p1, p2] = [...touchRef.current.values()];
+        pinchRef.current = {
+          d0: Math.max(1, Math.hypot(p2.x - p1.x, p2.y - p1.y)),
+          s0: params.view.s,
+          mid: { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 },
+          view: { ...params.view },
+        };
+        wire && setWire(null);
+        dragRef.current = null;
+        panRef.current = null;
+        bandRef.current = null;
+        relinkRef.current = null;
+        setBand(null);
+        setRelink(null);
+        return;
+      }
+    }
     const w = screenToWorld(e.clientX, e.clientY);
     if (e.button === 1) {
       // 中键：始终平移（与元件/端口无关）
@@ -664,7 +694,17 @@ export function BlockTool(props: ToolViewProps) {
       }
       return;
     }
-    // 空白：清除选择并开始平移
+    // 空白：Shift = 框选（保留原选择），否则清除选择并平移
+    if (e.shiftKey) {
+      bandRef.current = { a: w, sx: e.clientX, sy: e.clientY, moved: false };
+      setBand(null);
+      try {
+        (e.currentTarget as Element).setPointerCapture(e.pointerId);
+      } catch {
+        /* 指针捕获不可用 */
+      }
+      return;
+    }
     setSelNodes([]);
     setSelEdge(-1);
     panRef.current = { px: e.clientX, py: e.clientY, tx: params.view.tx, ty: params.view.ty };
@@ -676,10 +716,43 @@ export function BlockTool(props: ToolViewProps) {
   };
 
   const onPointerMove = (e: PointerEvent): void => {
+    // 捏合缩放：保持两指中点下的世界点不动
+    if (pinchRef.current && e.pointerType === 'touch') {
+      touchRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touchRef.current.size === 2) {
+        const [p1, p2] = [...touchRef.current.values()];
+        const d = Math.max(1, Math.hypot(p2.x - p1.x, p2.y - p1.y));
+        const svg = svgRef.current;
+        const rect = svg?.getBoundingClientRect();
+        const p = pinchRef.current;
+        const ns = Math.max(0.35, Math.min(3, (p.s0 * d) / p.d0));
+        const mx = p.mid.x - (rect?.left ?? 0);
+        const my = p.mid.y - (rect?.top ?? 0);
+        const wx = (mx - p.view.tx) / p.view.s;
+        const wy = (my - p.view.ty) / p.view.s;
+        applyLive({ view: { s: ns, tx: mx - wx * ns, ty: my - wy * ns } });
+      }
+      return;
+    }
     if (wire) {
       const w = screenToWorld(e.clientX, e.clientY);
       const over = nodeAt(w);
       setWire({ ...wire, cur: w, target: over && over.id !== wire.from ? over.id : null });
+      return;
+    }
+    if (relinkRef.current) {
+      const r = relinkRef.current;
+      if (!r.moved && Math.hypot(e.clientX - r.sx, e.clientY - r.sy) > 4) r.moved = true;
+      const w = screenToWorld(e.clientX, e.clientY);
+      const over = nodeAt(w);
+      setRelink({ index: r.index, cur: w, target: over ? over.id : null, moved: r.moved });
+      return;
+    }
+    if (bandRef.current) {
+      const b = bandRef.current;
+      if (!b.moved && Math.hypot(e.clientX - b.sx, e.clientY - b.sy) > 4) b.moved = true;
+      const w = screenToWorld(e.clientX, e.clientY);
+      setBand({ a: b.a, b: w });
       return;
     }
     if (dragRef.current) {
@@ -714,6 +787,10 @@ export function BlockTool(props: ToolViewProps) {
   };
 
   const onPointerUp = (e: PointerEvent): void => {
+    if (e.pointerType === 'touch') {
+      touchRef.current.delete(e.pointerId);
+      if (touchRef.current.size < 2) pinchRef.current = null;
+    }
     if (wire) {
       const w = screenToWorld(e.clientX, e.clientY);
       const over = nodeAt(w);
@@ -731,6 +808,54 @@ export function BlockTool(props: ToolViewProps) {
         }
       }
       setWire(null);
+    }
+    // 框选松手：选中与矩形相交的全部元件（Shift 语义 = 追加）
+    if (bandRef.current) {
+      const b = bandRef.current;
+      bandRef.current = null;
+      if (band && b.moved) {
+        const x0 = Math.min(band.a.x, band.b.x);
+        const x1 = Math.max(band.a.x, band.b.x);
+        const y0 = Math.min(band.a.y, band.b.y);
+        const y1 = Math.max(band.a.y, band.b.y);
+        const hit = params.nodes
+          .filter((n) => {
+            const g = nodeGeom(n);
+            return n.x + g.w / 2 >= x0 && n.x - g.w / 2 <= x1 && n.y + g.h / 2 >= y0 && n.y - g.h / 2 <= y1;
+          })
+          .map((n) => n.id);
+        const next = Array.from(new Set([...selNodes, ...hit]));
+        setSelNodes(next);
+        setHint(hit.length ? '框选中 ' + hit.length + ' 个元件（共 ' + next.length + ' 个）' : '框选范围内没有元件');
+      }
+      setBand(null);
+    }
+    // 连线改接松手：落在元件上 = 改接；未移动 = 切换正负号（原单击语义）
+    if (relinkRef.current) {
+      const r = relinkRef.current;
+      relinkRef.current = null;
+      const cur = relink;
+      setRelink(null);
+      if (!r.moved) {
+        const edges = params.edges.map((x, k) => (k === r.index ? { ...x, sign: x.sign === 1 ? -1 : 1 } : x));
+        apply({ edges });
+      } else {
+        const e0 = params.edges[r.index];
+        const over = cur && cur.target != null ? params.nodes.find((n) => n.id === cur.target) : null;
+        if (!e0) {
+          /* 边已不在（并发编辑），忽略 */
+        } else if (!over) {
+          setHint('未落在元件上：连线保持原样');
+        } else if (over.id === e0.from) {
+          setHint('不能连接到自身');
+        } else if (params.edges.some((x, k) => k !== r.index && x.from === e0.from && x.to === over.id)) {
+          setHint('已存在该连线（原连线未改动）');
+        } else {
+          const edges = params.edges.map((x, k) => (k === r.index ? { ...x, to: over.id } : x));
+          apply({ edges });
+          setHint('已改接：' + e0.from + ' → ' + over.id);
+        }
+      }
     }
     if (dragRef.current) {
       dragRef.current = null;
@@ -948,7 +1073,10 @@ export function BlockTool(props: ToolViewProps) {
                 清空画布
               </button>
             </div>
-            <p class="muted">Delete 删除选中；Esc 取消选择；拖空白平移 · 滚轮缩放 · 双击空白复位。</p>
+            <p class="muted">
+              Delete 删除选中（元件或连线）；Esc 取消选择；拖空白平移 · 滚轮缩放 · 双击空白适应取景；
+              Shift+拖空白框选；拖动线中点徽标可把连线改接到别的元件（原地单击 = 切换正负号）。
+            </p>
           </FieldGroup>
         </aside>
       ) : null}
@@ -1049,12 +1177,18 @@ export function BlockTool(props: ToolViewProps) {
                       <g
                         class="blk-badge-g"
                         transform={'translate(' + g.mid.x + ' ' + g.mid.y + ')'}
+                        title="单击切换正负号 · 拖动可把该连线的终点改接到别的元件"
                         onPointerDown={(ev) => {
                           ev.stopPropagation();
                           setSelEdge(i);
                           setSelNodes([]);
-                          const edges = params.edges.map((x, k) => (k === i ? { ...x, sign: x.sign === 1 ? -1 : 1 } : x));
-                          apply({ edges });
+                          // 拖动 = 改接终点；原地松开 = 切换正负号（在 onPointerUp 中判定）
+                          relinkRef.current = { index: i, p0: screenToWorld(ev.clientX, ev.clientY), sx: ev.clientX, sy: ev.clientY, moved: false };
+                          try {
+                            (ev.currentTarget as Element).setPointerCapture(ev.pointerId);
+                          } catch {
+                            /* 指针捕获不可用 */
+                          }
                         }}
                       >
                         <circle class="blk-badge" r={9} />
@@ -1085,10 +1219,39 @@ export function BlockTool(props: ToolViewProps) {
                   />
                 ) : null}
 
+                {band ? (
+                  <rect
+                    class="blk-band"
+                    x={Math.min(band.a.x, band.b.x)}
+                    y={Math.min(band.a.y, band.b.y)}
+                    width={Math.abs(band.b.x - band.a.x)}
+                    height={Math.abs(band.b.y - band.a.y)}
+                    pointer-events="none"
+                    vector-effect="non-scaling-stroke"
+                  />
+                ) : null}
+
+                {relink && relink.moved ? (
+                  <path
+                    class="blk-wire is-relink"
+                    d={(() => {
+                      const e0 = params.edges[relink.index];
+                      if (!e0) return '';
+                      const from = params.nodes.find((n) => n.id === e0.from);
+                      if (!from) return '';
+                      const tn = relink.target != null ? params.nodes.find((n) => n.id === relink.target) : null;
+                      const b = tn ? inSlots(tn)[0] : relink.cur;
+                      return routePath(outPort(from), b, tn ? inSlots(tn)[0].slot : 'left', 0, []).d;
+                    })()}
+                    pointer-events="none"
+                    vector-effect="non-scaling-stroke"
+                  />
+                ) : null}
+
                 {params.nodes.map((n) => {
                   const g = nodeGeom(n);
                   const sel = selNodes.includes(n.id);
-                  const isTarget = wire?.target === n.id;
+                  const isTarget = wire?.target === n.id || (relink != null && relink.moved && relink.target === n.id);
                   const invalid = n.kind === 'box' && !n.f;
                   return (
                     <g

@@ -123,6 +123,9 @@ code, .mono { font-family: var(--font-mono); font-size: .92em; }
 .blk-port.in { fill: var(--ink-3); }
 /* 端口点击热区（透明）：位于连线上层，避免端口被连线的命中带吞掉 */
 .blk-port-hit { fill: transparent; cursor: crosshair; }
+/* 框选矩形（Shift+拖空白）与「连线改接」预览 */
+.blk-band { fill: var(--accent-soft); stroke: var(--accent); stroke-dasharray: 4 3; stroke-width: 1; }
+.blk-wire.is-relink { stroke-dasharray: 3 3; }
 /* 表达式无效（不参与求解）/ 布线受阻 / 拖线目标 —— 画布上直接可见 */
 .blk-box.is-err { stroke: var(--danger); stroke-dasharray: 5 3; }
 .blk-warn { fill: var(--danger); font: var(--w-bold) 11px var(--font-mono); }

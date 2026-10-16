@@ -30,7 +30,7 @@ import { buildBackup, readBackup } from '../report/backup';
  * 快捷键总览 · 关于（版本 / 内核 / 隐私）。所有写入均带确认，失败给出原因。
  */
 
-const APP_VERSION = '2.15.0 (M20)';
+const APP_VERSION = '2.15.1 (M20)';
 const PATHS_KEY = 'v2:paths:progress';
 const THEME_KEY = 'flt2:theme';
 const MOTION_KEY = 'flt2:motion';

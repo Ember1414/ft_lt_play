@@ -2,9 +2,10 @@ import { NumField } from './NumField';
 
 /**
  * SliderField — 有界参数（输入契约第 1 类）
- * 形态：`标签 · − [数值框] 单位 +`（步进按钮 + 可键盘输入 + 长按连发）。
- * 取值路径与格式化仍单点收口在 NumField（clamp / toFixed(precision) / Shift 精调 / Enter 提交）。
- * `withSlider` 可额外显示滑杆（用于需要「粗调 + 连续拖动」的探索场景，默认关闭）。
+ * 形态：`标签 · − [数值框] 单位 +` **＋ 拖动条**：
+ * - 拖动条负责「粗调/连续扫」（用户反馈：拖动条不能取消）；
+ * - −/+ 与数值框负责「定值/微调」（长按连发、Shift 精调 0.1×、Enter 提交、Esc 还原）。
+ * 取值路径与格式化仍单点收口在 NumField（clamp / toFixed(precision)）。
  */
 
 export interface SliderFieldProps {
@@ -18,12 +19,12 @@ export interface SliderFieldProps {
   unit?: string;
   hint?: string;
   disabled?: boolean;
-  /** 额外显示滑杆（默认否：步进 + 输入框已覆盖精细调节） */
+  /** 是否显示拖动条（默认显示；个别紧凑场景可关掉只留 −/数值框/+） */
   withSlider?: boolean;
 }
 
 export function SliderField(props: SliderFieldProps) {
-  const { label, value, onChange, min, max, step = 0.01, precision = 2, unit, hint, disabled, withSlider = false } = props;
+  const { label, value, onChange, min, max, step = 0.01, precision = 2, unit, hint, disabled, withSlider = true } = props;
   return (
     <div class={`c-slider${disabled ? ' is-disabled' : ''}`}>
       <div class="c-slider-head">

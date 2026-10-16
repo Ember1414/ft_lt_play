@@ -134,7 +134,9 @@ export function Chart(props: ChartProps) {
         touched.current.x && !chX && Number.isFinite(v.x[0]) && Number.isFinite(v.x[1]);
       const keepY =
         touched.current.y && !chY && Number.isFinite(v.y[0]) && Number.isFinite(v.y[1]);
-      return { x: keepX ? v.x : xRange, y: keepY ? v.y : yRange };
+      const nx = keepX ? v.x : xRange;
+      // 数据变了但用户没动过纵轴：若横轴仍在放大状态，纵轴继续贴合可视数据
+      return { x: nx, y: keepY ? v.y : (autoYFor(nx) ?? yRange) };
     });
   }, [xRange[0], xRange[1], yRange[0], yRange[1]]);
 
@@ -200,6 +202,42 @@ export function Chart(props: ChartProps) {
     y: MARGIN.t,
     w: Math.max(60, size.w - leftPad - MARGIN.r),
     h: Math.max(60, size.h - MARGIN.t - MARGIN.b),
+  };
+
+  /* ---------- 纵轴跟随：x 窗口内的数据 y 范围 ----------
+     用户反馈「缩放后曲线只有一截」：横轴放大 10 倍后，纵轴仍是全量程，
+     曲线被压成底部一条几乎水平的窄带。这里让**纵轴在横向缩放时自动贴合可视数据**
+     （带 8% 余量）；缩回全宽或用户手动调过纵轴（Shift 滚轮 / 竖向拖拽）则保持原样。 */
+  const seriesRef = useRef(series);
+  seriesRef.current = series;
+  const fitYTo = (xv: [number, number]): [number, number] | null => {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const se of seriesRef.current) {
+      const nx = Math.min(se.xs.length, se.ys.length);
+      for (let i = 0; i < nx; i++) {
+        const x = se.xs[i];
+        if (x < xv[0] || x > xv[1]) continue;
+        const y = se.ys[i];
+        if (!Number.isFinite(y)) continue;
+        if (y < lo) lo = y;
+        if (y > hi) hi = y;
+      }
+    }
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null;
+    if (hi - lo < 1e-12) {
+      const c = (hi + lo) / 2;
+      const d = Math.max(1e-9, Math.abs(c) * 0.05 + 1e-6);
+      return [c - d, c + d];
+    }
+    const m = (hi - lo) * 0.08;
+    return [lo - m, hi + m];
+  };
+  /** 已真正横向放大的窗口 → 返回自适应纵轴；否则 null（保持工具给定的默认纵轴） */
+  const autoYFor = (xv: [number, number]): [number, number] | null => {
+    const baseSpan = Math.abs(xRange[1] - xRange[0]) || 1;
+    if (Math.abs(xv[1] - xv[0]) >= baseSpan * 0.92) return null;
+    return fitYTo(xv);
   };
 
   const draw = useCallback(() => {
@@ -271,9 +309,12 @@ export function Chart(props: ChartProps) {
       else touched.current.x = true;
       const nx = e.shiftKey ? v.x : ([d.x + (v.x[0] - d.x) * k, d.x + (v.x[1] - d.x) * k] as [number, number]);
       const ny = e.shiftKey ? ([d.y + (v.y[0] - d.y) * k, d.y + (v.y[1] - d.y) * k] as [number, number]) : (v.y as [number, number]);
+      const nextX = xLog ? ([Math.max(nx[0], 1e-9), Math.max(nx[1], 1e-8)] as [number, number]) : clampSpan(nx, xRange);
+      // 横轴缩放（非 Shift）：纵轴跟随可视数据（用户手动调过纵轴则尊重其选择）
+      const auto = !e.shiftKey && !touched.current.y ? (autoYFor(nextX) ?? yRange) : null;
       const next = {
-        x: xLog ? ([Math.max(nx[0], 1e-9), Math.max(nx[1], 1e-8)] as [number, number]) : clampSpan(nx, xRange),
-        y: clampSpan(ny, yRange),
+        x: nextX,
+        y: auto ?? clampSpan(ny, yRange),
       };
       setView(next);
       onViewChange?.(next.x, next.y);
@@ -314,7 +355,8 @@ export function Chart(props: ChartProps) {
         y: ny,
       };
       touched.current.x = true;
-      touched.current.y = true;
+      // 只有真正竖向拖动才算「用户调过纵轴」（纯横向平移后仍允许纵轴自动贴合）
+      if (Math.abs(py - d.py) > 4) touched.current.y = true;
       setView(next);
       onViewChange?.(next.x, next.y);
       return;
@@ -349,6 +391,17 @@ export function Chart(props: ChartProps) {
       const { px, py } = localPos(e);
       const md = toData(px, py);
       onMarkerDrag?.(d.index, md.x, md.y, 'end');
+    }
+    // 纯横向平移结束：纵轴贴合可视数据（用户没手动调过纵轴时）
+    if (d?.mode === 'pan' && !touched.current.y) {
+      const { py: upy } = localPos(e);
+      if (Math.abs(upy - d.py) <= 4) {
+        const auto = autoYFor(view.x) ?? yRange;
+        setView((v) => ({ x: v.x, y: auto }));
+        onViewChange?.(view.x, auto);
+      } else {
+        touched.current.x = true;
+      }
     }
     drag.current = null;
     try {
