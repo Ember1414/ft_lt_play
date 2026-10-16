@@ -157,22 +157,33 @@ const timeCoreTex = (it: TimeItem): string => {
   }
 };
 
+/**
+ * 分式分子：多项式因子相乘，常量 1 在有其它因子时省略（1·s → s），
+ * 但分子**不允许为空**（系数为 1 时给出 `1`，避免渲染出 \dfrac{}{s+a} 的空白分子）。
+ */
+const numTexOf = (coefTex: string, rest: string[]): string => {
+  const parts = [coefTex, ...rest].filter((p) => p !== '');
+  const kept = parts.length > 1 ? parts.filter((p) => p !== '1') : parts;
+  return kept.length ? kept.join('\\cdot') : '1';
+};
+
 export const itemLapTex = (it: TimeItem): string => {
   const s = it.sign < 0 ? '-' : '';
+  const cn = num2tex(it.coef);
   switch (it.kind) {
     case 'exp':
-      return `${s}\\dfrac{${it.coef === 1 ? '' : num2tex(it.coef)}}{s+${num2tex(it.a)}}`;
+      return `${s}\\dfrac{${numTexOf(cn, [])}}{s+${num2tex(it.a)}}`;
     case 'texp':
-      return `${s}\\dfrac{${it.coef === 1 ? '' : num2tex(it.coef)}\\cdot${fact(it.n)}}{(s+${num2tex(it.a)})^{${it.n + 1}}}`;
+      return `${s}\\dfrac{${numTexOf(cn, [String(fact(it.n))])}}{(s+${num2tex(it.a)})^{${it.n + 1}}}`;
     case 'sin':
-      return `${s}\\dfrac{${it.coef === 1 ? '' : num2tex(it.coef) + '\\cdot'}${num2tex(it.w)}}{s^{2}+${num2tex(it.w * it.w)}}`;
+      return `${s}\\dfrac{${numTexOf(cn, [num2tex(it.w)])}}{s^{2}+${num2tex(it.w * it.w)}}`;
     case 'cos':
-      return `${s}\\dfrac{${it.coef === 1 ? '' : num2tex(it.coef) + '\\cdot'}s}{s^{2}+${num2tex(it.w * it.w)}}`;
+      return `${s}\\dfrac{${numTexOf(cn, ['s'])}}{s^{2}+${num2tex(it.w * it.w)}}`;
     case 'tpow':
-      return `${s}\\dfrac{${it.coef === 1 ? '' : num2tex(it.coef) + '\\cdot'}${fact(it.n)}}{s^{${it.n + 1}}}`;
+      return `${s}\\dfrac{${numTexOf(cn, [String(fact(it.n))])}}{s^{${it.n + 1}}}`;
     case 'u':
     case 'const':
-      return `${s}\\dfrac{${num2tex(it.coef)}}{s}`;
+      return `${s}\\dfrac{${numTexOf(cn, [])}}{s}`;
     default:
       return '';
   }

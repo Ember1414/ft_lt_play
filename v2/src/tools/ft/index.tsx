@@ -13,12 +13,14 @@ import { useExperimentSync } from '../useSync';
 import type { ToolViewProps } from '../api';
 
 /**
- * 傅立叶级数（ft）— M2 存量迁移升级
+ * 傅立叶级数（ft）
  * 三视图：画圈套画圈（DFT 相量链 + 轨迹拖尾 + 对比模式 + 手绘自定义 + 谐波幅度谱）/
  *        谐波叠加（方波逐步合成 + Gibbs 现象 + RMS 误差）/ 3D 瀑布（谐波分量族 + 部分和）。
- * 动画：自研时间轴引擎（确定性帧驱动，可逐帧、可变速 0.25×–2×，§4.16）；
- * 数值与 v1 一致（core.dsp.dftPhasors / signals.shapePoints 回归网保障）。
+ * 动画：自研时间轴引擎（确定性帧驱动，可逐帧、可变速 0.25×–2×；1× = 基波 5 s/圈，见 CYCLE_SEC）。
  */
+
+/** 画圈动画：1× 时基波走完一圈的秒数（手感基准；0.25× = 20 s、2× = 2.5 s） */
+const CYCLE_SEC = 5;
 
 type ViewId = 'circles' | 'harmonics' | 'waterfall';
 
@@ -459,10 +461,11 @@ function CirclesCanvas(props: {
   const tlRef = useRef<Timeline | null>(null);
   useEffect(() => {
     const tl = createTimeline({
-      duration: 1,
+      // duration = 一圈的秒数：1× 时基波 5 s/圈（原为 1 s/圈，实测过快）
+      duration: CYCLE_SEC,
       loop: true,
       easing: linear,
-      onFrame: (t) => {
+      onFrame: (_raw, t) => {
         const st = stRef.current;
         if (t < st.t) {
           st.tail = [];
@@ -1057,16 +1060,19 @@ export function FtTool(props: ToolViewProps) {
               precision={0}
               hint="相量链长度（1…60）：越多越贴合目标路径；瀑布视图绘制前 20 层"
             />
-            <SliderField
-              label="动画速度"
-              value={params.speed}
-              onChange={(v) => applyLive({ speed: v })}
-              min={0.25}
-              max={2}
-              step={0.25}
-              precision={2}
-              unit="×"
-            />
+            {params.view === 'circles' ? (
+              <SliderField
+                label="动画速度"
+                value={params.speed}
+                onChange={(v) => applyLive({ speed: v })}
+                min={0.25}
+                max={2}
+                step={0.25}
+                precision={2}
+                unit="×"
+                hint={`1× = 基波 ${CYCLE_SEC} s/圈；0.25× = ${CYCLE_SEC * 4} s/圈`}
+              />
+            ) : null}
             <Switch label="显示旋转圆与半径线" checked={params.showCircles} onChange={(v) => apply({ showCircles: v })} />
           </FieldGroup>
 
@@ -1112,7 +1118,8 @@ export function FtTool(props: ToolViewProps) {
                   onClick={() => {
                     applyLive({ playing: false });
                     tlRef.current?.pause();
-                    tlRef.current?.tick(0.004);
+                    // 每步前进 0.4% 圈（时间轴秒 = CYCLE_SEC × 0.004）
+                    tlRef.current?.tick(CYCLE_SEC * 0.004);
                   }}
                 >
                   ⏯ 逐帧
@@ -1131,7 +1138,7 @@ export function FtTool(props: ToolViewProps) {
                 </StatusBadge>
                 <span class="spacer" />
                 <span class="muted" style="margin:0">
-                  t = 循环相位 · 每周期 1（速度 {nf(params.speed, 2)}×）
+                  每圈 {nf(CYCLE_SEC / params.speed, 1)} s（速度 {nf(params.speed, 2)}×）
                 </span>
               </div>
               <CirclesCanvas

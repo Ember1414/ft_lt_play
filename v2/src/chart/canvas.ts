@@ -382,7 +382,52 @@ export interface SeriesStyle {
   fillAlpha?: number;
 }
 
-/** 折线（超出可视范围的点自动跳过；点数多时逐段描边；fill 时先填面积再描线） */
+/**
+ * 逐点遍历「值得绘制」的数据点（回调收到数据坐标与 move 标记）：
+ * - 可视窗口外的**连续**点串只保留首尾两点：既保持跨越窗口边界的线段连续，
+ *   又避免深度缩放时远点被映射成 1e8 级像素导致精度丢失、曲线断裂；
+ * - 非有限值处断开（move 重新起段），不再用假直线把缺口连起来。
+ */
+function forEachKept(
+  xs: ArrayLike<number>,
+  ys: ArrayLike<number>,
+  lo: number,
+  hi: number,
+  cb: (x: number, y: number, move: boolean) => void,
+): void {
+  const n = Math.min(xs.length, ys.length);
+  let pen = false;
+  let inOutRun = false;
+  for (let i = 0; i < n; i++) {
+    const x = xs[i];
+    const y = ys[i];
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      pen = false;
+      inOutRun = false;
+      continue;
+    }
+    const outside = x < lo || x > hi;
+    if (!outside) {
+      cb(x, y, !pen);
+      pen = true;
+      inOutRun = false;
+      continue;
+    }
+    if (!inOutRun) {
+      // 刚离开窗口：画出边界外的第一个点，保持跨界线段
+      cb(x, y, !pen);
+      pen = true;
+      inOutRun = true;
+      continue;
+    }
+    // 点串中间：仅当下一个点回到窗口内时补一个“边界外最后一个点”
+    const nx = i + 1 < n ? xs[i + 1] : NaN;
+    const ny = i + 1 < n ? ys[i + 1] : NaN;
+    if (Number.isFinite(nx) && Number.isFinite(ny) && nx >= lo && nx <= hi) cb(x, y, false);
+  }
+}
+
+/** 折线（按可视窗口裁剪数据；点数多时逐段描边；fill 时先填面积再描线） */
 export function drawLine(
   ctx: CanvasRenderingContext2D,
   xs: ArrayLike<number>,
@@ -393,6 +438,12 @@ export function drawLine(
 ): void {
   const n = Math.min(xs.length, ys.length);
   if (!n) return;
+  // 可视窗口（数据坐标）+ 2% 余量：让跨界线段完整画到边界外一点
+  const a = s.ix(rect.x);
+  const b = s.ix(rect.x + rect.w);
+  const pad = Math.abs(b - a) * 0.02;
+  const lo = Math.min(a, b) - pad;
+  const hi = Math.max(a, b) + pad;
   ctx.save();
   ctx.beginPath();
   ctx.rect(rect.x, rect.y, rect.w, rect.h);
@@ -403,21 +454,25 @@ export function drawLine(
     ctx.globalAlpha = st.fillAlpha ?? 0.3;
     ctx.fillStyle = resolveColor(st.fill);
     ctx.beginPath();
-    let started = false;
     let firstX = 0;
     let lastX = 0;
-    for (let i = 0; i < n; i++) {
-      const x = s.sx(xs[i]);
-      const y = s.sy(ys[i]);
-      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-      if (!started) {
-        ctx.moveTo(x, y);
-        firstX = x;
-        started = true;
-      } else ctx.lineTo(x, y);
-      lastX = x;
-    }
-    if (started) {
+    let open = false;
+    forEachKept(xs, ys, lo, hi, (x, y, move) => {
+      const px = s.sx(x);
+      const py = s.sy(y);
+      if (move) {
+        if (open) {
+          ctx.lineTo(lastX, y0);
+          ctx.lineTo(firstX, y0);
+          ctx.closePath();
+        }
+        ctx.moveTo(px, py);
+        firstX = px;
+        open = true;
+      } else ctx.lineTo(px, py);
+      lastX = px;
+    });
+    if (open) {
       ctx.lineTo(lastX, y0);
       ctx.lineTo(firstX, y0);
       ctx.closePath();
@@ -436,13 +491,12 @@ export function drawLine(
   }
   if (st.alpha != null) ctx.globalAlpha = st.alpha;
   ctx.beginPath();
-  for (let i = 0; i < n; i++) {
-    const x = s.sx(xs[i]);
-    const y = s.sy(ys[i]);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  }
+  forEachKept(xs, ys, lo, hi, (x, y, move) => {
+    const px = s.sx(x);
+    const py = s.sy(y);
+    if (move) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  });
   ctx.stroke();
   ctx.restore();
 }

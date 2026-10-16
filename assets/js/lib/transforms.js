@@ -78,15 +78,21 @@ window.TR = (() => {
     }
     return '';
   };
+  /* 分式分子：常量 1 在有其它因子时省略（1·s → s），但不允许为空（系数 1 → `1`） */
+  const numTexOf = (coefTex, rest) => {
+    const parts = [coefTex].concat(rest).filter((p) => p !== '');
+    const kept = parts.length > 1 ? parts.filter((p) => p !== '1') : parts;
+    return kept.length ? kept.join('\\cdot') : '1';
+  };
   const itemLapTex = (it) => {
-    const s = it.sign < 0 ? '-' : '', c = it.coef === 1 ? '' : num2tex(it.coef) + '\\cdot';
+    const s = it.sign < 0 ? '-' : '', cn = num2tex(it.coef);
     switch (it.kind) {
-      case 'exp': return `${s}\\dfrac{${it.coef === 1 ? '' : num2tex(it.coef)}}{s+${num2tex(it.a)}}`;
-      case 'texp': return `${s}\\dfrac{${it.coef === 1 ? '' : num2tex(it.coef)}\\cdot${fact(it.n)}}{(s+${num2tex(it.a)})^{${it.n + 1}}}`;
-      case 'sin': return `${s}\\dfrac{${it.coef === 1 ? '' : num2tex(it.coef) + '\\cdot'}${num2tex(it.w)}}{s^{2}+${num2tex(it.w * it.w)}}`;
-      case 'cos': return `${s}\\dfrac{${it.coef === 1 ? '' : num2tex(it.coef) + '\\cdot'}s}{s^{2}+${num2tex(it.w * it.w)}}`;
-      case 'tpow': return `${s}\\dfrac{${it.coef === 1 ? '' : num2tex(it.coef) + '\\cdot'}${fact(it.n)}}{s^{${it.n + 1}}}`;
-      case 'u': case 'const': return `${s}\\dfrac{${num2tex(it.coef)}}{s}`;
+      case 'exp': return `${s}\\dfrac{${numTexOf(cn, [])}}{s+${num2tex(it.a)}}`;
+      case 'texp': return `${s}\\dfrac{${numTexOf(cn, [fact(it.n)])}}{(s+${num2tex(it.a)})^{${it.n + 1}}}`;
+      case 'sin': return `${s}\\dfrac{${numTexOf(cn, [num2tex(it.w)])}}{s^{2}+${num2tex(it.w * it.w)}}`;
+      case 'cos': return `${s}\\dfrac{${numTexOf(cn, ['s'])}}{s^{2}+${num2tex(it.w * it.w)}}`;
+      case 'tpow': return `${s}\\dfrac{${numTexOf(cn, [fact(it.n)])}}{s^{${it.n + 1}}}`;
+      case 'u': case 'const': return `${s}\\dfrac{${numTexOf(cn, [])}}{s}`;
     }
     return '';
   };

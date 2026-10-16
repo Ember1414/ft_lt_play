@@ -1,6 +1,6 @@
 {
   "name": "ft-lt-play-v2",
-  "version": "2.14.0",
+  "version": "2.15.0",
   "private": true,
   "type": "module",
   "description": "信号与控制实验平台 v2 —— 专业级通用工具箱（local-first，Vite + TypeScript + Preact）",

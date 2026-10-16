@@ -292,7 +292,14 @@ interface RouteResult {
 }
 
 /** 正交路由：正向走中轴、回绕走独立车道；同轴穿框时改走上/下绕行（三候选择优） */
-function routePath(a: { x: number; y: number }, b: { x: number; y: number }, slot: string, lane: number, obstacles: Rect2[]): RouteResult {
+function routePath(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  slot: string,
+  lane: number,
+  obstacles: Rect2[],
+  targetBox?: Rect2,
+): RouteResult {
   const end = slot === 'up' ? { x: b.x, y: b.y - 22 } : slot === 'down' ? { x: b.x, y: b.y + 22 } : { x: b.x - 22, y: b.y };
   const build = (mode: 'orig' | 'below' | 'above'): Array<{ x: number; y: number }> => {
     const pts: Array<{ x: number; y: number }> = [a];
@@ -311,14 +318,24 @@ function routePath(a: { x: number; y: number }, b: { x: number; y: number }, slo
     pts.push(end, b);
     return pts;
   };
+  /**
+   * 评分：撞到「其它元件」计 1；撞到「目标元件自身包围盒」计 2 —— 后者只看末端之前的折线，
+   * 允许最后两段从外侧切入端口（否则每条线都会因接近端口而误判受阻）。
+   */
+  const score = (pts: Array<{ x: number; y: number }>): number => {
+    const outside = polylineHits(pts, obstacles);
+    if (!targetBox) return outside;
+    const pre = pts.slice(0, Math.max(1, pts.length - 2));
+    return outside + 2 * polylineHits(pre, [targetBox]);
+  };
   const cands = [build('orig'), build('below'), build('above')];
   let best = cands[0];
-  let bestHit = polylineHits(cands[0], obstacles);
-  for (let k = 1; k < cands.length && bestHit > 0; k++) {
-    const h = polylineHits(cands[k], obstacles);
-    if (h < bestHit) {
+  let bestScore = score(cands[0]);
+  for (let k = 1; k < cands.length && bestScore > 0; k++) {
+    const s = score(cands[k]);
+    if (s < bestScore) {
       best = cands[k];
-      bestHit = h;
+      bestScore = s;
     }
   }
   const uniq = best.filter((p, i) => i === 0 || Math.abs(p.x - best[i - 1].x) > 0.5 || Math.abs(p.y - best[i - 1].y) > 0.5);
@@ -326,7 +343,7 @@ function routePath(a: { x: number; y: number }, b: { x: number; y: number }, slo
     d: uniq.map((p, i) => (i ? 'L' : 'M') + ' ' + round1(p.x) + ' ' + round1(p.y)).join(' '),
     pts: uniq,
     mid: midOf(uniq, b),
-    blocked: bestHit > 0,
+    blocked: bestScore > 0,
   };
 }
 
@@ -418,6 +435,8 @@ export function BlockTool(props: ToolViewProps) {
   const [selNodes, setSelNodes] = useState<number[]>([]);
   const [selEdge, setSelEdge] = useState(-1);
   const [wire, setWire] = useState<{ from: number; cur: { x: number; y: number }; target: number | null } | null>(null);
+  /** 交互反馈（落点无效 / 重复连线 / 已新增 …）——顶栏无 toast，用画布下方状态行回显 */
+  const [hint, setHint] = useState('');
   const undoRef = useRef(createUndoStack<BlkParams>(50));
   const lastPush = useRef(0);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -529,12 +548,21 @@ export function BlockTool(props: ToolViewProps) {
           const fb = params.nodes.find((n) => n.id === params.edges[j].to);
           if (fa && fb && fb.x < fa.x + 40 && Math.abs(fa.y - A.y) < 220) lane++;
         }
-        return routePath(A, B, B.slot, lane, obstacles);
+        const bg = nodeGeom(b0);
+        const targetBox: Rect2 = {
+          x0: b0.x - bg.w / 2 - 4,
+          y0: b0.y - bg.h / 2 - 4,
+          x1: b0.x + bg.w / 2 + 4,
+          y1: b0.y + bg.h / 2 + 4,
+        };
+        return routePath(A, B, B.slot, lane, obstacles, targetBox);
       }),
     [params.edges, params.nodes, slotMap],
   );
 
   const blockedCount = useMemo(() => edgeGeoms.filter((g) => g && g.blocked).length, [edgeGeoms]);
+  /** 表达式无法解析的方框（求解时会被跳过）→ 画布上标红提示 */
+  const invalidCount = useMemo(() => params.nodes.filter((n) => n.kind === 'box' && !n.f).length, [params.nodes]);
 
   /* ================= 指针交互 ================= */
 
@@ -557,17 +585,52 @@ export function BlockTool(props: ToolViewProps) {
     return null;
   };
 
-  const portAt = (w: { x: number; y: number }): BlkNode | null => {
-    const hit = HIT_PORT / params.view.s;
-    for (const n of params.nodes) {
-      const p = outPort(n);
-      if (Math.hypot(p.x - w.x, p.y - w.y) <= hit) return n;
+  /** 命中元件实体几何（不含 8px 外扩热区）：用于区分「点端口」与「点元件本体」 */
+  const nodeBodyAt = (w: { x: number; y: number }): BlkNode | null => {
+    for (let i = params.nodes.length - 1; i >= 0; i--) {
+      const n = params.nodes[i];
+      const g = nodeGeom(n);
+      if (w.x >= n.x - g.w / 2 && w.x <= n.x + g.w / 2 && w.y >= n.y - g.h / 2 && w.y <= n.y + g.h / 2) return n;
     }
     return null;
   };
 
+  /**
+   * 输出端口命中：屏幕恒定半径 HIT_PORT。
+   * 落在**该元件实体**内时不抢起线（让位给「拖动元件」——分支点/小节点否则完全拖不动）；
+   * 端口本身画在实体外侧 5px，仍可正常起线。
+   */
+  const portAt = (w: { x: number; y: number }): BlkNode | null => {
+    const hit = HIT_PORT / params.view.s;
+    const inside = nodeBodyAt(w);
+    let best: BlkNode | null = null;
+    let bestD = Infinity;
+    for (const n of params.nodes) {
+      if (inside && inside.id === n.id) continue;
+      const p = outPort(n);
+      const d = Math.hypot(p.x - w.x, p.y - w.y);
+      if (d <= hit && d < bestD) {
+        best = n;
+        bestD = d;
+      }
+    }
+    return best;
+  };
+
   const onPointerDown = (e: PointerEvent): void => {
+    if (e.button === 2) return; // 右键：不拖、不清选择（交给 onContextMenu）
+    setHint('');
     const w = screenToWorld(e.clientX, e.clientY);
+    if (e.button === 1) {
+      // 中键：始终平移（与元件/端口无关）
+      panRef.current = { px: e.clientX, py: e.clientY, tx: params.view.tx, ty: params.view.ty };
+      try {
+        (e.currentTarget as Element).setPointerCapture(e.pointerId);
+      } catch {
+        /* 指针捕获不可用 */
+      }
+      return;
+    }
     const port = portAt(w);
     if (port) {
       setWire({ from: port.id, cur: w, target: null });
@@ -654,10 +717,17 @@ export function BlockTool(props: ToolViewProps) {
     if (wire) {
       const w = screenToWorld(e.clientX, e.clientY);
       const over = nodeAt(w);
-      if (over && over.id !== wire.from) {
+      if (!over) {
+        setHint('未落在元件上：连线已取消（拖到目标元件上松手）');
+      } else if (over.id === wire.from) {
+        setHint('不能连接到自身');
+      } else {
         const exists = params.edges.some((ed) => ed.from === wire.from && ed.to === over.id);
-        if (!exists) {
+        if (exists) {
+          setHint('已存在该连线（点线中点徽标可切换正负号）');
+        } else {
           apply({ edges: [...params.edges, { from: wire.from, to: over.id, sign: 1 }] });
+          setHint('已新增连线 ' + wire.from + ' → ' + over.id);
         }
       }
       setWire(null);
@@ -887,6 +957,34 @@ export function BlockTool(props: ToolViewProps) {
         <div class="card stack">
           <h3>框图编辑器（SVG · 正交避障布线）</h3>
           <div class="blk-wrap" ref={wrapRef} style={{ height: '520px' }}>
+            <div class="blk-tools">
+              <button class="btn" onClick={() => fitView()} title="按元件包围盒自适应取景（双击空白同效）">
+                适应
+              </button>
+              <button
+                class="btn"
+                onClick={() => {
+                  const v = params.view;
+                  const ns = Math.max(0.35, Math.min(3, v.s / 1.2));
+                  applyLive({ view: { s: ns, tx: v.tx, ty: v.ty } });
+                }}
+                title="缩小"
+              >
+                −
+              </button>
+              <span class="muted mono">{Math.round(params.view.s * 100)}%</span>
+              <button
+                class="btn"
+                onClick={() => {
+                  const v = params.view;
+                  const ns = Math.max(0.35, Math.min(3, v.s * 1.2));
+                  applyLive({ view: { s: ns, tx: v.tx, ty: v.ty } });
+                }}
+                title="放大"
+              >
+                +
+              </button>
+            </div>
             <svg
               ref={svgRef}
               class="blk-svg"
@@ -898,6 +996,7 @@ export function BlockTool(props: ToolViewProps) {
                 const t = e.target as Element;
                 if (t && t.tagName === 'svg') fitView();
               }}
+              onContextMenu={(e) => e.preventDefault()}
               onWheel={(e) => {
                 e.preventDefault();
                 const svg = svgRef.current;
@@ -926,14 +1025,21 @@ export function BlockTool(props: ToolViewProps) {
                   return (
                     <g key={'e' + i}>
                       <path
-                        class={'blk-edge' + (sel ? ' is-sel' : '')}
+                        class={'blk-edge' + (sel ? ' is-sel' : '') + (g.blocked ? ' is-blocked' : '')}
                         d={g.d}
                         pointer-events="none"
+                        vector-effect="non-scaling-stroke"
                       />
-                      <polygon class={'blk-arrow' + (sel ? ' is-sel' : '')} points={arrowOf(g.pts)} pointer-events="none" />
+                      <polygon
+                        class={'blk-arrow' + (sel ? ' is-sel' : '') + (g.blocked ? ' is-blocked' : '')}
+                        points={arrowOf(g.pts)}
+                        pointer-events="none"
+                        vector-effect="non-scaling-stroke"
+                      />
                       <path
                         class="blk-edge-hit"
                         d={g.d}
+                        vector-effect="non-scaling-stroke"
                         onPointerDown={(ev) => {
                           ev.stopPropagation();
                           setSelEdge(i);
@@ -975,20 +1081,39 @@ export function BlockTool(props: ToolViewProps) {
                       return r.d;
                     })()}
                     pointer-events="none"
+                    vector-effect="non-scaling-stroke"
                   />
                 ) : null}
 
                 {params.nodes.map((n) => {
                   const g = nodeGeom(n);
                   const sel = selNodes.includes(n.id);
+                  const isTarget = wire?.target === n.id;
+                  const invalid = n.kind === 'box' && !n.f;
                   return (
-                    <g key={'n' + n.id} class="blk-node" transform={'translate(' + n.x + ' ' + n.y + ')'}>
+                    <g
+                      key={'n' + n.id}
+                      class={'blk-node' + (isTarget ? ' is-target' : '')}
+                      transform={'translate(' + n.x + ' ' + n.y + ')'}
+                    >
                       {n.kind === 'box' ? (
                         <>
-                          <rect class={'blk-box' + (sel ? ' is-sel' : '')} x={-g.w / 2} y={-g.h / 2} width={g.w} height={g.h} rx={6} />
+                          <rect
+                            class={'blk-box' + (sel ? ' is-sel' : '') + (invalid ? ' is-err' : '')}
+                            x={-g.w / 2}
+                            y={-g.h / 2}
+                            width={g.w}
+                            height={g.h}
+                            rx={6}
+                          />
                           <text class="blk-txt" text-anchor="middle" dominant-baseline="central" pointer-events="none">
                             {nodeLabel(n).length > 16 ? nodeLabel(n).slice(0, 15) + '…' : nodeLabel(n)}
                           </text>
+                          {invalid ? (
+                            <text class="blk-warn" x={g.w / 2 - 6} y={-g.h / 2 + 2} text-anchor="middle" pointer-events="none">
+                              !
+                            </text>
+                          ) : null}
                         </>
                       ) : null}
                       {n.kind === 'sum' ? (
@@ -1020,8 +1145,19 @@ export function BlockTool(props: ToolViewProps) {
                       {inSlots(n).map((s) => (
                         <circle key={s.slot} class="blk-port in" transform={'translate(' + (s.x - n.x) + ' ' + (s.y - n.y) + ')'} r={2.6} pointer-events="none" />
                       ))}
-                      {/* 输出端口 */}
+                      {/* 输出端口：可见圆 + 透明热区（位于连线上层 ⇒ 端口点击优先于「选中连线」） */}
                       <circle class="blk-port" cx={g.w / 2 + 5} cy={0} r={3.4} pointer-events="none" />
+                      <circle
+                        class="blk-port-hit"
+                        cx={g.w / 2 + 5}
+                        cy={0}
+                        r={8}
+                        onPointerDown={(ev) => {
+                          ev.stopPropagation();
+                          setHint('');
+                          setWire({ from: n.id, cur: screenToWorld(ev.clientX, ev.clientY), target: null });
+                        }}
+                      />
                       {/* 标记：R / Y */}
                       <text class="blk-sub" text-anchor="middle" dominant-baseline="central" y={-g.h / 2 - 8} pointer-events="none">
                         {n.src ? 'R' : ''}
@@ -1034,12 +1170,21 @@ export function BlockTool(props: ToolViewProps) {
             </svg>
           </div>
           <div class="row">
-            <StatusBadge kind={solved.ok ? 'ok' : 'warn'}>{solved.ok ? '求解成功' : '未求解'}</StatusBadge>
+            <StatusBadge kind={hasSampled ? (samp?.ok ? 'ok' : 'warn') : solved.ok ? 'ok' : 'warn'}>
+              {hasSampled ? (samp?.ok ? 'z 域求解成功' : '采样分析未完成') : solved.ok ? '求解成功' : '未求解'}
+            </StatusBadge>
             <span class="muted" style="margin:0">
               {params.nodes.length} 元件 · {params.edges.length} 连线
+              {invalidCount ? ' · ' + invalidCount + ' 个元件表达式无效（不参与求解）' : ''}
               {blockedCount ? ' · ' + blockedCount + ' 条连线布线受阻（可挪动元件改善）' : ''}
             </span>
+            {hint ? <StatusBadge kind="info">{hint}</StatusBadge> : null}
           </div>
+          {hasSampled && !solved.ok ? (
+            <p class="muted" style="margin:0">
+              连续段求解未成功：{solved.note}
+            </p>
+          ) : null}
         </div>
 
         <div class="card stack">
@@ -1091,6 +1236,10 @@ export function BlockTool(props: ToolViewProps) {
                 xLabel="t (s)"
                 yLabel="y(t)"
               />
+            ) : solved.ok ? (
+              <p class="muted">
+                闭环传函为纯增益（无动态）：T(s) = {(solved.frac.n[0] ?? 1) / (solved.frac.d[0] || 1)}，无阶跃动态可绘。
+              </p>
             ) : (
               <p class="muted">暂无闭环解（含采样元件时请见 z 域分析）。</p>
             )}
@@ -1154,15 +1303,21 @@ export function BlockTool(props: ToolViewProps) {
               <>
                 <div class="row">
                   <StatusBadge kind="info">{KIND_LABEL[selNode.kind]} #{selNode.id}</StatusBadge>
-                  {selNode.kind !== 'branch' ? (
-                    <button class="btn" onClick={() => { setSelNodes([]); apply({ nodes: params.nodes.filter((n) => n.id !== selNode.id), edges: params.edges.filter((e) => e.from !== selNode.id && e.to !== selNode.id) }); }}>
-                      删除
-                    </button>
-                  ) : (
-                    <button class="btn" onClick={() => setSelNodes([])}>
-                      取消选择
-                    </button>
-                  )}
+                  <button
+                    class="btn"
+                    onClick={() => {
+                      setSelNodes([]);
+                      apply({
+                        nodes: params.nodes.filter((n) => n.id !== selNode.id),
+                        edges: params.edges.filter((e) => e.from !== selNode.id && e.to !== selNode.id),
+                      });
+                    }}
+                  >
+                    删除
+                  </button>
+                  <button class="btn" onClick={() => setSelNodes([])}>
+                    取消选择
+                  </button>
                 </div>
                 {selNode.kind === 'box' ? (
                   <>

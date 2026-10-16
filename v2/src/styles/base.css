@@ -121,6 +121,22 @@ code, .mono { font-family: var(--font-mono); font-size: .92em; }
 .blk-badge-txt { fill: var(--ink-2); font: var(--w-medium) 11px var(--font-mono); }
 .blk-port { fill: var(--accent); }
 .blk-port.in { fill: var(--ink-3); }
+/* 端口点击热区（透明）：位于连线上层，避免端口被连线的命中带吞掉 */
+.blk-port-hit { fill: transparent; cursor: crosshair; }
+/* 表达式无效（不参与求解）/ 布线受阻 / 拖线目标 —— 画布上直接可见 */
+.blk-box.is-err { stroke: var(--danger); stroke-dasharray: 5 3; }
+.blk-warn { fill: var(--danger); font: var(--w-bold) 11px var(--font-mono); }
+.blk-edge.is-blocked { stroke: var(--danger); stroke-dasharray: 5 4; }
+.blk-arrow.is-blocked { fill: var(--danger); }
+.blk-node.is-target .blk-box, .blk-node.is-target .blk-shape { stroke: var(--accent); stroke-width: 2.6; }
+/* 画布内常驻工具条：适应 / 缩小 / 百分比 / 放大（缩放随滚轮） */
+.blk-tools {
+  position: absolute; right: 8px; top: 8px; z-index: 5;
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 6px; border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+}
+.blk-tools .btn { padding: 2px 8px; }
 
 /* —— 数据输入区（textarea，交互求解的数据视图） —— */
 .c-area {

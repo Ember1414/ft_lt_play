@@ -114,9 +114,29 @@ export function Chart(props: ChartProps) {
     | { mode: 'marker'; index: number }
     | null
   >(null);
+  /** 用户是否手动调过某轴（滚轮/拖动）：手动过的轴在“基准未变”时保持用户视野 */
+  const touched = useRef({ x: false, y: false });
+  const baseRef = useRef({ x: xRange, y: yRange });
 
-  // 外部范围变化 → 同步视图
-  useEffect(() => setView({ x: xRange, y: yRange }), [xRange[0], xRange[1], yRange[0], yRange[1]]);
+  /**
+   * 外部基准范围变化 → 同步视图：
+   * - 只换数据、基准不变（绝大多数调参）：**保留用户缩放/平移**（M19 反馈：调参后视野被重置）；
+   * - 基准变化：未手动调过的轴跟随新基准；手动调过的轴仅在“新基准不再包含当前视野”时重置。
+   */
+  useEffect(() => {
+    const base = baseRef.current;
+    const chX = base.x[0] !== xRange[0] || base.x[1] !== xRange[1];
+    const chY = base.y[0] !== yRange[0] || base.y[1] !== yRange[1];
+    baseRef.current = { x: xRange, y: yRange };
+    if (!chX && !chY) return;
+    setView((v) => {
+      const keepX =
+        touched.current.x && !chX && Number.isFinite(v.x[0]) && Number.isFinite(v.x[1]);
+      const keepY =
+        touched.current.y && !chY && Number.isFinite(v.y[0]) && Number.isFinite(v.y[1]);
+      return { x: keepX ? v.x : xRange, y: keepY ? v.y : yRange };
+    });
+  }, [xRange[0], xRange[1], yRange[0], yRange[1]]);
 
   // 主题切换 → 刷新颜色并重绘
   useEffect(
@@ -246,16 +266,17 @@ export function Chart(props: ChartProps) {
       const { px, py } = localPos(e);
       const k = e.deltaY > 0 ? 1.15 : 1 / 1.15;
       const d = toData(px, py);
-      setView((v) => {
-        const nx = e.shiftKey ? v.x : ([d.x + (v.x[0] - d.x) * k, d.x + (v.x[1] - d.x) * k] as [number, number]);
-        const ny = e.shiftKey ? ([d.y + (v.y[0] - d.y) * k, d.y + (v.y[1] - d.y) * k] as [number, number]) : (v.y as [number, number]);
-        const next = {
-          x: xLog ? ([Math.max(nx[0], 1e-9), Math.max(nx[1], 1e-8)] as [number, number]) : clampSpan(nx, xRange),
-          y: clampSpan(ny, yRange),
-        };
-        onViewChange?.(next.x, next.y);
-        return next;
-      });
+      const v = view;
+      if (e.shiftKey) touched.current.y = true;
+      else touched.current.x = true;
+      const nx = e.shiftKey ? v.x : ([d.x + (v.x[0] - d.x) * k, d.x + (v.x[1] - d.x) * k] as [number, number]);
+      const ny = e.shiftKey ? ([d.y + (v.y[0] - d.y) * k, d.y + (v.y[1] - d.y) * k] as [number, number]) : (v.y as [number, number]);
+      const next = {
+        x: xLog ? ([Math.max(nx[0], 1e-9), Math.max(nx[1], 1e-8)] as [number, number]) : clampSpan(nx, xRange),
+        y: clampSpan(ny, yRange),
+      };
+      setView(next);
+      onViewChange?.(next.x, next.y);
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
@@ -292,6 +313,8 @@ export function Chart(props: ChartProps) {
         x: xLog ? ([Math.max(nx[0], 1e-9), Math.max(nx[1], 1e-8)] as [number, number]) : nx,
         y: ny,
       };
+      touched.current.x = true;
+      touched.current.y = true;
       setView(next);
       onViewChange?.(next.x, next.y);
       return;
@@ -345,6 +368,8 @@ export function Chart(props: ChartProps) {
         onPointerCancel={onPointerUp}
         onPointerLeave={() => setHoverPt(null)}
         onDblClick={() => {
+          touched.current = { x: false, y: false };
+          baseRef.current = { x: xRange, y: yRange };
           setView({ x: xRange, y: yRange });
           onViewChange?.(xRange, yRange);
         }}

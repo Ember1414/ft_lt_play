@@ -271,43 +271,48 @@ export function Workspace(props: WorkspaceProps) {
     <div class={wsCls}>
       <header class="ws-bar">
         <span class="ws-title">{tool.name}</span>
-        {subtitle ? <span class="muted">{subtitle}</span> : null}
+        {subtitle ? (
+          <span class="muted ws-sub" title={subtitle}>
+            {subtitle}
+          </span>
+        ) : null}
         {exp ? (
           <span class="muted ws-expname" title={'实验：' + exp.name}>
             {exp.name}
           </span>
         ) : null}
-        <span class="spacer" />
-        <button class="btn" onClick={() => api?.undo()} disabled={!api?.canUndo()} title="撤销（⌘Z）">
-          ↶ 撤销
-        </button>
-        <button class="btn" onClick={() => api?.redo()} disabled={!api?.canRedo()} title="重做（⌘⇧Z）">
-          ↷ 重做
-        </button>
-        <button
-          class={'btn' + (!focus && leftOpen ? ' is-on' : '')}
-          onClick={() => setLeftOpen((v) => !v)}
-          title="显示 / 隐藏参数区"
-        >
-          参数栏
-        </button>
-        <button
-          class={'btn' + (!focus && rightOpen ? ' is-on' : '')}
-          onClick={() => setRightOpen((v) => !v)}
-          title="显示 / 隐藏分析区"
-        >
-          分析栏
-        </button>
-        <button class={'btn' + (focus ? ' is-on' : '')} onClick={() => setFocus((v) => !v)} title="专注模式（仅主内容区）">
-          专注
-        </button>
-        <button
-          class={'btn' + (notesOpen ? ' is-on' : '')}
-          onClick={() => setNotesOpen((v) => !v)}
-          title={noteText.trim() ? '笔记（已有内容）' : '本实验笔记'}
-        >
-          笔记{noteText.trim() ? ' •' : ''}
-        </button>
+        <div class="ws-bar-actions">
+          <button class="btn" onClick={() => api?.undo()} disabled={!api?.canUndo()} title="撤销（⌘Z）">
+            ↶ 撤销
+          </button>
+          <button class="btn" onClick={() => api?.redo()} disabled={!api?.canRedo()} title="重做（⌘⇧Z）">
+            ↷ 重做
+          </button>
+          <button
+            class={'btn' + (!focus && leftOpen ? ' is-on' : '')}
+            onClick={() => setLeftOpen((v) => !v)}
+            title="显示 / 隐藏参数区"
+          >
+            参数栏
+          </button>
+          <button
+            class={'btn' + (!focus && rightOpen ? ' is-on' : '')}
+            onClick={() => setRightOpen((v) => !v)}
+            title="显示 / 隐藏分析区"
+          >
+            分析栏
+          </button>
+          <button class={'btn' + (focus ? ' is-on' : '')} onClick={() => setFocus((v) => !v)} title="专注模式（仅主内容区）">
+            专注
+          </button>
+          <button
+            class={'btn' + (notesOpen ? ' is-on' : '')}
+            onClick={() => setNotesOpen((v) => !v)}
+            title={noteText.trim() ? '笔记（已有内容）' : '本实验笔记'}
+          >
+            笔记<span class="dot-slot">{noteText.trim() ? '•' : ''}</span>
+          </button>
+        </div>
       </header>
 
       <div class="ws-body" ref={bodyRef}>
@@ -408,7 +413,7 @@ export function Workspace(props: WorkspaceProps) {
           存 B
         </button>
         <button class="btn" onClick={() => navigate({ page: 'compare' })} title="打开对比实验页（A/B 并排 + 参数与指标差异）">
-          对比 {readSlot('A') && readSlot('B') ? '●' : ''}
+          对比<span class="dot-slot">{readSlot('A') && readSlot('B') ? '●' : ''}</span>
         </button>
         <button class="btn" onClick={exportChartPng} title="导出工作区内最大画布为 PNG">
           图表 PNG

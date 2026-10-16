@@ -1,7 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { ExprField, FieldGroup, Metric, SegmentedChips, SliderField, StatusBadge } from '../../ui/components';
 import { TeX } from '../../ui/TeX';
-import { fourierOfItems, fNumeric, FsNumeric, itemLapTex, laplaceOfItems, parseTimeCombo, type TimeItem } from '../../core';
+import {
+  combineFracs,
+  fourierOfItems,
+  fNumeric,
+  FsNumeric,
+  invZ,
+  itemFracZ,
+  itemLapTex,
+  laplaceOfItems,
+  parseTimeCombo,
+  parseZCombo,
+  polyTex,
+  pTrim,
+  polyRoots,
+  xNumeric,
+  zOfItems,
+  type TimeItem,
+} from '../../core';
 import { createUndoStack } from '../../state/undo';
 import { getModuleState, setModuleState } from '../../state/experiments';
 import { useExperimentSync } from '../useSync';
@@ -9,14 +26,15 @@ import type { ToolViewProps } from '../api';
 
 /**
  * 公式推导（derive）
- * 三视图：性质表（ℱ/ℒ/𝒵 性质与常用变换对）/ 逐步推导（分步展示，可逐步展开）/
- *        自定义推导（输入 f(t) → 定义积分 → 逐项变换对 → 合并 + ROC + ℱ 对照 + 数值自检）。
+ * 三视图：性质表（ℱ/ℒ/𝒵 性质、常用变换对、s↔z 映射对照）/ 逐步推导（分步展示）/ 
+ *        自定义推导（连续：f(t) → F(s) + ROC + ℱ 对照；离散：x[n] → X(z) + 𝒵⁻¹ + 数值自检）。
  * 公式渲染走 KaTeX（缺失时自动纯文本降级）。
  */
 
 type ViewId = 'tables' | 'steps' | 'custom';
-type TableId = 'ft' | 'la' | 'lt' | 'zt' | 'ztp';
+type TableId = 'ft' | 'la' | 'lt' | 'zt' | 'ztp' | 'szmap';
 type DerivId = 'square' | 'laplace' | 'rect' | 'zsum' | 'conv1';
+type CustomMode = 'ct' | 'dt';
 
 interface DeriveParams {
   view: ViewId;
@@ -24,9 +42,21 @@ interface DeriveParams {
   deriv: DerivId;
   shown: number;
   sig: string;
+  /** 自定义推导模式：连续 f(t) / 离散 x[n] */
+  mode: CustomMode;
+  /** 离散序列表达式 */
+  zsig: string;
 }
 
-const DEFAULT: DeriveParams = { view: 'tables', table: 'la', deriv: 'square', shown: 1, sig: 'exp(-2*t)*u(t)' };
+const DEFAULT: DeriveParams = {
+  view: 'tables',
+  table: 'la',
+  deriv: 'square',
+  shown: 1,
+  sig: 'exp(-2*t)*u(t)',
+  mode: 'ct',
+  zsig: '0.8^n*u[n]',
+};
 
 const VIEWS: ReadonlyArray<{ value: ViewId; label: string }> = [
   { value: 'tables', label: '性质表' },
@@ -35,9 +65,9 @@ const VIEWS: ReadonlyArray<{ value: ViewId; label: string }> = [
 ];
 
 const VIEW_HINTS: Record<ViewId, string> = {
-  tables: 'ℱ / ℒ / 𝒵 的性质与常用变换对速查（三列：名称 · 时域/序列 · 变换域，𝒵 对表附 ROC）。',
-  steps: '典型推导按步骤展示：每步给"为什么"与关键公式；可用「下一步」逐步跟读。',
-  custom: '输入 f(t)：定义积分 → 逐项变换对 → 线性合并 F(s) + ROC → ℱ 对照 → 数值自检。',
+  tables: 'ℱ / ℒ / 𝒵 性质、常用变换对与 s↔z 映射对照速查。',
+  steps: '典型推导按步骤展示：每步给出依据与关键公式，可逐步展开。',
+  custom: '连续：f(t) → 定义积分 → 逐项变换对 → F(s)+ROC → ℱ 对照；离散：x[n] → X(z)+ROC → 𝒵⁻¹ 闭式与逐拍核对。',
 };
 
 /* ---------- 性质表数据 ---------- */
@@ -104,6 +134,16 @@ const TABLES: Record<TableId, TableDef> = {
       ['初值定理', 'x[0]=\\lim_{z\\to\\infty}X(z)', '\\text{（因果序列）}'],
       ['终值定理', '\\lim_{n\\to\\infty}x[n]', '\\lim_{z\\to 1}(z-1)X(z)'],
       ['与 s 域联系', 'z=e^{sT}', '\\text{单位圆}\\leftrightarrow j\\omega\\text{ 轴}'],
+    ],
+  },
+  szmap: {
+    name: 's ↔ z 映射对照',
+    head: ['方法', 's → z', 'z → s', '特性'],
+    rows: [
+      ['冲激响应不变', 'z=e^{sT}\\;(p\\mapsto e^{pT})', 's=\\dfrac{\\ln z}{T}', '\\text{极点映射直接；高频混叠（需小 }T\\text{）}'],
+      ['零阶保持（ZOH）', 'z=e^{sT},\\;G(z)=(1-z^{-1})\\mathcal{Z}\\!\\left[\\dfrac{G(s)}{s}\\right]', 's=\\dfrac{\\ln z}{T}', '\\text{与连续回路「采样保持」等效，最常用于控制}'],
+      ['双线性 / Tustin', 'z=\\dfrac{1+sT/2}{1-sT/2}', 's=\\dfrac{2}{T}\\cdot\\dfrac{z-1}{z+1}', '\\text{无混叠、左半平面 → 单位圆内；频率需预畸变 }\\omega_a=\\tfrac{2}{T}\\tan\\tfrac{\\omega T}{2}'],
+      ['后向差分', 'z=\\dfrac{1}{1-sT}', 's=\\dfrac{1-z^{-1}}{T}', '\\text{最简单；右半平面也映到 }|z|<1\\text{，最保守}'],
     ],
   },
   ztp: {
@@ -239,6 +279,7 @@ const TABLE_CHIPS: ReadonlyArray<{ value: TableId; label: string }> = [
   { value: 'lt', label: 'ℒ 变换对' },
   { value: 'zt', label: '𝒵 性质' },
   { value: 'ztp', label: '𝒵 变换对' },
+  { value: 'szmap', label: 's↔z 映射' },
 ];
 
 const DERIV_CHIPS: ReadonlyArray<{ value: DerivId; label: string }> = [
@@ -252,14 +293,17 @@ const DERIV_CHIPS: ReadonlyArray<{ value: DerivId; label: string }> = [
 function sanitize(raw: unknown): DeriveParams {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Partial<DeriveParams>;
   const views: ViewId[] = ['tables', 'steps', 'custom'];
-  const tables: TableId[] = ['ft', 'la', 'lt', 'zt', 'ztp'];
+  const tables: TableId[] = ['ft', 'la', 'lt', 'zt', 'ztp', 'szmap'];
   const derivs: DerivId[] = ['square', 'laplace', 'rect', 'zsum', 'conv1'];
+  const modes: CustomMode[] = ['ct', 'dt'];
   return {
     view: views.includes(r.view as ViewId) ? (r.view as ViewId) : DEFAULT.view,
     table: tables.includes(r.table as TableId) ? (r.table as TableId) : DEFAULT.table,
     deriv: derivs.includes(r.deriv as DerivId) ? (r.deriv as DerivId) : DEFAULT.deriv,
     shown: Number.isFinite(r.shown) ? Math.max(1, Math.min(20, Math.round(r.shown as number))) : DEFAULT.shown,
     sig: typeof r.sig === 'string' && r.sig.trim() ? r.sig : DEFAULT.sig,
+    mode: modes.includes(r.mode as CustomMode) ? (r.mode as CustomMode) : DEFAULT.mode,
+    zsig: typeof r.zsig === 'string' && r.zsig.trim() ? r.zsig : DEFAULT.zsig,
   };
 }
 
@@ -335,6 +379,36 @@ export function DeriveTool(props: ToolViewProps) {
     return { sigma, lhs: acc, rhs: closed, rel: Math.abs(acc - closed) / Math.max(1e-12, Math.abs(closed)) };
   }, [items, view]);
 
+  /* ---- 离散自定义：x[n] → X(z) → 𝒵⁻¹ ---- */
+
+  const zItems = useMemo(() => parseZCombo(params.zsig), [params.zsig]);
+  const zl = useMemo(() => (zItems ? zOfItems(zItems) : null), [zItems]);
+  const zX = useMemo(() => (zItems ? combineFracs(zItems, itemFracZ) : null), [zItems]);
+  const zPoles = useMemo(() => (zX ? polyRoots(zX.d) : []), [zX]);
+  const zInv = useMemo(() => (zX ? invZ(zX.n, zX.d) : null), [zX]);
+
+  /** 数值核对：𝒵⁻¹ 闭式 x[n] vs 直接求序列（前 12 拍最大偏差） */
+  const zCheck = useMemo(() => {
+    if (!zItems || !zInv || zInv.tex == null) return null;
+    const rows: Array<{ n: number; direct: number; closed: number }> = [];
+    let worst = 0;
+    for (let n = 0; n < 12; n++) {
+      const direct = xNumeric(zItems, n);
+      const closed = zInv.evalN(n);
+      rows.push({ n, direct, closed });
+      worst = Math.max(worst, Math.abs(direct - closed));
+    }
+    return { rows, worst };
+  }, [zItems, zInv]);
+
+  /** 稳定性：单位圆内极点（ρmax < 1）；无极点 = 有限长序列 */
+  const zStable = useMemo(() => {
+    if (!zPoles.length) return { kind: 'finite' as const, rho: 0 };
+    let rho = 0;
+    for (const p of zPoles) rho = Math.max(rho, Math.hypot(p.re, p.im));
+    return { kind: rho < 1 - 1e-9 ? ('stable' as const) : rho > 1 + 1e-9 ? ('unstable' as const) : ('critical' as const), rho };
+  }, [zPoles]);
+
   /* ================= ToolApi ================= */
 
   useEffect(() => {
@@ -356,9 +430,13 @@ export function DeriveTool(props: ToolViewProps) {
           ? TABLES[params.table].name + ' · ' + TABLES[params.table].rows.length + ' 条'
           : view === 'steps'
             ? DERIVS[params.deriv].name + ' · 第 ' + Math.min(params.shown, DERIVS[params.deriv].steps.length) + '/' + DERIVS[params.deriv].steps.length + ' 步'
-            : items
-              ? 'f(t) 已解析 · ' + items.length + ' 项'
-              : '信号待解析',
+            : params.mode === 'dt'
+              ? zItems
+                ? 'x[n] 已解析 · ' + zItems.length + ' 项'
+                : '序列待解析'
+              : items
+                ? 'f(t) 已解析 · ' + items.length + ' 项'
+                : '信号待解析',
       metrics: () => {
         if (view === 'tables') {
           return [{ label: '条目数', value: TABLES[params.table].rows.length, precision: 0 }];
@@ -368,6 +446,17 @@ export function DeriveTool(props: ToolViewProps) {
           return [
             { label: '步骤数', value: d.steps.length, precision: 0 },
             { label: '当前进度', value: Math.min(params.shown, d.steps.length) + ' / ' + d.steps.length },
+          ];
+        }
+        if (params.mode === 'dt') {
+          const stTone: 'ok' | 'warn' | 'danger' =
+            zStable.kind === 'stable' || zStable.kind === 'finite' ? 'ok' : zStable.kind === 'critical' ? 'warn' : 'danger';
+          const ckTone: 'ok' | 'warn' = zCheck && zCheck.worst < 1e-6 ? 'ok' : 'warn';
+          return [
+            { label: '项数', value: zItems ? zItems.length : 0, precision: 0 },
+            { label: '极点数', value: zPoles.length, precision: 0 },
+            { label: 'ρmax', value: zStable.kind === 'finite' ? '—' : zStable.rho, precision: 3, tone: stTone },
+            { label: '反变换核对 ε', value: zCheck ? (zCheck.worst < 1e-9 ? '< 1e-9' : zCheck.worst.toExponential(1)) : '—', tone: ckTone },
           ];
         }
         return check
@@ -383,9 +472,16 @@ export function DeriveTool(props: ToolViewProps) {
         {
           id: 'tex',
           label: 'TeX',
-          disabled: view !== 'custom' || !lap,
-          reason: '仅在「自定义推导」视图且信号已解析时可导出',
+          disabled: view !== 'custom' || (params.mode === 'dt' ? !(zl && zInv?.tex) : !lap),
+          reason: '仅在「自定义推导」视图且表达式已解析时可导出',
           run: () => {
+            if (params.mode === 'dt') {
+              if (!zl || !zInv || zInv.tex == null) return;
+              const X =
+                zX != null ? 'X(z)=\\dfrac{' + polyTex(pTrim(zX.n), 'z') + '}{' + polyTex(pTrim(zX.d), 'z') + '}' : zl.zLine;
+              downloadText('derive-latex.txt', [zl.xLine, zl.zLine, X, zl.rocTex, 'x[n]=' + zInv.tex].join('\n'));
+              return;
+            }
             if (!lap) return;
             downloadText('derive-latex.txt', [lap.fLine, lap.fsLine, lap.rocTex].join('\n'));
           },
@@ -393,7 +489,7 @@ export function DeriveTool(props: ToolViewProps) {
       ],
     });
     return () => props.api(null);
-  }, [params, view, items, lap, check, perTerm]);
+  }, [params, view, items, lap, check, perTerm, zItems, zl, zX, zInv, zPoles, zStable, zCheck]);
 
   /* ================= 渲染 ================= */
 
@@ -433,23 +529,56 @@ export function DeriveTool(props: ToolViewProps) {
           ) : null}
 
           {view === 'custom' ? (
-            <FieldGroup title="信号 f(t)" desc="支持 exp/sin/cos/t^n/u(t)/常数及其线性组合。">
-              <ExprField
-                label="f(t)"
-                value={params.sig}
-                onChange={(v) => apply({ sig: v })}
-                status={items ? 'ok' : 'err'}
-                message={items ? '已解析（' + items.length + ' 项）' : '无法解析：请检查写法'}
-                hint="示例：exp(-2*t)*u(t)、sin(3*t)*u(t)、t^2*u(t)"
-              />
-              <div class="row">
-                {['exp(-2*t)*u(t)', 'sin(3*t)*u(t)', 't^2*u(t)', 'exp(-2*t)*u(t)+cos(4*t)*u(t)'].map((s) => (
-                  <button key={s} class="btn" onClick={() => apply({ sig: s })}>
-                    {s.replace('*u(t)', '')}
-                  </button>
-                ))}
-              </div>
-            </FieldGroup>
+            <>
+              <FieldGroup title="推导类型">
+                <SegmentedChips
+                  options={[
+                    { value: 'ct' as CustomMode, label: '连续 ℒ' },
+                    { value: 'dt' as CustomMode, label: '离散 𝒵' },
+                  ]}
+                  value={params.mode}
+                  onChange={(v) => apply({ mode: v })}
+                  ariaLabel="推导类型"
+                />
+              </FieldGroup>
+              {params.mode === 'ct' ? (
+                <FieldGroup title="信号 f(t)" desc="支持 exp/sin/cos/t^n/u(t)/常数及其线性组合。">
+                  <ExprField
+                    label="f(t)"
+                    value={params.sig}
+                    onChange={(v) => apply({ sig: v })}
+                    status={items ? 'ok' : 'err'}
+                    message={items ? '已解析（' + items.length + ' 项）' : '无法解析：请检查写法'}
+                    hint="示例：exp(-2*t)*u(t)、sin(3*t)*u(t)、t^2*u(t)"
+                  />
+                  <div class="row">
+                    {['exp(-2*t)*u(t)', 'sin(3*t)*u(t)', 't^2*u(t)', 'exp(-2*t)*u(t)+cos(4*t)*u(t)'].map((s) => (
+                      <button key={s} class="btn" onClick={() => apply({ sig: s })}>
+                        {s.replace('*u(t)', '')}
+                      </button>
+                    ))}
+                  </div>
+                </FieldGroup>
+              ) : (
+                <FieldGroup title="序列 x[n]" desc="因果序列；支持 a^n、n、n·a^n、cos/sin(w n)、u[n]、delta[n] 及其线性组合。">
+                  <ExprField
+                    label="x[n]"
+                    value={params.zsig}
+                    onChange={(v) => apply({ zsig: v })}
+                    status={zItems ? 'ok' : 'err'}
+                    message={zItems ? '已解析（' + zItems.length + ' 项）' : '无法解析：请检查写法'}
+                    hint="示例：0.8^n*u[n]、n*u[n]、n*2^n*u[n]、cos(pi/3*n)u[n]"
+                  />
+                  <div class="row">
+                    {['0.8^n*u[n]', 'n*u[n]', '0.5^n*u[n]+delta[n]', 'cos(pi/3*n)u[n]'].map((s) => (
+                      <button key={s} class="btn" onClick={() => apply({ zsig: s })}>
+                        {s.replace('*u[n]', '')}
+                      </button>
+                    ))}
+                  </div>
+                </FieldGroup>
+              )}
+            </>
           ) : null}
         </aside>
       ) : null}
@@ -521,7 +650,101 @@ export function DeriveTool(props: ToolViewProps) {
           </div>
         ) : null}
 
-        {view === 'custom' ? (
+        {view === 'custom' && params.mode === 'dt' ? (
+          zItems && zl && zX && zInv ? (
+            <>
+              <div class="card stack">
+                <h3>① 定义（单边 Z 变换）</h3>
+                <div class="tex-line">
+                  <TeX tex={'X(z)=\\sum_{n=0}^{\\infty} x[n]\\,z^{-n}'} />
+                </div>
+                <p class="muted">{zl.xLine}</p>
+              </div>
+
+              <div class="card stack">
+                <h3>② 逐项变换对 → 有理式合并</h3>
+                <div class="formula-block">
+                  <div class="tex-line">
+                    <TeX tex={zl.zLine} />
+                  </div>
+                  <div class="tex-line">
+                    <TeX tex={'X(z)=\\dfrac{' + polyTex(pTrim(zX.n), 'z') + '}{' + polyTex(pTrim(zX.d), 'z') + '}'} />
+                  </div>
+                </div>
+                <div class="row">
+                  <StatusBadge kind={zStable.kind === 'stable' ? 'ok' : zStable.kind === 'finite' ? 'info' : zStable.kind === 'critical' ? 'warn' : 'err'}>
+                    {zStable.kind === 'finite'
+                      ? '无极点（有限长序列 · ROC 全平面）'
+                      : zStable.kind === 'stable'
+                        ? '稳定（极点在单位圆内）'
+                        : zStable.kind === 'critical'
+                          ? '临界（含单位圆上极点）'
+                          : '不稳定（存在单位圆外极点）'}
+                  </StatusBadge>
+                  {zStable.kind !== 'finite' ? <Metric label="ρmax（极点模）" value={zStable.rho} precision={3} /> : null}
+                  <Metric label="极点数" value={zPoles.length} precision={0} />
+                  <Metric label="项数" value={zItems.length} precision={0} />
+                </div>
+                <p class="muted">{zl.rocTex}</p>
+              </div>
+
+              <div class="card stack">
+                <h3>③ 反变换（𝒵 逆变换）</h3>
+                {zInv.tex ? (
+                  <div class="formula-block">
+                    <div class="tex-line">
+                      <TeX tex={'x[n]=' + zInv.tex + ',\\quad n\\ge 0'} />
+                    </div>
+                  </div>
+                ) : (
+                  <p class="muted">{zInv.note}</p>
+                )}
+                <p class="muted">{zInv.note}（部分分式 + 留数，重极点展开）</p>
+              </div>
+
+              <div class="card stack">
+                <h3>④ 数值核对（闭式 vs 直接求序列）</h3>
+                {zCheck ? (
+                  <>
+                    <table class="tbl">
+                      <thead>
+                        <tr>
+                          <th>n</th>
+                          <th>x[n]（直接）</th>
+                          <th>𝒵⁻¹ 闭式</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {zCheck.rows.map((r) => (
+                          <tr key={r.n}>
+                            <td>{r.n}</td>
+                            <td class="mono">{nf(r.direct, 6)}</td>
+                            <td class="mono">{nf(r.closed, 6)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <div class="row">
+                      <StatusBadge kind={zCheck.worst < 1e-9 ? 'ok' : 'warn'}>
+                        前 12 拍最大偏差 {zCheck.worst < 1e-9 ? '< 1e-9' : zCheck.worst.toExponential(1)}
+                      </StatusBadge>
+                      <span class="muted">闭式与序列直接求值同源，偏差应为数值误差量级。</span>
+                    </div>
+                  </>
+                ) : (
+                  <p class="muted">闭式不可用（{zInv.note}），仅能给出序列直接求值。</p>
+                )}
+              </div>
+            </>
+          ) : (
+            <div class="card stack">
+              <StatusBadge kind="err">序列无法解析</StatusBadge>
+              <p class="muted">支持：a^n·u[n]、n·u[n]、n·a^n·u[n]、cos/sin(w n)·u[n]、u[n]、delta[n]、常数及加减组合。</p>
+            </div>
+          )
+        ) : null}
+
+        {view === 'custom' && params.mode === 'ct' ? (
           items && lap ? (
             <>
               <div class="card stack">

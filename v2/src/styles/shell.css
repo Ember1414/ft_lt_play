@@ -73,12 +73,24 @@
 /* —— 工作区骨架 —— */
 .ws { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-3); min-height: 100%; }
 .ws-bar {
-  display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
+  display: flex; align-items: center; gap: var(--sp-2); flex-wrap: nowrap;
   padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--r-md);
   background: var(--panel);
 }
-.ws-title { font-weight: var(--w-bold); font-size: var(--fs-4); }
+.ws-title { font-weight: var(--w-bold); font-size: var(--fs-4); flex: 0 0 auto; }
 .ws-expname { max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 副标题（参数摘要）长度随参数变化：限宽 + 省略号，避免顶栏右侧按钮左右位移 */
+.ws-bar .ws-sub {
+  flex: 0 1 auto; min-width: 0; max-width: 46ch; margin-top: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* 顶栏动作组：钉在右侧，宽度只由自身决定（不随左侧文案变化） */
+.ws-bar-actions {
+  margin-left: auto; flex: 0 0 auto; display: flex; align-items: center; gap: var(--sp-2);
+}
+.ws-bar-actions .btn { flex: 0 0 auto; white-space: nowrap; }
+/* 状态圆点占位固定宽度：出现/消失不再改变按钮宽度（避免整组左右位移） */
+.dot-slot { display: inline-block; width: .75em; text-align: center; }
 .ws-body { flex: 1 1 auto; display: flex; gap: var(--sp-3); align-items: flex-start; }
 .ws-left { flex: 0 0 300px; display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
 .ws-main { flex: 1 1 auto; display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
@@ -272,6 +284,10 @@
   .app:not(.is-mobile-nav) .nav-mask { display: none; }
   .ws-body { flex-wrap: wrap; }
   .ws-left, .ws-right { flex: 1 1 100%; }
+  /* 窄屏顶栏：允许换行，参数摘要不再占位（避免把动作组挤出可视区） */
+  .ws-bar { flex-wrap: wrap; }
+  .ws-bar .ws-sub { display: none; }
+  .ws-bar-actions { flex-wrap: nowrap; overflow-x: auto; }
   .tabbar {
     display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
     padding: 4px 6px calc(4px + env(safe-area-inset-bottom));

@@ -18,6 +18,9 @@ type Criterion = 'ise' | 'iae' | 'itae';
 type AwMode = 'off' | 'clamp' | 'back';
 type DistKind = 'none' | 'step' | 'pulse';
 
+/** 仿真步数（dt = tmax/1500）：数字 PID 的实际控制周期由它决定 */
+const SIM_STEPS = 1500;
+
 interface PidParams {
   expr: string;
   kp: number;
@@ -33,6 +36,10 @@ interface PidParams {
   dKind: DistKind;
   dAmp: number;
   criterion: Criterion;
+  /** 反算抗饱和时间常数（s）：1/Tt 决定积分回退速率，教科书常取 Tt≈Ti 或 √(Ti·Td) */
+  Tt: number;
+  /** 参考阶跃时刻（s）：0 = t=0 立即阶跃；>0 时「微分先行」与原误差微分的差异才可见 */
+  tr: number;
   /** 仿真时长（s）— 影响 ts 与稳态观察窗 */
   tmax: number;
 }
@@ -53,6 +60,8 @@ const DEFAULT: PidParams = {
   dKind: 'none',
   dAmp: 0.5,
   criterion: 'ise',
+  Tt: 1,
+  tr: 0,
   tmax: 12,
 };
 
@@ -94,6 +103,8 @@ function sanitize(raw: unknown): PidParams {
     dKind: ds.includes(r.dKind as DistKind) ? (r.dKind as DistKind) : DEFAULT.dKind,
     dAmp: num(r.dAmp, DEFAULT.dAmp, -10, 10),
     criterion: cs.includes(r.criterion as Criterion) ? (r.criterion as Criterion) : DEFAULT.criterion,
+    Tt: num(r.Tt, DEFAULT.Tt, 0.05, 5),
+    tr: num(r.tr, DEFAULT.tr, 0, 30),
     tmax: num(r.tmax, DEFAULT.tmax, 2, 60),
   };
 }
@@ -147,17 +158,24 @@ export function PidTool(props: ToolViewProps) {
     return t && (t.den[0] || 0) ? t : null;
   }, [params.expr]);
 
+  /** 仿真步数：dt = tmax/SIM_STEPS；数字 PID 的实际控制周期 = round(Ts/dt)·dt */
+  const ctrlPeriod = useMemo(() => {
+    const dt = params.tmax / SIM_STEPS;
+    return params.Ts > 0 ? Math.max(1, Math.round(params.Ts / dt)) * dt : 0;
+  }, [params.Ts, params.tmax]);
+
   const sim = useMemo(() => {
     if (!parsed) return null;
     if (parsed.num.length - 1 >= parsed.den.length - 1) return { ok: false as const, note: '对象需为严格真分式（分子阶次 < 分母阶次）' };
     const opts: PidSimOpts = {
       tmax: params.tmax,
-      steps: 1500,
+      steps: SIM_STEPS,
       uMax: params.uOn ? params.uMax : null,
       aw: params.aw,
-      Tt: 1,
+      Tt: params.Tt,
       Ts: params.Ts > 0 ? params.Ts : 0,
-      r: params.r,
+      // 参考阶跃可延后到 tr：>0 时误差微分与微分先行不再等价（能看出微分踢）
+      r: (t) => (t < params.tr ? 0 : params.r),
       dSeq: distFn(params.dKind, params.dAmp),
     };
     const ctrl: PidCtrl = { kp: params.kp, ki: params.ki, kd: params.kd, Tf: params.Tf, dOnM: params.dOnM };
@@ -198,22 +216,26 @@ export function PidTool(props: ToolViewProps) {
     if (!simOk) return null;
     const m = errMetrics(simOk.t, simOk.e);
     const y = simOk.y;
+    const t = simOk.t;
     const r = params.r;
-    let peak = -Infinity;
-    for (const v of y) if (v > peak) peak = v;
-    const Mp = Math.abs(r) > 1e-12 ? Math.max(0, ((peak - r) / Math.abs(r)) * 100) : 0;
+    const tr = params.tr;
+    // 指标窗口：参考阶跃之后（tr=0 时即全窗）
+    let i0 = 0;
+    for (let i = 0; i < t.length; i++) if (t[i] >= tr) { i0 = i; break; }
+    // 超调：按 r 的符号取同向极值（r<0 时取最小值），否则负设定值会误报 100%
+    let ext = -Infinity;
+    for (let i = i0; i < y.length; i++) ext = Math.max(ext, r >= 0 ? y[i] : -y[i]);
+    const Mp = Math.abs(r) > 1e-12 ? Math.max(0, ((ext - Math.abs(r)) / Math.abs(r)) * 100) : 0;
     const band = 0.02 * Math.max(Math.abs(r), 1e-6);
-    let ts: number | null = null;
-    for (let i = y.length - 1; i >= 0; i--) {
-      if (Math.abs(y[i] - r) > band) {
-        ts = i + 1 < y.length ? simOk.t[i + 1] : simOk.t[i];
-        break;
-      }
-    }
+    let lastOut = -1;
+    for (let i = i0; i < y.length; i++) if (Math.abs(y[i] - r) > band) lastOut = i;
+    // 未入带（末端仍在带外）→ ts 记 null（界面显示 "> tmax"，不再伪造“恰好 tmax 调节到位”）
+    const settled = lastOut >= 0 && lastOut < y.length - 1;
+    const ts = settled ? t[lastOut + 1] : null;
     // 终值误差：取仿真末端瞬时误差（并非解析稳态误差，故按窗口标注）
     const ess = Math.abs(r - y[y.length - 1]);
-    return { ...m, Mp, ts, ess };
-  }, [simOk, params.r]);
+    return { ...m, Mp, ts, ess, i0, windowFrom: tr };
+  }, [simOk, params.r, params.tr]);
 
   // ZN 临界比例度（纯 P 临界增益）
   const zn = useMemo(() => (parsed ? znUltimate(parsed.num, parsed.den) : null), [parsed]);
@@ -246,9 +268,9 @@ export function PidTool(props: ToolViewProps) {
       steps: 1200,
       uMax: params.uOn ? params.uMax : null,
       aw: params.aw,
-      Tt: 1,
+      Tt: params.Tt,
       Ts: params.Ts > 0 ? params.Ts : 0,
-      r: params.r,
+      r: (t) => (t < params.tr ? 0 : params.r),
       dSeq: distFn(params.dKind, params.dAmp),
     };
     const crit = (g: readonly number[]): number => {
@@ -315,8 +337,15 @@ export function PidTool(props: ToolViewProps) {
       metrics: () =>
         met
           ? [
-              { label: '超调 Mp', value: met.Mp, unit: '%', precision: 1, tone: met.Mp > 25 ? 'warn' : 'default', hint: '峰值相对设定的百分比' },
-              { label: '调节时间 ts', value: met.ts ?? '—', unit: 's', precision: 2, hint: `进入 ±2% 带（窗口 ${params.tmax} s）` },
+              { label: '超调 Mp', value: met.Mp, unit: '%', precision: 1, tone: met.Mp > 25 ? 'warn' : 'default', hint: '峰值相对设定的百分比（按 r 的符号取同向极值）' },
+              {
+                label: '调节时间 ts',
+                value: met.ts != null ? met.ts : `> ${params.tmax}`,
+                unit: met.ts != null ? 's' : undefined,
+                precision: 2,
+                tone: met.ts != null ? 'default' : 'warn',
+                hint: met.ts != null ? `最后一次进入 ±2% 带（窗口 ${params.tmax} s）` : `窗口 ${params.tmax} s 内未进入 ±2% 带（提高 tmax 或调增益）`,
+              },
               { label: `终值误差 e(${params.tmax}s)`, value: met.ess, precision: 4, tone: met.ess > 0.02 ? 'warn' : 'ok', hint: '仿真末端 |r−y|；非解析稳态误差' },
               { label: 'ISE', value: met.ise, precision: 3, hint: '∫e²dt' },
             ]
@@ -414,7 +443,23 @@ export function PidTool(props: ToolViewProps) {
             <SliderField label="Ki · 积分增益" value={params.ki} onChange={(v) => applyLive({ ki: v })} min={0} max={50} step={0.05} precision={2} />
             <SliderField label="Kd · 微分增益" value={params.kd} onChange={(v) => applyLive({ kd: v })} min={0} max={20} step={0.02} precision={2} />
             <SliderField label="Tf · 微分滤波时间常数（0 = 理想差分）" value={params.Tf} onChange={(v) => applyLive({ Tf: v })} min={0} max={2} step={0.005} precision={3} unit="s" />
-            <Switch label="微分先行（D 作用于 −Δy）" checked={params.dOnM} onChange={(v) => apply({ dOnM: v })} />
+            <SliderField
+              label="tr · 参考阶跃时刻"
+              value={params.tr}
+              onChange={(v) => applyLive({ tr: v })}
+              min={0}
+              max={Math.max(1, Math.min(10, Math.round(params.tmax / 2)))}
+              step={0.5}
+              precision={1}
+              unit="s"
+              hint="0 = t=0 立即阶跃；设 >0 后「微分先行」与原误差微分的差别（微分踢）才看得出来"
+            />
+            <Switch
+              label="微分先行（D 作用于 −Δy）"
+              checked={params.dOnM}
+              onChange={(v) => apply({ dOnM: v })}
+              hint={params.tr > 0 ? '对测量求导：设定值阶跃不再产生微分踢' : 'tr=0 时设定值无跳变，与「对误差求导」数值等价（把 tr 调到 1 s 即可看出差别）'}
+            />
           </FieldGroup>
 
           <FieldGroup title="执行器与采样" defaultOpen={false}>
@@ -428,7 +473,24 @@ export function PidTool(props: ToolViewProps) {
               <span class="muted">抗饱和</span>
               <SegmentedChips options={AW_OPTIONS} value={params.aw} onChange={(v) => apply({ aw: v })} ariaLabel="抗饱和模式" />
             </div>
+            <SliderField
+              label="Tt · 反算抗饱和时间常数"
+              value={params.Tt}
+              onChange={(v) => applyLive({ Tt: v })}
+              min={0.05}
+              max={5}
+              step={0.05}
+              precision={2}
+              unit="s"
+              hint="back-calculation 的积分回退速率 1/Tt：偏小回退快（过校正），偏大回退慢；常用 Tt≈Ti 或 √(Ti·Td)"
+            />
             <SliderField label="Ts · 采样周期（0 = 连续）" value={params.Ts} onChange={(v) => applyLive({ Ts: v })} min={0} max={1} step={0.005} precision={3} unit="s" />
+            {params.Ts > 0 ? (
+              <p class="muted">
+                实际控制周期 {ctrlPeriod.toFixed(3)} s（= round(Ts/dt)·dt，dt = {params.tmax}/{SIM_STEPS} = {(params.tmax / SIM_STEPS * 1000).toFixed(1)} ms）
+                {Math.abs(ctrlPeriod - params.Ts) > 1e-6 ? '：Ts 小于仿真步长，已被步长量化' : ''}
+              </p>
+            ) : null}
             <SliderField label="tmax · 仿真时长" value={params.tmax} onChange={(v) => applyLive({ tmax: v })} min={2} max={60} step={1} precision={0} unit="s" hint="决定 ts 与终值误差的观察窗口" />
           </FieldGroup>
 
@@ -505,8 +567,15 @@ export function PidTool(props: ToolViewProps) {
             <h4 class="card-h">时域指标</h4>
             <div class="row">
               <Metric label="超调 Mp" value={met ? met.Mp : '—'} unit="%" precision={1} tone={met && met.Mp > 25 ? 'warn' : 'default'} />
-              <Metric label="调节时间 ts" value={met?.ts ?? '—'} unit="s" precision={2} />
+              <Metric
+                label="调节时间 ts"
+                value={met ? (met.ts != null ? met.ts : '> ' + params.tmax) : '—'}
+                unit={met && met.ts != null ? 's' : undefined}
+                precision={2}
+                tone={met && met.ts == null ? 'warn' : 'default'}
+              />
             </div>
+            {params.tr > 0 ? <p class="muted">指标窗口自 tr = {params.tr} s 起算（参考阶跃时刻）。</p> : null}
             <div class="row">
               <Metric
                 label={`终值误差 e(${params.tmax}s)`}

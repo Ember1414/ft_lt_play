@@ -6,6 +6,19 @@
 
 /* —— 1 · 数值参数 NumField —— */
 .c-num { display: inline-flex; align-items: center; gap: 4px; }
+.c-num-step {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; padding: 0; flex: 0 0 auto;
+  font: var(--w-medium) 13px/1 var(--font-mono); color: var(--ink-2);
+  background: var(--well); border: 1px solid var(--line-2); border-radius: var(--r-sm);
+  cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none;
+  transition: color var(--t-fast) var(--ease-out), background var(--t-fast) var(--ease-out),
+    border-color var(--t-fast) var(--ease-out);
+}
+.c-num-step:hover:not(:disabled) { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-line); }
+.c-num-step:active:not(:disabled) { background: var(--accent-soft); }
+.c-num-step:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.c-num-step:disabled { opacity: .45; cursor: not-allowed; }
 .c-num-input {
   font: var(--w-medium) var(--fs-3)/1 var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -29,10 +42,13 @@
 .c-num.is-disabled { opacity: .55; }
 .c-num.is-disabled .c-num-grip { cursor: not-allowed; }
 
-/* —— 2 · 有界连续参数 SliderField（文本 ↔ 滑杆 ↔ 拖拽三态） —— */
+/* —— 2 · 有界参数 SliderField（`− [数值框] +`，滑杆可选） —— */
 .c-slider { display: flex; flex-direction: column; gap: 2px; min-width: 200px; }
-.c-slider-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
-.c-slider-label { font-size: var(--fs-2); font-weight: var(--w-medium); color: var(--ink-2); }
+.c-slider-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.c-slider-label {
+  font-size: var(--fs-2); font-weight: var(--w-medium); color: var(--ink-2);
+  flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .c-slider.is-disabled { opacity: .6; }
 .c-slider-track {
   -webkit-appearance: none; appearance: none;
