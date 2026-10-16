@@ -560,14 +560,14 @@ export function DeriveTool(props: ToolViewProps) {
                   </div>
                 </FieldGroup>
               ) : (
-                <FieldGroup title="序列 x[n]" desc="因果序列；支持 a^n、n、n·a^n、cos/sin(w n)、u[n]、delta[n] 及其线性组合。">
+                <FieldGroup title="序列 x[n]" desc="因果序列；支持 a^n、n、n·a^n、cos/sin(w n)、r^n·cos/sin(w n)（阻尼振荡）、u[n]、delta[n] 及其线性组合。">
                   <ExprField
                     label="x[n]"
                     value={params.zsig}
                     onChange={(v) => apply({ zsig: v })}
                     status={zItems ? 'ok' : 'err'}
                     message={zItems ? '已解析（' + zItems.length + ' 项）' : '无法解析：请检查写法'}
-                    hint="示例：0.8^n*u[n]、n*u[n]、n*2^n*u[n]、cos(pi/3*n)u[n]"
+                    hint="示例：0.8^n*u[n]、n*u[n]、n*2^n*u[n]、cos(pi/3*n)u[n]、0.9^n*cos(pi/4*n)*u[n]"
                   />
                   <div class="row">
                     {['0.8^n*u[n]', 'n*u[n]', '0.5^n*u[n]+delta[n]', 'cos(pi/3*n)u[n]'].map((s) => (
@@ -739,7 +739,9 @@ export function DeriveTool(props: ToolViewProps) {
           ) : (
             <div class="card stack">
               <StatusBadge kind="err">序列无法解析</StatusBadge>
-              <p class="muted">支持：a^n·u[n]、n·u[n]、n·a^n·u[n]、cos/sin(w n)·u[n]、u[n]、delta[n]、常数及加减组合。</p>
+              <p class="muted">
+                支持：a^n·u[n]、n·u[n]、n·a^n·u[n]、cos/sin(w n)·u[n]、r^n·cos/sin(w n)·u[n]（阻尼振荡）、u[n]、delta[n]、常数及加减组合。
+              </p>
             </div>
           )
         ) : null}

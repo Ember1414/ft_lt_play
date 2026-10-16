@@ -53,7 +53,8 @@ const VIEWS: ReadonlyArray<{ value: ViewId; label: string }> = [
 
 const PRESETS: ReadonlyArray<{ label: string; expr: string }> = [
   { label: '0.8^n', expr: '0.8^n*u[n]' },
-  { label: '谐振（临界）', expr: 'cos(pi/3*n)u[n]' },
+  { label: '谐振器', expr: '0.9^n*cos(pi/4*n)*u[n]' },
+  { label: '临界谐振', expr: 'cos(pi/3*n)u[n]' },
   { label: '斜坡', expr: 'n*u[n]' },
   { label: 'n·2^n', expr: 'n*2^n*u[n]' },
   { label: '常数', expr: 'u[n]' },
@@ -263,14 +264,14 @@ export function ZTool(props: ToolViewProps) {
     <>
       {props.leftOpen ? (
         <aside class="ws-left">
-          <FieldGroup title="序列 x[n]" desc="因果序列；支持 a^n、n、n·a^n、cos/sin(w n)、u[n]、delta[n] 及其线性组合。">
+          <FieldGroup title="序列 x[n]" desc="因果序列；支持 a^n、n、n·a^n、cos/sin(w n)、r^n·cos/sin(w n)（阻尼振荡）、u[n]、delta[n] 及其线性组合。">
             <ExprField
               label="x[n]"
               value={params.expr}
               onChange={(v) => apply({ expr: v })}
               status={items ? 'ok' : 'err'}
               message={items ? '已解析' : '无法解析：请检查写法'}
-              hint="示例：0.8^n*u[n]、n*u[n]、n*2^n*u[n]、cos(pi/3*n)u[n]"
+              hint="示例：0.8^n*u[n]、n*u[n]、n*2^n*u[n]、cos(pi/3*n)u[n]、0.9^n*cos(pi/4*n)*u[n]"
             />
             <div class="row">
               {PRESETS.map((p) => (
@@ -310,7 +311,7 @@ export function ZTool(props: ToolViewProps) {
           <StatePanel
             kind="error"
             title="序列无法解析"
-            desc="支持：a^n*u[n]、n*u[n]、n*a^n、cos(w n)u[n]、sin(w n)u[n]、u[n]、delta[n]、常数项及其线性组合。"
+            desc="支持：a^n*u[n]、n*u[n]、n*a^n、cos(w n)u[n]、sin(w n)u[n]、r^n*cos(w n)*u[n]、r^n*sin(w n)*u[n]、u[n]、delta[n]、常数项及其线性组合。"
             action={{ label: '恢复默认序列', onClick: () => apply({ expr: DEFAULT.expr }) }}
           />
         ) : null}

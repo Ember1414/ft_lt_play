@@ -177,6 +177,15 @@ export function itemFracZ(it: ZItem): Frac {
       return { n: [c, -c * Math.cos(it.w), 0], d: [1, -2 * Math.cos(it.w), 1] };
     case 'zsn':
       return { n: [c * Math.sin(it.w), 0], d: [1, -2 * Math.cos(it.w), 1] };
+    // 阻尼振荡（复极点对 r·e^{±jw}）：X(z)=c·z(z−r cos w)/(z²−2r cos w z+r²)
+    case 'rncos':
+      return it.r === 0
+        ? { n: [c], d: [1] }
+        : { n: [c, -c * it.r * Math.cos(it.w), 0], d: [1, -2 * it.r * Math.cos(it.w), it.r * it.r] };
+    case 'rnsin':
+      return it.r === 0
+        ? { n: [0], d: [1] }
+        : { n: [c * it.r * Math.sin(it.w), 0], d: [1, -2 * it.r * Math.cos(it.w), it.r * it.r] };
     case 'un':
     case 'const':
       return { n: [c, 0], d: [1, -1] };

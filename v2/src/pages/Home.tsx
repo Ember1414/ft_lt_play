@@ -35,7 +35,7 @@ const TEMPLATES: TemplateDef[] = [
   { id: 'tpl-ss', name: '状态空间 · 极点配置', toolId: 'control', blurb: '可控标准型 + Ackermann 极点配置', state: { view: 'place' } },
   { id: 'tpl-zn', name: 'ZN 临界比例度', toolId: 'pid', blurb: 'L=1/(s+1)³（Ku=8）→ 一键试算 PID 增益', state: { expr: '1/(s^3+3s^2+3s+1)' } },
   { id: 'tpl-aw', name: 'PID 抗饱和对比', toolId: 'pid', blurb: '执行器限幅 + back-calculation 前后对比', state: { aw: 'back', uOn: true, uMax: 5 } },
-  { id: 'tpl-reso', name: '极点逼近单位圆', toolId: 'z', blurb: 'ρ=0.95 的极点与 |X(e^jω)| 峰值 · 稳定裕度', state: { expr: '0.95^n*u[n]', view: 'freq' } },
+  { id: 'tpl-reso', name: '数字谐振器', toolId: 'z', blurb: '复极点对 0.9e^{±jπ/4} · |X(e^jω)| 在 ω=π/4 出峰', state: { expr: '0.9^n*cos(pi/4*n)*u[n]', view: 'freq' } },
   { id: 'tpl-jury', name: 'Jury 稳定性扫描', toolId: 'z', blurb: '特征表逐行判据与 ρmax 裕度', state: { view: 'jury' } },
   { id: 'tpl-sampled', name: '采样回路（框图）', toolId: 'block', blurb: '误差点采样 + ZOH 的 z 域归约与闭环极点', state: {
     nodes: [

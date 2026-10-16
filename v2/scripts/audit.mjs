@@ -316,6 +316,67 @@ const CASES = [
       return diffs;
     },
   ],
+  /* M21 新增：阻尼振荡项 r^n·cos(w n) / r^n·sin(w n)（复极点对，v1 语法不支持 → 对拍网无法覆盖） */
+  [
+    'M21 阻尼振荡项：解析等价 / 闭式 X(z) / 复极点 / 频响峰 / 与 r=1 非阻尼一致',
+    () => {
+      const diffs = [];
+      const R = 0.9;
+      const W = Math.PI / 4;
+      // 1) 三种写法（*u[n] / u[n] / 省略）解析为同一项
+      for (const s of ['0.9^n*cos(pi/4*n)*u[n]', '0.9^n*cos(pi/4*n)u[n]', '0.9^n*cos(pi/4*n)']) {
+        const it = C.parseZCombo(s);
+        push(diffs, !!it && it.length === 1 && it[0].kind === 'rncos' && eq(it[0].r, R) && eq(it[0].w, W));
+      }
+      const its = C.parseZCombo('0.9^n*cos(pi/4*n)*u[n]');
+      const itSin = C.parseZCombo('0.9^n*sin(pi/4*n)*u[n]');
+      push(diffs, !!itSin && itSin[0].kind === 'rnsin' && eq(itSin[0].r, R));
+      // 2) 与几何级数写法在同一表达式内可共存（0.5^n*u[n]+0.9^n*cos(pi/4*n)*u[n]）
+      const mix = C.parseZCombo('0.5^n*u[n]+0.9^n*cos(pi/4*n)*u[n]');
+      push(diffs, !!mix && mix.length === 2 && mix[0].kind === 'an' && mix[1].kind === 'rncos');
+      // 3) 闭式 X(z)=z(z−r cos w)/(z²−2r cos w z+r²)：在 z=2 与截断直接求和（400 项）一致
+      const z0 = 2;
+      const closed = (z0 * (z0 - R * Math.cos(W))) / (z0 * z0 - 2 * R * Math.cos(W) * z0 + R * R);
+      push(diffs, Math.abs(C.XzNumeric(its, z0, R) - closed) < 1e-6);
+      // 4) 极点：itemFracZ 分母 z²−2r cos w z+r² → |p|=r、arg=±w
+      const fr = C.itemFracZ(its[0]);
+      const den = fr.d.map((v) => v / fr.d[0]);
+      const roots = C.polyRoots(den);
+      push(diffs, roots.length === 2);
+      for (const p of roots) {
+        push(diffs, eq(Math.hypot(p.re, p.im), R, 1e-9));
+        push(diffs, eq(Math.abs(Math.atan2(p.im, p.re)), W, 1e-9));
+      }
+      // 5) 频响峰：|X(e^jw)| 在 w=W 处应显著高于 w=0 与 w=π/2（≥3 倍）
+      const magAt = (wq) => {
+        const zr = Math.cos(wq);
+        const zi = Math.sin(wq);
+        // N = z(z − r cos w)：复数乘
+        const nr = zr * (zr - R * Math.cos(W)) - zi * zi;
+        const ni = zi * (zr - R * Math.cos(W)) + zr * zi;
+        // D = z² − 2r cos w z + r²
+        const dr = zr * zr - zi * zi - 2 * R * Math.cos(W) * zr + R * R;
+        const di = 2 * zr * zi - 2 * R * Math.cos(W) * zi;
+        return Math.hypot(nr, ni) / Math.hypot(dr, di);
+      };
+      const peak = magAt(W);
+      push(diffs, peak > 3 * magAt(0));
+      push(diffs, peak > 3 * magAt(Math.PI / 2));
+      // 6) r=1 退化为非阻尼 cos：itemFracZ 与 'zn' 分支一致（[1,−cos w,0]/[1,−2cos w,1]）
+      const d1 = C.itemFracZ({ coef: 1, sign: 1, kind: 'zn', w: W });
+      const d2 = C.itemFracZ({ coef: 1, sign: 1, kind: 'rncos', r: 1, w: W });
+      push(diffs, d1.d.length === d2.d.length && d1.d.every((v, i) => eq(v, d2.d[i])));
+      push(diffs, d1.n.length === d2.n.length && d1.n.every((v, i) => eq(v, d2.n[i])));
+      // 7) r=0 退化：0^n·cos(w n)u[n] = δ(n) → X(z)=1
+      const d0 = C.itemFracZ({ coef: 1, sign: 1, kind: 'rncos', r: 0, w: W });
+      push(diffs, d0.d.length === 1 && eq(d0.d[0], 1) && eq(d0.n[0], 1));
+      // 8) ROC 取 |r|（0.9）而非 1
+      const zl = C.zOfItems(its);
+      push(diffs, eq(zl.roc, R));
+      push(diffs, zl.zLine.includes('0.81'));
+      return diffs;
+    },
+  ],
 ];
 
 /* ---------- 执行 ---------- */

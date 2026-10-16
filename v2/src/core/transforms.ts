@@ -312,6 +312,7 @@ export function FsNumeric(items: TimeItem[], sv: number): number {
 
 /* ================= 离散序列组合（因果序列） ================= */
 // 语法：项：[c*]a^n*u[n] | [c*]n*u[n] | [c*]n*a^n[*u[n]] | [c*]cos(w*n)[*u[n]] | [c*]sin(w*n)[*u[n]]
+//       | [c*]r^n*cos(w*n)[*u[n]] | [c*]r^n*sin(w*n)[*u[n]]（阻尼振荡 / 复极点对）
 //       | [c*]u[n] | [c*]delta[n]（或 d[n]）| 常数 c（按 c·u[n] 处理）
 
 export type ZItem =
@@ -321,6 +322,8 @@ export type ZItem =
   | (ItemBase & { kind: 'n' })
   | (ItemBase & { kind: 'zn'; w: number })
   | (ItemBase & { kind: 'zsn'; w: number })
+  | (ItemBase & { kind: 'rncos'; r: number; w: number })
+  | (ItemBase & { kind: 'rnsin'; r: number; w: number })
   | (ItemBase & { kind: 'un' })
   | (ItemBase & { kind: 'delta' })
   | (ItemBase & { kind: 'const' });
@@ -351,12 +354,21 @@ export function parseZCombo(str: string | null | undefined): ZItem[] | null {
         items.push({ sign, coef, kind: 'un' });
         continue;
       }
-      // 数字后紧跟 ^n → 该数字为几何底数（0.5^n 写法）
+      // 数字后紧跟 ^n → 几何底数（0.5^n）；若后面接 cos/sin 则为阻尼振荡 r^n·cos(w n)
       if (s[i] === '^') {
         const mm = s.slice(i).match(/^\^n(\*u\(n\))?/);
         if (!mm) return null;
-        items.push({ sign, coef: 1, kind: 'an', a: coef });
         i += mm[0].length;
+        const mo = s.slice(i).match(/^\*?(cos|sin)\(([0-9pi+\-*/.()]+)\*?n\)/);
+        if (mo) {
+          const w = evalW(mo[2]);
+          items.push(mo[1] === 'cos' ? { sign, coef: 1, kind: 'rncos', r: coef, w } : { sign, coef: 1, kind: 'rnsin', r: coef, w });
+          i += mo[0].length;
+          if (s.slice(i).startsWith('*u(n)')) i += 5;
+          else if (s.slice(i).startsWith('u(n)')) i += 4;
+          continue;
+        }
+        items.push({ sign, coef: 1, kind: 'an', a: coef });
         continue;
       }
     }
@@ -411,6 +423,10 @@ const zCoreTex = (it: ZItem): string => {
       return `${c}\\cos(${num2tex(it.w)}n)u(n)`;
     case 'zsn':
       return `${c}\\sin(${num2tex(it.w)}n)u(n)`;
+    case 'rncos':
+      return `${c}${num2tex(it.r)}^{n}\\cos(${num2tex(it.w)}n)u(n)`;
+    case 'rnsin':
+      return `${c}${num2tex(it.r)}^{n}\\sin(${num2tex(it.w)}n)u(n)`;
     case 'un':
       return `${c}u(n)`;
     case 'delta':
@@ -439,6 +455,14 @@ const itemZTex = (it: ZItem): string => {
       return `${s}\\dfrac{${it.coef === 1 ? '' : num2tex(it.coef) + '\\cdot'}z(z-\\cos ${num2tex(it.w)})}{z^{2}-2z\\cos ${num2tex(it.w)}+1}`;
     case 'zsn':
       return `${s}\\dfrac{${it.coef === 1 ? '' : num2tex(it.coef) + '\\cdot'}z\\sin ${num2tex(it.w)}}{z^{2}-2z\\cos ${num2tex(it.w)}+1}`;
+    case 'rncos':
+      return it.r === 0
+        ? `${s}${num2tex(it.coef)}`
+        : `${s}\\dfrac{${it.coef === 1 ? '' : num2tex(it.coef) + '\\cdot'}z\\left(z-${num2tex(it.r)}\\cos ${num2tex(it.w)}\\right)}{z^{2}-2\\cdot${num2tex(it.r)}\\cos ${num2tex(it.w)}\\,z+${num2tex(it.r * it.r)}}`;
+    case 'rnsin':
+      return it.r === 0
+        ? `${s}0`
+        : `${s}\\dfrac{${it.coef === 1 ? '' : num2tex(it.coef) + '\\cdot'}${num2tex(it.r)}z\\sin ${num2tex(it.w)}}{z^{2}-2\\cdot${num2tex(it.r)}\\cos ${num2tex(it.w)}\\,z+${num2tex(it.r * it.r)}}`;
     case 'un':
       return `${s}\\dfrac{${it.coef === 1 ? '' : num2tex(it.coef) + '\\cdot'}z}{z-1}`;
     case 'delta':
@@ -468,7 +492,8 @@ export function zOfItems(items: ZItem[]): ZLines {
       .replace(/^\+/, '');
   let roc = 0;
   for (const it of items) {
-    if (it.kind === 'an' || it.kind === 'nan') roc = Math.max(roc, Math.abs(it.a));
+    if (it.kind === 'rncos' || it.kind === 'rnsin') roc = Math.max(roc, Math.abs(it.r));
+    else if (it.kind === 'an' || it.kind === 'nan') roc = Math.max(roc, Math.abs(it.a));
     else if (it.kind === 'np2') roc = Math.max(roc, 1);
     else if (it.kind !== 'delta') roc = Math.max(roc, 1);
   }
@@ -493,6 +518,10 @@ export function xNumeric(items: ZItem[], n: number): number {
             return acc + v * Math.cos(it.w * n);
           case 'zsn':
             return acc + v * Math.sin(it.w * n);
+          case 'rncos':
+            return acc + v * Math.pow(it.r, n) * Math.cos(it.w * n);
+          case 'rnsin':
+            return acc + v * Math.pow(it.r, n) * Math.sin(it.w * n);
           case 'un':
             return acc + v;
           case 'delta':
