@@ -16,7 +16,8 @@
     "uidata": "node scripts/uidata.mjs",
     "perf": "node scripts/perf.mjs",
     "version:check": "node scripts/version-check.mjs",
-    "verify": "npm run check && npm run parity && npm run audit && npm run uidata && npm run perf && npm run build",
+    "e2e": "playwright test",
+    "verify": "npm run check && npm run parity && npm run audit && npm run uidata && npm run perf && npm run build && npm run e2e",
     "preview": "vite preview --port 5200"
   },
   "dependencies": {
@@ -24,6 +25,7 @@
     "preact": "^10.24.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "typescript": "^5.6.3",
     "vite": "^5.4.10"
   }

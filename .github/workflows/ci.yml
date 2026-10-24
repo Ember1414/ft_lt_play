@@ -59,3 +59,33 @@ jobs:
           find dist -name '*.js' -printf '%s\t%p\n' | sort -nr | head -5 | awk '{printf "%.1f KB\t%s\n", $1/1024, $2}'
       - name: 部署件自检（_headers 已随构建进入 dist）
         run: test -f dist/_headers && echo "dist/_headers 就位"
+
+  e2e:
+    name: v2 · Playwright 冒烟（13 工具 × 双主题 + 关键交互）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: v2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: v2/package-lock.json
+      - name: Install（锁定版本）
+        run: npm ci
+      - name: 安装 Playwright Chromium（含系统依赖）
+        run: npx playwright install --with-deps chromium
+      - name: E2E（加载 0 console error + 5 条关键交互）
+        run: npm run e2e
+      - name: 上传失败证据（trace / 截图 / 与基线的差异图 / HTML 报告）
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-evidence
+          path: |
+            v2/test-results/
+            v2/playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore
