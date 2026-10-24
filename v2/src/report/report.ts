@@ -73,6 +73,8 @@ export interface ReportMeta {
   metrics: MetricItem[];
   params: unknown;
   generatedAt: string;
+  /** 应用版本（构建期注入的 __APP_VERSION__，与备份包同源） */
+  appVersion: string;
 }
 
 const esc = (s: unknown): string =>
@@ -124,7 +126,7 @@ ${css}
 </style></head>
 <body><div class="report">
 <h1>${esc(meta.toolName)} · 实验报告</h1>
-<div class="meta">实验：${esc(meta.expName)}｜${esc(meta.subtitle || '')}｜生成于 ${esc(meta.generatedAt)}｜工具 id：${esc(meta.toolId)}</div>
+<div class="meta">实验：${esc(meta.expName)}｜${esc(meta.subtitle || '')}｜生成于 ${esc(meta.generatedAt)}｜工具 id：${esc(meta.toolId)}｜版本：${esc(meta.appVersion)}</div>
 <h2>关键指标</h2>
 ${metricRows ? `<table>${metricRows}</table>` : '<p>（无指标）</p>'}
 <h2>可视化</h2>

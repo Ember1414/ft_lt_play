@@ -30,7 +30,8 @@ import { buildBackup, readBackup } from '../report/backup';
  * 快捷键总览 · 关于（版本 / 内核 / 隐私）。所有写入均带确认，失败给出原因。
  */
 
-const APP_VERSION = '2.16.0 (M21)';
+// 版本单一来源：构建期由 vite.config.ts 从 package.json 注入（scripts/version-check.mjs 校验一致性）
+const APP_VERSION = __APP_VERSION__;
 const PATHS_KEY = 'v2:paths:progress';
 const THEME_KEY = 'flt2:theme';
 const MOTION_KEY = 'flt2:motion';

@@ -39,6 +39,8 @@ jobs:
         run: npm ci
       - name: Type check（TS strict）
         run: npm run check
+      - name: 版本一致性（package.json = CHANGELOG 最新条目 = 设置页注入，A1）
+        run: npm run version:check
       - name: 内核回归网（v1↔v2 对拍 + 闭式真值）
         run: npm run parity
       - name: 内核语义/审计断言（§四 空洞 + #12/#14/#9）

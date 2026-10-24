@@ -162,6 +162,7 @@ export function Workspace(props: WorkspaceProps) {
         metrics: apiRef.current?.metrics() ?? [],
         params: getModuleState<unknown>(toolId, {}),
         generatedAt: new Date().toLocaleString('zh-CN'),
+        appVersion: __APP_VERSION__,
       },
       charts,
       svgs,
