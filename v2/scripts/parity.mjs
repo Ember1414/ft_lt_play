@@ -26,6 +26,8 @@ sandbox.window = sandbox;
 sandbox.btoa = (s) => Buffer.from(s, 'binary').toString('base64');
 sandbox.atob = (s) => Buffer.from(s, 'base64').toString('binary');
 vm.createContext(sandbox);
+/* v1 已归档至 legacy/v1（只读 fixture，2026-10 迁移；见 docs/v2/改进计划.md A2） */
+const V1_ROOT = path.join(repoRoot, 'legacy', 'v1');
 for (const f of [
   'assets/js/lib/util.js',
   'assets/js/lib/mathdsp.js',
@@ -36,7 +38,7 @@ for (const f of [
   'assets/js/lib/odesolve.js',
   'assets/js/lib/project.js',
 ]) {
-  vm.runInContext(fs.readFileSync(path.join(repoRoot, f), 'utf8'), sandbox, { filename: f });
+  vm.runInContext(fs.readFileSync(path.join(V1_ROOT, f), 'utf8'), sandbox, { filename: f });
 }
 const V1 = {
   U: sandbox.U,

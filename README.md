@@ -4,19 +4,27 @@
 
 **在线使用：[ft-lt-play.pages.dev](https://ft-lt-play.pages.dev/)**
 
-## v2 · 信号与控制实验平台（新版，2.14.0 · 已上线主域）
+## v2 · 信号与控制实验平台（新版，2.16.0 · 已上线主域）
 
 > 面向「一切与信号 / 控制打交道的人」的专业级通用工具箱：Vite 5 + TS(strict) + Preact 10，local-first 纯静态。
 > 站点即 **`https://ft-lt-play.pages.dev`**（v2 沿用原站点名；`/sw.js` 保险栓会清除同域上 v1 遗留的 Service Worker）。
 > 13 个工具（傅立叶 / 拉普拉斯 / Z / 系统分析 / PID / 框图 / 求解 / 推导 / 滤波器 / 控制器 / 随机信号 / 通信…）
 > ＋ 学习路径 · 演示剧场（内置 + 自建剧本，可分享） · 对比实验 A/B · 内容包 · 备份（实验 + 剧本） · 笔记 · 语音输入。
 > 源码在 [`v2/`](v2/)，命令与质量门见 [`v2/README.md`](v2/README.md)（类型 / 回归网 / 审计 / UI 数据层 / 开销巡检 / 构建 六道门），
-> 变更见 [`v2/CHANGELOG.md`](v2/CHANGELOG.md)（2.14.0 = 全站缺陷修复与显示精简：正确性 / 交互 / 显示 / 模板生效），
-> 设计文档见 [`docs/v2/`](docs/v2/)（规划书 / M1–M19 验收单与走查报告 / 存量问题清单 / 部署说明）。
+> 变更见 [`v2/CHANGELOG.md`](v2/CHANGELOG.md)（2.16.0 = Z 域阻尼振荡项 / 复极点谐振器 + 8 项闭式真值钉），
+> 设计文档见 [`docs/v2/`](docs/v2/)（规划书 / M1–M21 验收单与走查报告 / 存量问题清单 / 部署说明 / 改进计划）。
 
-下面为 **v1（1.1.3）** 的说明，保留供参考。
+## v1 已归档（legacy/v1 · 只读 · 禁止部署）
 
-## v1.1.3 · 稳定性修复（离线可用性 / 生产 CSP）
+v1（1.1.3）的全部源码、测试与部署产物已迁移到 **`legacy/v1/`**（`git mv` 保留历史），仅作为
+v2 内核对拍（`v2/scripts/parity.mjs`）的只读真值 fixture 维护。**不要修改、不要部署、不要给 v1 加功能**；
+本 README 下方的 v1 历史功能说明与 [CHANGELOG.md](CHANGELOG.md)、[docs/platform.md](docs/platform.md) 仅作存档。
+部署与开发请一律使用 [`v2/`](v2/)。
+
+<details>
+<summary>v1 历史功能说明（已归档，点开查看）</summary>
+
+### v1.1.3 · 稳定性修复（离线可用性 / 生产 CSP）
 
 - **时域表达式解析零外部依赖**：`FX_LIB.parseTimeExpr` 改装内置递归下降解析器（白名单函数 + 常量，无 `eval`），移除对 CDN 的 mathjs 依赖 —— 断网、CDN 被拦截时「交互求解」的时域信号（含全部示例）照常解析
 - **系统分析「案例」全部可用**：结构按钮「PID」改为真分式模板（含一阶滤波）、分子拼接补括号；KaTeX 缺失时公式区降级为可读纯文本（原先被写成空串，看着像「解析失败」）
@@ -101,57 +109,69 @@
 - 自实现：FFT（Cooley–Tukey）、Durand–Kerner 多项式求根（根轨迹含暖启动）、留数法部分分式、RK4 状态空间仿真、白名单算术求值器（`U.safeCalc`）
 - 实验数据：版本化 schema + localStorage（`fltp:v1:*`），拒绝式校验与 FNV-1a 分享校验（`lib/project.js`）
 
-## 开发
+</details>
+
+## 开发与校验
+
+**v2（主线，唯一部署路径）**：
 
 ```bash
-npm test          # 全部测试（30 个脚本，无浏览器 Node 断言）
-npm run check     # 语法门（node --check）
-npm run lint      # 静态安全审计 + 引用/版本一致性
-npm run format    # 保守格式化
-npm run build     # 部署产物校验（引用存在 / _headers / CSP）
-npm run preview   # 本地静态服务器 http://localhost:8080
-npm run verify    # check + lint + test + build（CI 同款）
+cd v2
+npm ci && npm run verify   # check + parity + audit + uidata + perf + build + e2e（本地与 CI 同口径）
+npm run dev                # 开发服务器
 ```
 
-架构、实验 schema v1 契约与安全基线详见 **[docs/platform.md](docs/platform.md)**；变更记录见 [CHANGELOG.md](CHANGELOG.md)。
+**v1（已归档，只读校验）**——仓库根目录的 `npm test` / `check` / `lint` / `build` 仍可运行，
+但校验对象是 `legacy/v1/`，仅用于保证对拍 fixture 自身可加载：
+
+```bash
+npm test          # legacy/v1 全部测试（30 个脚本，无浏览器 Node 断言）
+npm run check     # 语法门（node --check）
+npm run lint      # 静态安全审计 + 引用/版本一致性
+npm run build     # 归档产物校验（引用存在 / _headers / CSP）
+npm run verify    # check + lint + test + build（CI 同款）
+npm run deploy    # ✗ 故意失败：v1 禁止部署（防误操作，见下）
+```
+
+v1 的架构与实验 schema 契约详见 [docs/platform.md](docs/platform.md)；变更记录见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 本地运行
 
-任意静态服务器即可，例如：
+请使用 v2：
 
 ```bash
-npx http-server -p 8321
-# 打开 http://localhost:8321
+cd v2
+npm run dev        # http://localhost:5199
+npm run preview    # 生产产物预览 http://localhost:5200
 ```
 
-## 部署
+（`legacy/v1` 不再提供本地运行支持，仅作对拍 fixture。）
 
-Cloudflare Pages（静态直传，`_headers` 提供 CSP 等安全响应头）：
+## 部署（只有一条路径：v2）
+
+⚠️ **根目录部署已禁用**：`npm run deploy` 会直接失败并提示（v1 部署产物已迁出根目录，
+照旧从根目录执行 `wrangler pages deploy .` 也不再能得到 v1 站点）。唯一部署方式：
 
 ```bash
-npx wrangler pages deploy . --project-name=ft-lt-play --branch=main
+cd v2
+npm run build
+npx wrangler pages deploy dist --project-name=ft-lt-play --branch=main
 ```
+
+详见 [docs/v2/部署说明.md](docs/v2/部署说明.md)。
 
 ## 目录结构
 
 ```
-index.html                    入口（无内联脚本）
-assets/css/style.css          样式（浅色默认 + 深色主题，设计令牌变量）
-assets/js/app.js              应用骨架 / 导航 / 模型库 / 实验控制器
-assets/js/lib/util.js         通用工具 + safeCalc 白名单求值器
-assets/js/lib/project.js      ★ 实验数据模型 / 版本化存储 / 分享 v2
-assets/js/lib/toolbar.js      ★ 统一结果工具栏
-assets/js/lib/plots.js        Canvas 图表基类（缩放/平移/悬停读数/主题色）
-assets/js/lib/mathdsp.js      数值计算（FFT/求根/频响/仿真）
-assets/js/lib/fx.js           信号库 / 形状 / 解析器
-assets/js/lib/mathinput.js    统一数学输入组件
-assets/js/lib/transforms.js   符号变换引擎（拉普拉斯/傅立叶/Z）
-assets/js/lib/odesolve.js     微分/差分方程求解内核
-assets/js/lib/blocksolve.js   框图求解 / 采样 / s↔z
-assets/js/modules/*.js        工作台 + 九大功能模块
-scripts/                      test/check/lint/format/build/serve（零依赖）
-tests/*.test.mjs              29 个测试脚本（Node，无浏览器）
-_headers                      Cloudflare Pages 安全响应头（CSP 等）
+v2/                           ★ 当前主线（源码 / 质量门 / 部署产物，见 v2/README.md）
+legacy/v1/                    v1 归档（只读，禁止部署；parity 的真值 fixture）
+legacy/v1/index.html          v1 入口（无内联脚本）
+legacy/v1/assets/css/style.css  v1 样式（浅色默认 + 深色主题，设计令牌变量）
+legacy/v1/assets/js/lib/*.js  v1 内核（util/mathdsp/statespace/fx/transforms/odesolve/blocksolve/project…）
+legacy/v1/assets/js/modules/  v1 工作台 + 九大功能模块
+legacy/v1/scripts/            v1 test/check/lint/format/build/serve（零依赖）
+legacy/v1/tests/*.test.mjs    30 个 v1 测试脚本（Node，无浏览器）
+docs/v2/                      v2 设计文档（规划书 / M1–M21 验收单 / 部署说明 / 改进计划）
 ```
 
 ## License
