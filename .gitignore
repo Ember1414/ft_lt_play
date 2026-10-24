@@ -8,3 +8,7 @@ node_modules/
 *.log
 .wrangler/
 
+
+# Playwright（v2 e2e）运行产物不入库（截图基线在 v2/e2e/baseline/，需入库）
+v2/test-results/
+v2/playwright-report/
