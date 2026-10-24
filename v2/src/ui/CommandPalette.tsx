@@ -55,7 +55,7 @@ export function CommandPalette(props: CommandPaletteProps) {
 
   const actions = useMemo<CmdAction[]>(() => {
     const list: CmdAction[] = [];
-    // 工具跳转（14 个，按注册表顺序）
+    // 工具跳转（13 个，按注册表顺序）
     for (const t of TOOLS) {
       list.push({
         id: 'tool:' + t.id,

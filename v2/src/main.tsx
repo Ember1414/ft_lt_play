@@ -1,5 +1,7 @@
 import { render } from 'preact';
 import { App } from './app';
+import { ErrorBoundary } from './ui/ErrorBoundary';
+import { initDiagnostics } from './ui/diagnostics';
 import { initTheme } from './ui/theme';
 import { initPrefs } from './ui/prefs';
 import { restoreLastSession } from './state/experiments';
@@ -13,9 +15,10 @@ import './styles/shell.css';
 
 initTheme();
 initPrefs();
+initDiagnostics(); // 全局错误 → 内存环形缓冲（设置页可导出诊断 JSON，纯本地）
 // 渲染前恢复最近一次实验：子组件 effect 先于父组件执行，
 // 若放在 App 的 useEffect 中，工作区的 ensureExperiment 会抢先创建空实验。
 restoreLastSession();
 
 const mount = document.getElementById('app');
-if (mount) render(<App />, mount);
+if (mount) render(<ErrorBoundary><App /></ErrorBoundary>, mount);

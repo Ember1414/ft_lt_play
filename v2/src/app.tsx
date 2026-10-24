@@ -41,6 +41,9 @@ function crumbs(route: Route): string {
   }
 }
 
+/** 崩溃探针标记：模块级（放组件内会被重渲染复位，「重试」将永远循环）；仅 dev 探针使用 */
+let devCrashFired = false;
+
 export function App() {
   const [route, setRoute] = useState<Route>(currentRoute);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -99,7 +102,16 @@ export function App() {
     setChoice(nx);
   };
 
+  // 仅 dev 构建生效的崩溃探针（#/dev/crash）：首次渲染人为抛错，供 e2e 验证 ErrorBoundary 兜底；
+  // 生产构建 import.meta.env.DEV 恒为 false，整段连同标记位一并被剔除。
   const page = (() => {
+    if (import.meta.env.DEV && location.hash === '#/dev/crash') {
+      if (!devCrashFired) {
+        devCrashFired = true;
+        throw new Error('dev crash probe：人为渲染异常（仅 dev 构建可见）');
+      }
+      return <Home onToast={showToast} />;
+    }
     switch (route.page) {
       case 'home':
         return <Home onToast={showToast} />;

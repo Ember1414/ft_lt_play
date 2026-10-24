@@ -18,11 +18,13 @@ npm ci            # 或 npm install
 npm run dev       # 开发服务器
 npm run check     # TypeScript strict 类型检查（零错误）
 npm run parity    # 内核回归网：v1 ↔ v2 数值对拍 + 闭式真值校验
-npm run audit     # 内核语义 / 审计断言（§四 空洞 + #12/#14/#9）
+npm run audit     # 内核语义 / 审计断言（§四 空洞 + #12/#14/#9 + M21 阻尼振荡项）
 npm run uidata    # UI 数据层断言（剧本库 / 备份包 / 参数表规则 / 指标对照 / 坐标图刻度与缩放规则）
 npm run perf      # 主线程重算开销巡检（灾难级预算 + 基线表）
 npm run build     # 类型检查 + 生产构建（产物在 dist/）
 npm run preview   # 本地预览生产产物（http://localhost:5200）
+npm run e2e       # Playwright 冒烟：13 工具 × 浅/深主题 0 console error + 5 条关键交互（需先 npx playwright install chromium）
+npm run verify    # check + parity + audit + uidata + perf + build + e2e（本地与 CI 同口径）
 ```
 
 ## 质量门（每次改动内核后必须全绿）
@@ -35,6 +37,8 @@ npm run preview   # 本地预览生产产物（http://localhost:5200）
 | UI 数据层 | `npm run uidata` | **90 条断言全通过**（剧本库编解码 / 备份数据通路 / 参数表规则 / 指标对照规则 / 坐标图刻度与缩放规则） |
 | 开销巡检 | `npm run perf` | 主线程合计 ≤ 150 ms（基线 15.1 ms）、单项 ≤ 25 ms（基线最大 3.5 ms）；≥5 ms 打 ⚠ |
 | 构建 | `npm run build` | 通过；入口 chunk JS **137.2 KB（gzip 55.8 KB）**、KaTeX 分片 262.5 KB（按需），dist ≈ 1.80 MB |
+| 版本一致性 | `npm run version:check` | package.json = CHANGELOG 最新条目；src 无硬编码版本；设置页走 `__APP_VERSION__` 注入 |
+| 浏览器冒烟 | `npm run e2e` | 13 工具 × 浅/深主题加载 0 console error + **双主题截图视觉基线**（`e2e/baseline/`，首轮经人工确认；`toHaveScreenshot` 断言） + 5 条关键交互 + ErrorBoundary/诊断韧性（Chromium；CI 单 worker） |
 
 > 责任边界：`parity` / `audit` 管**内核正确性**，`uidata` 管**内核之外的数据逻辑**，`perf` 管**内核调用开销**
 > （它只覆盖 `src/core`；JSX 渲染与交互由各里程碑的**浏览器走查**负责）。
@@ -85,7 +89,9 @@ CI（`.github/workflows/ci.yml`）与发布流程（`deploy-v2.yml`，未配置�
 | 文档 | 说明 |
 |---|---|
 | `docs/v2/规划书.html` | M0 规划书（14 项产品维度 / 信息架构 / 交互规范） |
-| `docs/v2/M1-验收单.md` … `M19-验收单.md`、`M6-走查报告.md`、`M17-走查报告.md` | 各里程碑交付、M5/M7/M8 增强、M9 剧场剧本库、M10 备份含剧本、M11 奈奎斯特临界判定、M12 对比页标量参数可调、M13 UI 数据层断言并入 CI、M14 临界档位圈数修正、M15 开销基线、M16 双跑自报指标对照、M18 坐标图交互质量、**M19 全站缺陷修复与显示精简**（工具而非教学）、**M20 参数控件/坐标图/框图交互/PID 正确性**，M6 全站走查、M17 全站回归走查（21 视图 · 零缺陷） |
+| `docs/v2/改进计划.md` | 2026-10 全仓体检 + 三批改进路线（批次 A 基线收口 / B 数据与可访问性 / C 性能与工程化） |
+| `docs/v2/M1-验收单.md` … `M19-验收单.md`、`M6-走查报告.md`、`M17-走查报告.md` | 各里程碑交付、M5/M7/M8 增强、M9 剧场剧本库、M10 备份含剧本、M11 奈奎斯特临界判定、M12 对比页标量参数可调、M13 UI 数据层断言并入 CI、M14 临界档位圈数修正、M15 开销基线、M16 双跑自报指标对照、M18 坐标图交互质量、**M19 全站缺陷修复与显示精简**（工具而非教学）、M6 全站走查、M17 全站回归走查（21 视图 · 零缺陷） |
+| `docs/v2/M20-验收单.md`、`docs/v2/M21-验收单.md` | **M20** 参数控件/坐标图/框图交互/PID 正确性；**M21** Z 域阻尼振荡项（复极点谐振器） |
 | `docs/v2/存量问题清单.md` | v1 审计 → v2 处置（含 #7–#15 重修记录） |
 | `docs/v2/部署说明.md` | 构建 / 发布 / 缓存与 CSP / 发布前检查清单 |
 | `CHANGELOG.md`（本目录） | 版本变更记录 |

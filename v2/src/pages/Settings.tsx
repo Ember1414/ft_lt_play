@@ -23,6 +23,7 @@ import { clearUserScripts, getUserScripts, isUserScript, saveUserScript } from '
 import { TOOLS } from '../tools/registry';
 import { downloadText } from '../report/report';
 import { buildBackup, readBackup } from '../report/backup';
+import { diagCount, diagSnapshot } from '../ui/diagnostics';
 
 /**
  * Settings — 设置中心（FR-08 / §12.5）
@@ -171,6 +172,13 @@ export function Settings(props: SettingsProps) {
     const bundle = buildBackup(items, scripts, APP_VERSION);
     downloadText(`fltp-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(bundle, null, 2), 'application/json');
     onToast(`已导出备份（${items.length} 个实验 + ${scripts.length} 部自建剧本）`);
+  };
+
+  const exportDiag = (): void => {
+    // 纯本地生成与下载（Blob → a[download]），不含实验内容等隐私数据（见 ui/diagnostics.ts）
+    const snap = diagSnapshot();
+    downloadText(`诊断-${__APP_VERSION__}-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(snap, null, 2), 'application/json');
+    onToast(`已导出诊断 JSON（最近 ${diagCount()} 条错误记录 · 纯本地，不发送任何请求）`);
   };
 
   const importBackup = async (file: File): Promise<void> => {
@@ -363,6 +371,12 @@ export function Settings(props: SettingsProps) {
           <Metric label="数据格式版本" value={SCHEMA_VERSION} precision={0} />
           <StatusBadge kind="ok">本地优先 · 数据不出浏览器</StatusBadge>
           <StatusBadge kind="info">公式层 KaTeX 按需加载（离线可用）</StatusBadge>
+        </div>
+        <div class="row">
+          <button class="btn" onClick={exportDiag} title="导出最近 50 条错误记录与浏览器环境信息（纯本地，不含实验内容）">
+            导出诊断 JSON
+          </button>
+          <span class="muted">仅含错误记录与环境信息（版本 / 路由 / UA），用于排查白屏与报错；不发送任何网络请求。</span>
         </div>
         <p class="muted">
           内核（变换 / 滤波器 / 控制器 / 随机信号 / 通信 + 状态空间）为纯函数层，受 v1↔v2 数值对拍网与闭式真值校验双重保障；
